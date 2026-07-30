@@ -1,0 +1,50 @@
+{
+  "mp_units_version": "2.6",
+  "cxx": "clang++-21",
+  "results": {
+    "affine/custom_origins": {
+      "InstantiateClass": 9101,
+      "InstantiateFunction": 4061
+    },
+    "affine/temperature_points": {
+      "InstantiateClass": 9868,
+      "InstantiateFunction": 5373
+    },
+    "generic/generic_interfaces": {
+      "InstantiateClass": 11206,
+      "InstantiateFunction": 5224
+    },
+    "isq/custom_hierarchy": {
+      "InstantiateClass": 13558,
+      "InstantiateFunction": 6839
+    },
+    "isq/hierarchy_conversions": {
+      "InstantiateClass": 13454,
+      "InstantiateFunction": 6896
+    },
+    "isq/kind_safe_interfaces": {
+      "InstantiateClass": 14258,
+      "InstantiateFunction": 7233
+    },
+    "parity/kinetic_energy": {
+      "InstantiateClass": 9033,
+      "InstantiateFunction": 3990
+    },
+    "parity/unit_conversions": {
+      "InstantiateClass": 9614,
+      "InstantiateFunction": 4899
+    },
+    "text/quantity_text": {
+      "InstantiateClass": 9080,
+      "InstantiateFunction": 4059
+    },
+    "umbrella/isq_umbrella": {
+      "InstantiateClass": 14860,
+      "InstantiateFunction": 8505
+    },
+    "umbrella/si_umbrella": {
+      "InstantiateClass": 8178,
+      "InstantiateFunction": 3343
+    }
+  }
+}

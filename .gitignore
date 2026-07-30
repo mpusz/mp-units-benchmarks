@@ -1,0 +1,5 @@
+results/
+.worktrees/
+*.o
+__pycache__/
+.claude/
