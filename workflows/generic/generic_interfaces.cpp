@@ -1,4 +1,7 @@
+// REQUIRES: mp-units >= 2.5
 // Generic code over references and representation types - templates any unit/rep combination.
+// (2.4 enforced character/representation matching, so `isq::acceleration` with a `double` rep
+// is ill-formed there - a rewrite would measure a different workload, so 2.4 is reported n/a.)
 #include <mp-units/systems/isq/space_and_time.h>
 #include <mp-units/systems/si.h>
 #include <cstdio>

@@ -1,4 +1,3 @@
-// REQUIRES: mp-units >= 2.6
 // User-defined absolute and relative point origins with point arithmetic.
 #include <mp-units/systems/isq/space_and_time.h>
 #include <mp-units/systems/si.h>
