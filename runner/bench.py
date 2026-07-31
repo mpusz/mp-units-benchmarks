@@ -39,9 +39,12 @@ ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / "workflows"
 BASELINES = ROOT / "baselines"
 
-GATE_SLACK = 0.02          # per-workflow tolerance band (2%)
-MEDIAN_ALARM = 0.02        # median growth across non-umbrella workflows -> framework regression
-TIGHTEN_NOTICE = 0.02      # improvement beyond this -> suggest tightening baselines
+# Defaults for `check`; every band is a percent and overridable per invocation, because the same
+# baselines are read with different strictness depending on who is asking (this repo gates itself
+# tightly, mp-units blocks only on egregious growth).
+GATE_SLACK = 2.0           # per-workflow growth beyond this -> error
+MEDIAN_ALARM = 2.0         # median growth across non-umbrella workflows -> framework regression
+TIGHTEN_NOTICE = 2.0       # improvement beyond this -> baselines can be tightened
 
 
 def run(cmd, **kw):
@@ -209,20 +212,43 @@ def gate_summary_line(text, kind="notice"):
             f.write(text + "\n\n")
 
 
+def total(entry):
+    """class + function instantiations, or None when the workflow is n/a or failed to compile."""
+    return entry["InstantiateClass"] + entry["InstantiateFunction"] if isinstance(entry, dict) else None
+
+
 def cmd_counts(args):
     repo = Path(args.repo).resolve()
-    results = measure_counts(repo, args.cxx, args.extra_flags, args.workflows)
-    rows = [(n, v) for n, v in sorted(results.items())]
-    print_table(["inst_class", "inst_func"],
-                [(n, v and v != "FAIL" and v["InstantiateClass"], v and v != "FAIL" and v["InstantiateFunction"])
-                 for n, v in rows],
-                lambda v: "n/a" if v in (None, False) else str(v))
+    refs = args.refs or ["WORKTREE"]
+    cache = Path(args.worktree_cache).resolve()
+    cache.mkdir(parents=True, exist_ok=True)
+    repos = {ref: repo if ref == "WORKTREE" else checkout(repo, ref, cache) for ref in refs}
+    measured = {ref: measure_counts(r, args.cxx, args.extra_flags, args.workflows) for ref, r in repos.items()}
+    if len(refs) == 1:
+        results = measured[refs[0]]
+        print_table(["inst_class", "inst_func"],
+                    [(n, v and v != "FAIL" and v["InstantiateClass"], v and v != "FAIL" and v["InstantiateFunction"])
+                     for n, v in sorted(results.items())],
+                    lambda v: "n/a" if v in (None, False) else str(v))
+    else:
+        # Several refs: totals side by side, plus the delta of the last against the first. Counts are
+        # deterministic per compiler, so unlike `time` this comparison is valid anywhere.
+        names = sorted({n for m in measured.values() for n in m})
+        rows = []
+        for name in names:
+            totals = [total(measured[ref].get(name)) for ref in refs]
+            delta = None
+            if totals[0] and totals[-1]:
+                delta = (totals[-1] - totals[0]) / totals[0]
+            rows.append((name, *totals, delta))
+        print_table([*refs, f"{refs[-1]} vs {refs[0]}"], rows,
+                    lambda v: "n/a" if v is None else (f"{v:+.1%}" if isinstance(v, float) else str(v)))
     if args.output:
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)  # results/ is gitignored: absent in fresh checkouts
-        out.write_text(json.dumps(
-            {"repo_version": ".".join(map(str, detect_version(repo))), "cxx": args.cxx,
-             "host": platform.node(), "results": results}, indent=2))
+        payload = {ref: {"repo_version": ".".join(map(str, detect_version(repos[ref]))),
+                         **git_provenance(repos[ref]), "results": measured[ref]} for ref in refs}
+        out.write_text(json.dumps({"cxx": args.cxx, "host": platform.node(), "refs": payload}, indent=2) + "\n")
 
 
 def cmd_time(args):
@@ -259,30 +285,43 @@ def cmd_check(args):
     repo = Path(args.repo).resolve()
     baseline_file = BASELINES / f"instantiations-{args.baseline_key}.json"
     baseline = json.loads(baseline_file.read_text())["results"]
+    slack, alarm, notice = args.slack / 100, args.median_alarm / 100, args.tighten_notice / 100
+    advisory_band = args.advisory_slack / 100 if args.advisory_slack is not None else None
     details = baseline_deltas(baseline, measure_counts(repo, args.cxx, args.extra_flags))
-    regressions = {n: d for n, d in details.items() if d["rel"] > GATE_SLACK}
-    improvements = {n: d for n, d in details.items() if d["rel"] < -TIGHTEN_NOTICE}
+    regressions = {n: d for n, d in details.items() if d["rel"] > slack}
+    improvements = {n: d for n, d in details.items() if d["rel"] < -notice}
+    # Growth inside the blocking band but past the advisory one: reported, never fatal. This is how
+    # a loose gate can still say "this grew" without stopping the change.
+    advisory = {n: d for n, d in details.items()
+                if advisory_band is not None and advisory_band < d["rel"] <= slack}
     deltas = [d["rel"] for d in details.values() if not d["umbrella"]]
     median = statistics.median(deltas) if deltas else 0.0
     if args.report:
         report = Path(args.report)
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text(json.dumps(
-            {"mp_units_version": ".".join(map(str, detect_version(repo))), "cxx": args.cxx,
-             "baseline_key": args.baseline_key, "median_non_umbrella": median,
-             "regressions": list(regressions), "improvements": list(improvements),
+            {"mp_units_version": ".".join(map(str, detect_version(repo))), **git_provenance(repo),
+             "cxx": args.cxx, "baseline_key": args.baseline_key,
+             "bands": {"slack": args.slack, "median_alarm": args.median_alarm,
+                       "tighten_notice": args.tighten_notice, "advisory_slack": args.advisory_slack},
+             "median_non_umbrella": median, "regressions": list(regressions),
+             "improvements": list(improvements), "advisory": list(advisory),
              "workflows": details}, indent=2) + "\n")
     for name, d in regressions.items():
         gate_summary_line(f"instantiation regression: {name} {d['baseline']} -> {d['current']} "
-                          f"({d['rel']:+.1%}); if intentional, run bench.py update and commit the new "
-                          f"baselines in this PR", "error")
-    if median > MEDIAN_ALARM:
+                          f"({d['rel']:+.1%}, band {args.slack:g}%); if intentional, run bench.py update "
+                          f"and commit the new baselines in this PR", "error")
+    if median > alarm:
         gate_summary_line(f"framework-wide regression: median instantiation growth {median:+.1%} "
                           f"across all workflows - this should almost never be rebaselined away", "error")
+    for name, d in advisory.items():
+        gate_summary_line(f"growth within the blocking band: {name} {d['baseline']} -> {d['current']} "
+                          f"({d['rel']:+.1%}, advisory band {args.advisory_slack:g}%) - not fatal here, but "
+                          f"the benchmarks repo gates tighter and will go red on it", "warning")
     for name, d in improvements.items():
         gate_summary_line(f"improvement: {name} {d['baseline']} -> {d['current']} ({d['rel']:+.1%}) - "
                           f"baselines can be tightened; run bench.py update in a follow-up PR", "warning")
-    if not regressions and median <= MEDIAN_ALARM:
+    if not regressions and median <= alarm:
         msg = f"instantiation gate OK (median delta {median:+.1%})"
         if improvements:
             msg += f"; {len(improvements)} workflow(s) improved - consider tightening baselines"
@@ -342,12 +381,24 @@ def main():
     t.add_argument("--worktree-cache", default=str(ROOT / ".worktrees"))
 
     c = sub.add_parser("counts", help="deterministic instantiation counts")
+    c.add_argument("refs", nargs="*", help="git refs to measure (default: WORKTREE = the checkout as-is); "
+                                          "more than one prints them side by side with a delta column")
     c.add_argument("--workflows", nargs="*")
     c.add_argument("--output", help="write JSON results")
+    c.add_argument("--worktree-cache", default=str(ROOT / ".worktrees"))
 
     g = sub.add_parser("check", help="gate against baselines (two-sided)")
     g.add_argument("--baseline-key", default="clang21")
     g.add_argument("--report", help="write a JSON report (per-workflow deltas, median, regressions, improvements)")
+    g.add_argument("--slack", type=float, default=GATE_SLACK, metavar="PCT",
+                   help=f"per-workflow growth beyond this percent fails (default {GATE_SLACK:g})")
+    g.add_argument("--median-alarm", type=float, default=MEDIAN_ALARM, metavar="PCT",
+                   help=f"non-umbrella median growth beyond this percent fails (default {MEDIAN_ALARM:g})")
+    g.add_argument("--tighten-notice", type=float, default=TIGHTEN_NOTICE, metavar="PCT",
+                   help=f"improvement beyond this percent suggests tightening (default {TIGHTEN_NOTICE:g})")
+    g.add_argument("--advisory-slack", type=float, metavar="PCT",
+                   help="report growth beyond this percent as a warning without failing; use with a "
+                        "looser --slack to block only on egregious growth while still flagging the rest")
 
     u = sub.add_parser("update", help="re-record baselines")
     u.add_argument("--baseline-key", default="clang21")

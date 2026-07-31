@@ -27,6 +27,7 @@ R="--repo ~/repos/mp-units --cxx clang++-21"
 runner/bench.py $R counts                                  # deterministic counts, all workflows
 runner/bench.py $R counts --workflows isq/ affine           # substring filters (single workflow)
 runner/bench.py $R counts --output results/counts.json      # machine-readable
+runner/bench.py $R counts WORKTREE v2.5.0                   # refs side by side + delta column
 runner/bench.py $R time WORKTREE v2.5.0 v2.4.0 --reps 3     # interleaved A/B (quiet machine)
 runner/bench.py $R check                                    # two-sided gate (exit 1 on regression)
 runner/bench.py $R check --report results/report.json       # + machine-readable deltas
@@ -66,33 +67,41 @@ the baseline file. `results/` and `.worktrees/` are gitignored scratch space.
 
 ## Gate semantics (bench.py check)
 
-- Per-workflow growth > 2% -> error with "run update and commit baselines in this PR".
-- Median growth across non-umbrella workflows > 2% -> framework-wide regression error
-  (should almost never be rebaselined away).
-- Improvement > 2% -> `::warning::` annotation + GITHUB_STEP_SUMMARY entry suggesting
-  baseline tightening (visible on the run page, never buried in logs).
+All bands below are percents and default to 2, overridable per invocation (see CI - strict here,
+loose in mp-units).
+
+- Per-workflow growth > `--slack` -> error with "run update and commit baselines in this PR".
+- Median growth across non-umbrella workflows > `--median-alarm` -> framework-wide regression
+  error (should almost never be rebaselined away).
+- Growth > `--advisory-slack` but within `--slack` -> `::warning::` only, never fatal. This is how
+  a loose gate still reports borderline growth (and names the repo that will go red on it).
+- Improvement > `--tighten-notice` -> `::warning::` annotation + GITHUB_STEP_SUMMARY entry
+  suggesting baseline tightening (visible on the run page, never buried in logs).
 - `check` iterates the *baseline* keys, so a newly added workflow is ungated until an
   `update` records it; a workflow that stops compiling is reported as `FAIL` by
   `measure_counts` and skipped by the gate rather than failing it.
 
 ## CI
 
-- `.github/workflows/ci-self-test.yml` - tests THIS repo, does not gate mp-units. Pins
-  `MP_UNITS_REF` and `CLANG_VERSION` (either bump requires an `update` in the same PR), records
-  provenance into `GITHUB_STEP_SUMMARY`, writes `counts --output` BEFORE `check` so numbers are
-  published even when the check fails, then smoke-tests `time` on one workflow (a shared
-  runner's wall time is not comparable to anything - the step only proves the path runs).
-- `.github/workflows/ci-tighten-baselines.yml` - opens a PR re-recording the baselines when a
-  workflow improves >=2% (the band `check` warns at) or the non-umbrella median >=1%
-  (`check --report` JSON drives the decision). Nothing accumulates between runs - `check` always
-  compares against the committed file - so the weekly cron is only polling for `MP_UNITS_REF`
-  movement, and the job short-circuits before compiling when the checked-out sha equals the
-  baseline's `mp_units_sha` (recorded by `update`) for the same compiler. Never auto-PRs regressions, and skips entirely when any regression is present -
-  mixed signals need a human. Keep its `MP_UNITS_REF` in step with the self-test's.
-- `ci/mp-units-compile-time-gate.yml` - copy target for the mp-units repo, NOT a workflow here.
-  This is the gate that actually blocks compile-time regressions, because it runs where the
-  offending change is authored. It pins this suite by ref, so a corpus change here cannot
-  silently change what gates mp-units.
+- `.github/workflows/ci-instantiations.yml` - ONE measurement per run, several reactions. Runs on
+  push, PR, weekly cron and `workflow_dispatch` (inputs: `ref`, plus `compare_ref` to report two
+  refs side by side instead of gating). Measures mp-units master (or the given ref) with TIGHT
+  bands (`SLACK: 1`, `MEDIAN_ALARM: 0.5`): growth fails the build, an improvement past
+  `TIGHTEN_NOTICE` opens the re-record PR (never from a `pull_request` event, and never when any
+  regression is present - mixed signals need a human), and counts are uploaded as an artifact
+  before the comparison so they survive a red build. `check` runs with `continue-on-error` so the
+  reactions happen first and a final step fails the job. Nothing accumulates between runs - `check`
+  always compares against the committed file - so the cron only polls for ref movement, and the job
+  short-circuits before compiling when the checked-out sha equals the baseline's `mp_units_sha`
+  (recorded by `update`) for the same compiler.
+- The other half lives in the mp-units repo itself as `.github/workflows/ci-compile-time.yml`
+  (written there directly, not mirrored here); it runs on its pushes as well as its PRs. LOOSE
+  bands (`--slack 3 --median-alarm 2`) plus `--advisory-slack 1`, so a couple of percent of growth
+  annotates without blocking library work and goes red in this repo instead - that split is the
+  point. It pins this suite by ref, so a corpus change here cannot silently change what gates
+  mp-units.
+- Bands are CLI flags (`--slack`, `--median-alarm`, `--tighten-notice`, `--advisory-slack`, all
+  percents), NOT constants: the same baseline file is read strictly here and loosely there.
 
 ## mp-units checkouts
 

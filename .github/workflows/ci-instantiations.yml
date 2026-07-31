@@ -1,0 +1,220 @@
+# One measurement, several reactions.
+#
+# Every trigger runs the same thing - instantiation counts of the corpus against the reviewed
+# baselines - and only the reaction differs: growth past the (tight) band fails the build so it can
+# be investigated here rather than in mp-units, and an improvement opens a PR re-recording the
+# baselines, because a stale baseline silently desensitizes the gate.
+#
+# The library ref is mp-units master by default and can be pointed at any tag or sha on demand;
+# giving a second ref turns the run into a side-by-side comparison instead of a gate.
+#
+# The loose gate that mp-units itself runs, on both pushes and PRs, lives in
+# ci/mp-units-compile-time-gate.yml - it blocks only egregious growth, so this repo is where
+# borderline growth surfaces first.
+name: Instantiations
+
+on:
+  push:
+  pull_request:
+  # Only polling for movement of MP_UNITS_REF: nothing accumulates between runs, and the guard
+  # below exits before compiling when master has not moved since the baselines were recorded.
+  schedule:
+    - cron: '17 5 * * 1' # Mondays, 05:17 UTC
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'mp-units ref to measure (tag, sha or origin/<branch>)'
+        default: master
+      compare_ref:
+        description: 'optional second mp-units ref - reports both side by side instead of gating'
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MP_UNITS_REF: ${{ inputs.ref || 'master' }}
+  COMPARE_REF: ${{ inputs.compare_ref || '' }}
+  CLANG_VERSION: 21
+  # Tighter than the bands mp-units blocks on: borderline growth must go red here first.
+  SLACK: 1
+  MEDIAN_ALARM: 0.5
+  TIGHTEN_NOTICE: 2
+  BRANCH: auto/tighten-baselines
+
+jobs:
+  instantiations:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check out mp-units at ${{ env.MP_UNITS_REF }}
+        uses: actions/checkout@v5
+        with:
+          repository: mpusz/mp-units
+          ref: ${{ env.MP_UNITS_REF }}
+          path: mp-units
+          # Full history only when comparing, since the runner materialises a worktree per ref.
+          fetch-depth: ${{ inputs.compare_ref != '' && '0' || '1' }}
+      - name: Install Clang ${{ env.CLANG_VERSION }}
+        shell: bash
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh ${{ env.CLANG_VERSION }}
+      - name: Install Libc++
+        shell: bash
+        run: |
+          sudo apt install -y libc++-${{ env.CLANG_VERSION }}-dev libc++abi-${{ env.CLANG_VERSION }}-dev libunwind-${{ env.CLANG_VERSION }}-dev
+      - name: Record what was measured
+        shell: bash
+        run: |
+          {
+            echo "| measured | value |"
+            echo "|---|---|"
+            echo "| mp-units ref | \`${MP_UNITS_REF}\` @ $(git -C mp-units describe --tags --always --dirty) |"
+            echo "| library version | $(sed -nE 's/.*VERSION[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' mp-units/src/CMakeLists.txt | head -1) |"
+            echo "| compiler | $(clang++-${CLANG_VERSION} --version | head -1) |"
+            echo "| bands | slack ${SLACK}%, median ${MEDIAN_ALARM}%, tighten ${TIGHTEN_NOTICE}% |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # --- comparison mode: two refs, no gating ------------------------------------------------
+      - name: Compare ${{ env.MP_UNITS_REF }} against ${{ env.COMPARE_REF }}
+        if: env.COMPARE_REF != ''
+        shell: bash
+        run: |
+          {
+            echo '```'
+            runner/bench.py --repo mp-units --cxx "clang++-${CLANG_VERSION}" counts "$MP_UNITS_REF" "$COMPARE_REF"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # --- gate mode --------------------------------------------------------------------------
+      - name: Skip trees the baselines already describe
+        id: guard
+        if: env.COMPARE_REF == ''
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+
+          key = os.environ["CLANG_VERSION"]
+          data = json.loads(pathlib.Path(f"baselines/instantiations-clang{key}.json").read_text())
+          head = subprocess.run(["git", "-C", "mp-units", "rev-parse", "HEAD"],
+                                capture_output=True, text=True).stdout.strip()
+          recorded = data.get("mp_units_sha")
+          # Same tree AND same compiler means the comparison cannot have moved since the baselines
+          # were recorded - measuring would burn CI to prove 0.0%.
+          same = bool(recorded) and recorded == head and data.get("cxx") == f"clang++-{key}"
+          print(f"baselines describe {recorded or '(no sha recorded)'}, checked out {head}"
+                f" -> {'nothing to measure' if same else 'measuring'}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"measure={'false' if same else 'true'}\n")
+          PY
+      - name: Instantiation counts
+        if: steps.guard.outputs.measure == 'true'
+        # Recorded before the comparison so the numbers are published even when the build goes red.
+        run: runner/bench.py --repo mp-units --cxx clang++-${{ env.CLANG_VERSION }} counts --output results/counts.json
+      - uses: actions/upload-artifact@v5
+        if: steps.guard.outputs.measure == 'true'
+        with:
+          name: instantiation-counts
+          path: results/counts.json
+      - name: Compare against the reviewed baselines
+        id: check
+        if: steps.guard.outputs.measure == 'true'
+        continue-on-error: true # the reaction steps below run first; the job fails at the end
+        run: |
+          runner/bench.py --repo mp-units --cxx clang++-${{ env.CLANG_VERSION }} check \
+            --baseline-key clang${{ env.CLANG_VERSION }} --report results/report.json \
+            --slack ${{ env.SLACK }} --median-alarm ${{ env.MEDIAN_ALARM }} \
+            --tighten-notice ${{ env.TIGHTEN_NOTICE }}
+      - name: Decide whether the baselines can be tightened
+        id: decide
+        if: steps.guard.outputs.measure == 'true'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, sys
+
+          report = pathlib.Path("results/report.json")
+          min_median = float(os.environ["MEDIAN_ALARM"]) / 100
+
+          def decide(value):
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write(f"tighten={value}\n")
+
+          if not report.exists():
+              print("no report written - the comparison never got as far as comparing counts")
+              decide("false")
+              sys.exit(0)
+
+          r = json.loads(report.read_text())
+          if r["regressions"]:
+              print("regressions present, leaving this to a human:", ", ".join(r["regressions"]))
+              decide("false")
+              sys.exit(0)
+
+          median = r["median_non_umbrella"]
+          if not r["improvements"] and median > -min_median:
+              print(f"nothing worth a PR (median {median:+.1%}, no workflow past the tighten band)")
+              decide("false")
+              sys.exit(0)
+
+          workflows = r["workflows"]
+          best = min((d["rel"] for d in workflows.values() if not d["umbrella"]), default=0.0)
+          lines = [
+              f"mp-units {r['mp_units_version']} (`{r.get('mp_units_describe', 'unknown tree')}`) needs",
+              "measurably fewer template instantiations than",
+              f"`baselines/instantiations-{r['baseline_key']}.json` records, so the baselines are stale.",
+              "Leaving them stale desensitizes the gate: a later regression of the same size would pass",
+              "unnoticed.",
+              "",
+              f"- best single workflow: **{best:+.1%}**",
+              f"- median across non-umbrella workflows: **{median:+.1%}**",
+              f"- measured with `{r['cxx']}`, tighten band {r['bands']['tighten_notice']:g}%",
+              "",
+              "| workflow | baseline | current | delta |",
+              "|---|---:|---:|---:|",
+          ]
+          for name, d in sorted(workflows.items(), key=lambda kv: kv[1]["rel"]):
+              label = f"{name} (churn-expected)" if d["umbrella"] else name
+              lines.append(f"| {label} | {d['baseline']} | {d['current']} | {d['rel']:+.1%} |")
+          lines += ["", "Generated by the `Instantiations` workflow. Review the numbers before merging:",
+                    "a re-record blesses the current counts of *every* workflow, not only the improved ones."]
+          pathlib.Path("pr-body.md").write_text("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          decide("true")
+          PY
+      - name: Open or refresh the tightening pull request
+        # Never from a pull_request event: a PR that opens a PR is noise, and the token is read-only.
+        if: steps.decide.outputs.tighten == 'true' && github.event_name != 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          runner/bench.py --repo mp-units --cxx "clang++-${CLANG_VERSION}" update --baseline-key "clang${CLANG_VERSION}"
+          git add baselines
+          git commit -m "chore: tighten instantiation baselines
+
+          Re-recorded against mp-units ${MP_UNITS_REF} (see the PR body for per-workflow deltas)."
+          git push -f origin "$BRANCH"
+          if gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -qx OPEN; then
+            gh pr edit "$BRANCH" --body-file pr-body.md
+            echo "refreshed the open PR"
+          else
+            gh pr create --base "${{ github.event.repository.default_branch }}" --head "$BRANCH" \
+              --title "chore: tighten instantiation baselines" --body-file pr-body.md
+          fi
+      - name: Fail on regression
+        if: steps.check.outcome == 'failure'
+        run: |
+          echo "counts grew past the ${SLACK}% band (or the ${MEDIAN_ALARM}% median) - see the annotations above"
+          exit 1

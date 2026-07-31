@@ -90,30 +90,34 @@ baselines of workflows that ref cannot compile.
 
 ## Continuous integration
 
-`.github/workflows/ci-self-test.yml` tests **the suite**, not the library: both the mp-units ref
-and the clang version are pinned, so it catches a workflow that stopped compiling, a runner bug,
-a corpus edit that moved the counts unintentionally, or a baseline file that no longer matches
-the corpus. It publishes what was measured (ref, sha, library version, exact compiler build) to
-the job summary and uploads the counts table as an artifact. Bumping either pin means
-re-recording the baselines in the same PR.
+Two workflows, one measurement each, differing in how strict they are - because the same reviewed
+baselines are read by two audiences.
 
-`.github/workflows/ci-tighten-baselines.yml` closes the loop on improvements: if mp-units needs
-measurably fewer instantiations than the baselines record (a single workflow ≥2% better — the same
-band `check` warns at — or the non-umbrella median ≥1% better), it re-records them and opens a PR
-with the per-workflow deltas in the body. Nothing accumulates between runs, since `check` always
-compares against the committed file: the weekly schedule is only polling for movement of
-`MP_UNITS_REF`, and the job exits before compiling anything when the checked-out sha is the one
-the baselines already record. Stale baselines are not harmless - they silently desensitize the
-gate, since a later regression of the same size would land inside the band. Regressions are never
-auto-PRed: a red gate is a decision, not a chore.
+`.github/workflows/ci-instantiations.yml` runs here on every commit and pull request, weekly, and
+on demand. It measures mp-units `master` (or any ref given to `workflow_dispatch`) against the
+baselines with **tight** bands (1% per workflow, 0.5% median) and reacts to that one result in both
+directions: growth fails the build, so borderline growth gets investigated here rather than in
+mp-units, and an improvement past the tighten band opens a PR re-recording the baselines - stale
+baselines are not harmless, since a later regression of the same size would land inside the band.
+Every run publishes what it measured (ref, `git describe`, library version, exact compiler build,
+bands) to the job summary and uploads the counts table as an artifact. Nothing accumulates between
+runs, since `check` always compares against the committed file: the schedule only polls for
+movement of the ref, and the job exits before compiling when the checked-out sha is the one the
+baselines already record. Dispatching with a second ref turns the run into a side-by-side
+comparison of two refs instead of a gate.
 
-The mp-units repository can consume the suite the same way to gate its own PRs - instantiation
-counts are deterministic, so they are valid on hosted runners where wall-clock timings are not.
-A ready-to-copy job lives in [`ci/mp-units-compile-time-gate.yml`](ci/mp-units-compile-time-gate.yml);
-it pins the suite by ref so that adding a workflow here cannot silently change what gates
-mp-units. Regressions fail the job with actionable messages naming the workflows; improvements
-surface as warning annotations and in the job summary, so threshold-tightening never goes
-unnoticed.
+mp-units carries the other half itself, in its own `.github/workflows/ci-compile-time.yml`, running
+on its pushes as well as its pull requests - instantiation counts are deterministic, so they are
+valid on hosted runners where wall-clock timings are not. Its bands are deliberately **loose** (3%
+per workflow, 2% median) with an advisory band at 1%: a minor framework extension that grows a
+workflow by a couple of percent is annotated but does not block library work, and goes red in this
+repo instead. It pins this suite by ref, so adding a workflow here cannot silently change what gates
+mp-units.
+
+Two bands over one baseline file are what make the split work: +2% growth annotates in mp-units and
+fails here, so the investigation happens where a red build blocks nobody. Because this repo tracks
+mp-units `master`, that failure arrives once the change has merged; the advisory annotations in the
+mp-units job are what give the same warning before merge.
 
 ## Roadmap
 
