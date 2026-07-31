@@ -29,8 +29,16 @@ runner/bench.py $R counts --workflows isq/ affine           # substring filters 
 runner/bench.py $R counts --output results/counts.json      # machine-readable
 runner/bench.py $R time WORKTREE v2.5.0 v2.4.0 --reps 3     # interleaved A/B (quiet machine)
 runner/bench.py $R check                                    # two-sided gate (exit 1 on regression)
-runner/bench.py $R update                                   # re-record baselines
+runner/bench.py $R check --report results/report.json       # + machine-readable deltas
+runner/bench.py $R update                                   # re-record every entry
+runner/bench.py $R update --workflows isq/ affine           # re-record only these
 ```
+
+`update` without filters is authoritative (drops entries whose workflow is gone) but blesses the
+sub-band drift of every other workflow too - that is the one way baseline creep can happen, since
+`check` itself always compares against the committed file. `update --workflows` moves only the
+matching entries and lists the rest under `not_re_recorded`. Neither form overwrites a reviewed
+number with `n/a`/`FAIL`, so re-recording against an older ref cannot erase newer workflows.
 
 Fixed compile flags: `-std=c++23 -O2 -DNDEBUG -DMP_UNITS_API_CONTRACTS=0` plus `-stdlib=libc++`
 for clang; add anything else via `--extra-flags`. `--baseline-key` (default `clang21`) selects
@@ -74,9 +82,9 @@ the baseline file. `results/` and `.worktrees/` are gitignored scratch space.
   provenance into `GITHUB_STEP_SUMMARY`, writes `counts --output` BEFORE `check` so numbers are
   published even when the check fails, then smoke-tests `time` on one workflow (a shared
   runner's wall time is not comparable to anything - the step only proves the path runs).
-- `.github/workflows/ci-tighten-baselines.yml` - weekly; opens a PR re-recording the baselines
-  when a workflow improves >=5% or the non-umbrella median >=2% (`check --report` JSON drives the
-  decision). Never auto-PRs regressions, and skips entirely when any regression is present -
+- `.github/workflows/ci-tighten-baselines.yml` - daily; opens a PR re-recording the baselines
+  when a workflow improves >=2% (the band `check` warns at) or the non-umbrella median >=1%
+  (`check --report` JSON drives the decision). Never auto-PRs regressions, and skips entirely when any regression is present -
   mixed signals need a human. Keep its `MP_UNITS_REF` in step with the self-test's.
 - `ci/mp-units-compile-time-gate.yml` - copy target for the mp-units repo, NOT a workflow here.
   This is the gate that actually blocks compile-time regressions, because it runs where the

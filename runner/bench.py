@@ -229,27 +229,28 @@ def cmd_time(args):
           "  ".join(f"{ref}={totals[ref]} ms" for ref in args.refs))
 
 
+def baseline_deltas(baseline, results):
+    """Per-workflow baseline/current/relative-delta for every comparable entry."""
+    details = {}
+    for name, base in sorted(baseline.items()):
+        cur = results.get(name)
+        if not isinstance(cur, dict) or not isinstance(base, dict):
+            continue  # n/a, FAIL, or a baseline entry whose workflow is gone
+        b = base["InstantiateClass"] + base["InstantiateFunction"]
+        c = cur["InstantiateClass"] + cur["InstantiateFunction"]
+        details[name] = {"baseline": b, "current": c, "rel": (c - b) / b,
+                         "umbrella": name.startswith("umbrella/")}
+    return details
+
+
 def cmd_check(args):
     repo = Path(args.repo).resolve()
     baseline_file = BASELINES / f"instantiations-{args.baseline_key}.json"
     baseline = json.loads(baseline_file.read_text())["results"]
-    results = measure_counts(repo, args.cxx, args.extra_flags)
-    regressions, improvements, deltas, details = [], [], [], {}
-    for name, base in sorted(baseline.items()):
-        cur = results.get(name)
-        if not isinstance(cur, dict) or not isinstance(base, dict):
-            continue
-        b = base["InstantiateClass"] + base["InstantiateFunction"]
-        c = cur["InstantiateClass"] + cur["InstantiateFunction"]
-        rel = (c - b) / b
-        umbrella = name.startswith("umbrella/")
-        details[name] = {"baseline": b, "current": c, "rel": rel, "umbrella": umbrella}
-        if not umbrella:
-            deltas.append(rel)
-        if rel > GATE_SLACK:
-            regressions.append((name, b, c, rel))
-        elif rel < -TIGHTEN_NOTICE:
-            improvements.append((name, b, c, rel))
+    details = baseline_deltas(baseline, measure_counts(repo, args.cxx, args.extra_flags))
+    regressions = {n: d for n, d in details.items() if d["rel"] > GATE_SLACK}
+    improvements = {n: d for n, d in details.items() if d["rel"] < -TIGHTEN_NOTICE}
+    deltas = [d["rel"] for d in details.values() if not d["umbrella"]]
     median = statistics.median(deltas) if deltas else 0.0
     if args.report:
         report = Path(args.report)
@@ -257,17 +258,18 @@ def cmd_check(args):
         report.write_text(json.dumps(
             {"mp_units_version": ".".join(map(str, detect_version(repo))), "cxx": args.cxx,
              "baseline_key": args.baseline_key, "median_non_umbrella": median,
-             "regressions": [n for n, *_ in regressions], "improvements": [n for n, *_ in improvements],
+             "regressions": list(regressions), "improvements": list(improvements),
              "workflows": details}, indent=2) + "\n")
-    for name, b, c, rel in regressions:
-        gate_summary_line(f"instantiation regression: {name} {b} -> {c} ({rel:+.1%}); if intentional, "
-                          f"run bench.py update and commit the new baselines in this PR", "error")
+    for name, d in regressions.items():
+        gate_summary_line(f"instantiation regression: {name} {d['baseline']} -> {d['current']} "
+                          f"({d['rel']:+.1%}); if intentional, run bench.py update and commit the new "
+                          f"baselines in this PR", "error")
     if median > MEDIAN_ALARM:
         gate_summary_line(f"framework-wide regression: median instantiation growth {median:+.1%} "
                           f"across all workflows - this should almost never be rebaselined away", "error")
-    for name, b, c, rel in improvements:
-        gate_summary_line(f"improvement: {name} {b} -> {c} ({rel:+.1%}) - baselines can be tightened; "
-                          f"run bench.py update in a follow-up PR", "warning")
+    for name, d in improvements.items():
+        gate_summary_line(f"improvement: {name} {d['baseline']} -> {d['current']} ({d['rel']:+.1%}) - "
+                          f"baselines can be tightened; run bench.py update in a follow-up PR", "warning")
     if not regressions and median <= MEDIAN_ALARM:
         msg = f"instantiation gate OK (median delta {median:+.1%})"
         if improvements:
@@ -278,14 +280,39 @@ def cmd_check(args):
 
 
 def cmd_update(args):
+    """Re-record baselines. Without --workflows every entry is rewritten from this checkout,
+    which also blesses whatever sub-band drift the other workflows happen to have; with
+    --workflows only the matching entries move and the rest keep their reviewed numbers."""
     repo = Path(args.repo).resolve()
-    results = measure_counts(repo, args.cxx, args.extra_flags)
+    measured = measure_counts(repo, args.cxx, args.extra_flags, args.workflows)
     BASELINES.mkdir(exist_ok=True)
     out = BASELINES / f"instantiations-{args.baseline_key}.json"
-    out.write_text(json.dumps(
-        {"mp_units_version": ".".join(map(str, detect_version(repo))), "cxx": args.cxx,
-         "results": results}, indent=2) + "\n")
-    print(f"baselines written to {out}")
+    previous = json.loads(out.read_text())["results"] if out.exists() else {}
+    if args.workflows and not measured:
+        sys.exit(f"no workflow matches {args.workflows}; baselines left untouched")
+    recorded, preserved = {}, {}
+    for name, value in measured.items():
+        if isinstance(value, dict) or name not in previous:
+            recorded[name] = value  # a fresh measurement, or a new workflow with nothing to keep
+        else:
+            preserved[name] = previous[name]  # n/a or FAIL here: keep the reviewed number instead
+    # A full update is authoritative - entries whose workflow is gone must disappear. A filtered
+    # one only moves what it measured, so everything else is carried over verbatim.
+    results = dict(sorted({**(previous if args.workflows else preserved), **recorded}.items()))
+    carried = sorted(n for n in results if n not in recorded)
+    data = {"mp_units_version": ".".join(map(str, detect_version(repo))), "cxx": args.cxx}
+    if carried:
+        # The metadata above describes the re-recorded entries only; these predate it.
+        data["not_re_recorded"] = carried
+    data["results"] = results
+    out.write_text(json.dumps(data, indent=2) + "\n")
+    print(f"baselines written to {out}: {len(recorded)} re-recorded, {len(carried)} carried over")
+    if preserved:
+        print(f"kept the previous numbers for {', '.join(preserved)} (n/a or FAIL in this checkout)")
+    if not args.workflows and (dropped := sorted(set(previous) - set(results))):
+        print(f"dropped entries with no workflow: {', '.join(dropped)}")
+    if carried:
+        print(f"carried over: {', '.join(carried)}")
 
 
 def main():
@@ -311,6 +338,9 @@ def main():
 
     u = sub.add_parser("update", help="re-record baselines")
     u.add_argument("--baseline-key", default="clang21")
+    u.add_argument("--workflows", nargs="*",
+                   help="substring filters: re-record only these, leaving the rest untouched "
+                        "(default: rewrite every entry from this checkout)")
 
     args = p.parse_args()
     if args.cmd == "time":

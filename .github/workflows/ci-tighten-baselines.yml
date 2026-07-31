@@ -10,7 +10,7 @@ name: Tighten baselines
 
 on:
   schedule:
-    - cron: '17 5 * * 1' # Mondays, 05:17 UTC
+    - cron: '17 5 * * *' # daily, 05:17 UTC - an improvement should not wait a week to be recorded
   workflow_dispatch:
 
 permissions:
@@ -27,10 +27,12 @@ env:
   MP_UNITS_REF: master
   CLANG_VERSION: 21
   BRANCH: auto/tighten-baselines
-  # `check` already warns at 2%; a PR is only worth opening for a real win, so require either a
-  # single workflow this much better, or the non-umbrella median this much better (percent).
-  MIN_IMPROVEMENT: 5
-  MIN_MEDIAN_IMPROVEMENT: 2
+  # Percent a single workflow (or the non-umbrella median) must improve before a PR is opened.
+  # MIN_IMPROVEMENT matches the band `check` warns at, so every "baselines can be tightened"
+  # warning turns into a PR rather than an annotation someone has to notice. The metric is
+  # deterministic, so these are real wins, not noise - there is no reason to let them accumulate.
+  MIN_IMPROVEMENT: 2
+  MIN_MEDIAN_IMPROVEMENT: 1
 
 jobs:
   tighten:

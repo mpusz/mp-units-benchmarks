@@ -74,8 +74,17 @@ runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 counts
 
 # gate / re-record
 runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 check
-runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 update
+runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 update              # every entry
+runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 update --workflows isq/   # only these
 ```
+
+A full `update` is authoritative: every entry is rewritten from the checkout and entries whose
+workflow no longer exists are dropped — convenient after a major refactoring, but it also blesses
+whatever sub-band drift the *other* workflows happen to have. `update --workflows <filters>` moves
+only the matching entries, leaves the rest at their reviewed numbers, and records those in a
+`not_re_recorded` field so the file says which entries predate its metadata. Neither form will
+overwrite a reviewed number with `n/a`, so re-recording against an older ref cannot erase the
+baselines of workflows that ref cannot compile.
 
 ## Continuous integration
 
@@ -86,10 +95,10 @@ the corpus. It publishes what was measured (ref, sha, library version, exact com
 the job summary and uploads the counts table as an artifact. Bumping either pin means
 re-recording the baselines in the same PR.
 
-`.github/workflows/ci-tighten-baselines.yml` runs weekly and closes the loop on improvements: if
-mp-units needs measurably fewer instantiations than the baselines record (a single workflow ≥5%
-better, or the non-umbrella median ≥2% better), it re-records them and opens a PR with the
-per-workflow deltas in the body. Stale baselines are not harmless - they silently desensitize the
+`.github/workflows/ci-tighten-baselines.yml` runs daily and closes the loop on improvements: if
+mp-units needs measurably fewer instantiations than the baselines record (a single workflow ≥2%
+better — the same band `check` warns at — or the non-umbrella median ≥1% better), it re-records
+them and opens a PR with the per-workflow deltas in the body. Stale baselines are not harmless - they silently desensitize the
 gate, since a later regression of the same size would land inside the band. Regressions are never
 auto-PRed: a red gate is a decision, not a chore.
 
