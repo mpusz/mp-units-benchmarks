@@ -74,6 +74,10 @@ the baseline file. `results/` and `.worktrees/` are gitignored scratch space.
   provenance into `GITHUB_STEP_SUMMARY`, writes `counts --output` BEFORE `check` so numbers are
   published even when the check fails, then smoke-tests `time` on one workflow (a shared
   runner's wall time is not comparable to anything - the step only proves the path runs).
+- `.github/workflows/ci-tighten-baselines.yml` - weekly; opens a PR re-recording the baselines
+  when a workflow improves >=5% or the non-umbrella median >=2% (`check --report` JSON drives the
+  decision). Never auto-PRs regressions, and skips entirely when any regression is present -
+  mixed signals need a human. Keep its `MP_UNITS_REF` in step with the self-test's.
 - `ci/mp-units-compile-time-gate.yml` - copy target for the mp-units repo, NOT a workflow here.
   This is the gate that actually blocks compile-time regressions, because it runs where the
   offending change is authored. It pins this suite by ref, so a corpus change here cannot

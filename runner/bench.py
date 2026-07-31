@@ -234,7 +234,7 @@ def cmd_check(args):
     baseline_file = BASELINES / f"instantiations-{args.baseline_key}.json"
     baseline = json.loads(baseline_file.read_text())["results"]
     results = measure_counts(repo, args.cxx, args.extra_flags)
-    regressions, improvements, deltas = [], [], []
+    regressions, improvements, deltas, details = [], [], [], {}
     for name, base in sorted(baseline.items()):
         cur = results.get(name)
         if not isinstance(cur, dict) or not isinstance(base, dict):
@@ -242,13 +242,23 @@ def cmd_check(args):
         b = base["InstantiateClass"] + base["InstantiateFunction"]
         c = cur["InstantiateClass"] + cur["InstantiateFunction"]
         rel = (c - b) / b
-        if not name.startswith("umbrella/"):
+        umbrella = name.startswith("umbrella/")
+        details[name] = {"baseline": b, "current": c, "rel": rel, "umbrella": umbrella}
+        if not umbrella:
             deltas.append(rel)
         if rel > GATE_SLACK:
             regressions.append((name, b, c, rel))
         elif rel < -TIGHTEN_NOTICE:
             improvements.append((name, b, c, rel))
     median = statistics.median(deltas) if deltas else 0.0
+    if args.report:
+        report = Path(args.report)
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text(json.dumps(
+            {"mp_units_version": ".".join(map(str, detect_version(repo))), "cxx": args.cxx,
+             "baseline_key": args.baseline_key, "median_non_umbrella": median,
+             "regressions": [n for n, *_ in regressions], "improvements": [n for n, *_ in improvements],
+             "workflows": details}, indent=2) + "\n")
     for name, b, c, rel in regressions:
         gate_summary_line(f"instantiation regression: {name} {b} -> {c} ({rel:+.1%}); if intentional, "
                           f"run bench.py update and commit the new baselines in this PR", "error")
@@ -297,6 +307,7 @@ def main():
 
     g = sub.add_parser("check", help="gate against baselines (two-sided)")
     g.add_argument("--baseline-key", default="clang21")
+    g.add_argument("--report", help="write a JSON report (per-workflow deltas, median, regressions, improvements)")
 
     u = sub.add_parser("update", help="re-record baselines")
     u.add_argument("--baseline-key", default="clang21")

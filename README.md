@@ -86,6 +86,13 @@ the corpus. It publishes what was measured (ref, sha, library version, exact com
 the job summary and uploads the counts table as an artifact. Bumping either pin means
 re-recording the baselines in the same PR.
 
+`.github/workflows/ci-tighten-baselines.yml` runs weekly and closes the loop on improvements: if
+mp-units needs measurably fewer instantiations than the baselines record (a single workflow ≥5%
+better, or the non-umbrella median ≥2% better), it re-records them and opens a PR with the
+per-workflow deltas in the body. Stale baselines are not harmless - they silently desensitize the
+gate, since a later regression of the same size would land inside the band. Regressions are never
+auto-PRed: a red gate is a decision, not a chore.
+
 The mp-units repository can consume the suite the same way to gate its own PRs - instantiation
 counts are deterministic, so they are valid on hosted runners where wall-clock timings are not.
 A ready-to-copy job lives in [`ci/mp-units-compile-time-gate.yml`](ci/mp-units-compile-time-gate.yml);
