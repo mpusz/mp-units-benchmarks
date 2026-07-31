@@ -56,6 +56,18 @@ def detect_version(repo: Path):
     return int(m.group(1)), int(m.group(2))
 
 
+def git_provenance(repo: Path):
+    """Which tree the numbers came from. `project(... VERSION)` cannot distinguish a tag from any
+    dev tree of the same era, and the recorded sha is also what lets CI skip re-measuring a tree
+    the baselines already describe."""
+    try:
+        return {"mp_units_sha": run(["git", "-C", str(repo), "rev-parse", "HEAD"]).stdout.strip(),
+                "mp_units_describe": run(["git", "-C", str(repo), "describe", "--tags", "--always",
+                                          "--dirty"]).stdout.strip()}
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return {}  # not a git checkout (tarball, vendored copy): version metadata is all we have
+
+
 def include_dirs(repo: Path):
     dirs = [repo / f"src/{c}/include" for c in ("core", "systems", "utility")]
     return [d for d in dirs if d.is_dir()]
@@ -300,7 +312,8 @@ def cmd_update(args):
     # one only moves what it measured, so everything else is carried over verbatim.
     results = dict(sorted({**(previous if args.workflows else preserved), **recorded}.items()))
     carried = sorted(n for n in results if n not in recorded)
-    data = {"mp_units_version": ".".join(map(str, detect_version(repo))), "cxx": args.cxx}
+    data = {"mp_units_version": ".".join(map(str, detect_version(repo))), **git_provenance(repo),
+            "cxx": args.cxx}
     if carried:
         # The metadata above describes the re-recorded entries only; these predate it.
         data["not_re_recorded"] = carried

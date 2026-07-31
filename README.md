@@ -61,7 +61,9 @@ hidden threshold:
   ("baselines can be tightened") — visible on the workflow run page, not buried in logs.
 
 Baselines are recorded per compiler key; bumping the pinned CI clang re-records them in the
-same PR.
+same PR. Each record also stores the sha and `git describe` of the mp-units tree it was measured
+from — `project(... VERSION)` alone cannot tell a tag from any dev tree of the same era, and that
+sha is what lets CI skip re-measuring a tree it already describes.
 
 ## Usage
 
@@ -95,10 +97,13 @@ the corpus. It publishes what was measured (ref, sha, library version, exact com
 the job summary and uploads the counts table as an artifact. Bumping either pin means
 re-recording the baselines in the same PR.
 
-`.github/workflows/ci-tighten-baselines.yml` runs daily and closes the loop on improvements: if
-mp-units needs measurably fewer instantiations than the baselines record (a single workflow ≥2%
-better — the same band `check` warns at — or the non-umbrella median ≥1% better), it re-records
-them and opens a PR with the per-workflow deltas in the body. Stale baselines are not harmless - they silently desensitize the
+`.github/workflows/ci-tighten-baselines.yml` closes the loop on improvements: if mp-units needs
+measurably fewer instantiations than the baselines record (a single workflow ≥2% better — the same
+band `check` warns at — or the non-umbrella median ≥1% better), it re-records them and opens a PR
+with the per-workflow deltas in the body. Nothing accumulates between runs, since `check` always
+compares against the committed file: the weekly schedule is only polling for movement of
+`MP_UNITS_REF`, and the job exits before compiling anything when the checked-out sha is the one
+the baselines already record. Stale baselines are not harmless - they silently desensitize the
 gate, since a later regression of the same size would land inside the band. Regressions are never
 auto-PRed: a red gate is a decision, not a chore.
 

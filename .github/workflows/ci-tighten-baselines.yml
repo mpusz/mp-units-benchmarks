@@ -9,8 +9,12 @@
 name: Tighten baselines
 
 on:
+  # Nothing accumulates between runs: `check` always compares against the committed baseline, so
+  # the result is a pure function of (library tree, baseline file). The schedule is therefore only
+  # polling for "has MP_UNITS_REF moved" - weekly is plenty, and the job short-circuits below when
+  # the tree is one the baselines already describe.
   schedule:
-    - cron: '17 5 * * *' # daily, 05:17 UTC - an improvement should not wait a week to be recorded
+    - cron: '17 5 * * 1' # Mondays, 05:17 UTC
   workflow_dispatch:
 
 permissions:
@@ -30,7 +34,7 @@ env:
   # Percent a single workflow (or the non-umbrella median) must improve before a PR is opened.
   # MIN_IMPROVEMENT matches the band `check` warns at, so every "baselines can be tightened"
   # warning turns into a PR rather than an annotation someone has to notice. The metric is
-  # deterministic, so these are real wins, not noise - there is no reason to let them accumulate.
+  # deterministic, so a win of this size is signal, not noise.
   MIN_IMPROVEMENT: 2
   MIN_MEDIAN_IMPROVEMENT: 1
 
@@ -55,11 +59,33 @@ jobs:
         shell: bash
         run: |
           sudo apt install -y libc++-${{ env.CLANG_VERSION }}-dev libc++abi-${{ env.CLANG_VERSION }}-dev libunwind-${{ env.CLANG_VERSION }}-dev
+      - name: Skip trees the baselines already describe
+        id: guard
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+
+          key = os.environ["CLANG_VERSION"]
+          data = json.loads(pathlib.Path(f"baselines/instantiations-clang{key}.json").read_text())
+          head = subprocess.run(["git", "-C", "mp-units", "rev-parse", "HEAD"],
+                                capture_output=True, text=True).stdout.strip()
+          recorded = data.get("mp_units_sha")
+          # Same tree AND same compiler means the comparison cannot have moved since the baselines
+          # were recorded - measuring would burn CI to prove 0.0%.
+          same = bool(recorded) and recorded == head and data.get("cxx") == f"clang++-{key}"
+          print(f"baselines describe {recorded or '(no sha recorded)'}, checked out {head}"
+                f" -> {'nothing to measure' if same else 'measuring'}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"measure={'false' if same else 'true'}\n")
+          PY
       - name: Measure against the recorded baselines
+        if: steps.guard.outputs.measure == 'true'
         # A regression exits 1; the report is still written, and the next step decides on it.
         run: runner/bench.py --repo mp-units --cxx clang++-${{ env.CLANG_VERSION }} check --report results/report.json || true
       - name: Decide whether the baselines can be tightened
         id: decide
+        if: steps.guard.outputs.measure == 'true'
         shell: bash
         run: |
           python3 - <<'PY'
