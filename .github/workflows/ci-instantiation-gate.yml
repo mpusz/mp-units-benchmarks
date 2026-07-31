@@ -1,0 +1,63 @@
+name: Instantiation gate
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The gate compares this corpus against baselines/instantiations-clang21.json, so both the
+  # library and the compiler have to be pinned - otherwise unrelated mp-units or LLVM drift
+  # fails PRs here. Bump MP_UNITS_REF to v2.6.0 once it is tagged. Any bump of either pin
+  # requires re-recording the baselines (`bench.py update`) in the same PR.
+  MP_UNITS_REF: master
+  CLANG_VERSION: 21
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check out mp-units at ${{ env.MP_UNITS_REF }}
+        uses: actions/checkout@v5
+        with:
+          repository: mpusz/mp-units
+          ref: ${{ env.MP_UNITS_REF }}
+          path: mp-units
+      - name: Install Clang ${{ env.CLANG_VERSION }}
+        shell: bash
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh ${{ env.CLANG_VERSION }}
+      - name: Install Libc++
+        shell: bash
+        run: |
+          sudo apt install -y libc++-${{ env.CLANG_VERSION }}-dev libc++abi-${{ env.CLANG_VERSION }}-dev libunwind-${{ env.CLANG_VERSION }}-dev
+      - name: Record what was measured
+        shell: bash
+        run: |
+          {
+            echo "| measured | value |"
+            echo "|---|---|"
+            echo "| mp-units ref | \`${MP_UNITS_REF}\` @ $(git -C mp-units rev-parse --short HEAD) |"
+            echo "| library version | $(sed -nE 's/.*VERSION[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' mp-units/src/CMakeLists.txt | head -1) |"
+            echo "| compiler | $(clang++-${CLANG_VERSION} --version | head -1) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Instantiation counts
+        # Recorded before the gate so the numbers are published even when the gate fails.
+        run: runner/bench.py --repo mp-units --cxx clang++-${{ env.CLANG_VERSION }} counts --output results/counts.json
+      - uses: actions/upload-artifact@v5
+        with:
+          name: instantiation-counts
+          path: results/counts.json
+      - name: Gate against baselines
+        run: runner/bench.py --repo mp-units --cxx clang++-${{ env.CLANG_VERSION }} check --baseline-key clang${{ env.CLANG_VERSION }}
+      - name: Smoke-test the wall-clock path
+        # Wall time from a shared runner is not comparable to anything; this only proves the
+        # `time` subcommand still runs end to end.
+        run: runner/bench.py --repo mp-units --cxx clang++-${{ env.CLANG_VERSION }} time WORKTREE --reps 1 --workflows parity/kinetic_energy

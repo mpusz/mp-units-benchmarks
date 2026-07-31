@@ -77,23 +77,20 @@ runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 check
 runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 update
 ```
 
-## Using from mp-units CI
+## Continuous integration
 
-A job in the mp-units repository can consume this suite to gate PRs on instantiation counts
-(deterministic, so valid on hosted runners):
+This repository gates itself with `.github/workflows/ci-instantiation-gate.yml`: it pins both
+the mp-units ref and the clang version, publishes what was measured (ref, sha, library version,
+exact compiler build) to the job summary, uploads the counts table as an artifact, and only then
+runs the gate. Bumping either pin means re-recording the baselines in the same PR.
 
-```yaml
-  compile-time-gate:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with: { repository: mpusz/mp-units-benchmarks, path: benchmarks }
-      - run: benchmarks/runner/bench.py --repo . --cxx clang++-21 check
-```
-
-Regressions fail the job with actionable messages; improvements surface as warning
-annotations and in the job summary so threshold-tightening never goes unnoticed.
+The mp-units repository can consume the suite the same way to gate its own PRs - instantiation
+counts are deterministic, so they are valid on hosted runners where wall-clock timings are not.
+A ready-to-copy job lives in [`ci/mp-units-compile-time-gate.yml`](ci/mp-units-compile-time-gate.yml);
+it pins the suite by ref so that adding a workflow here cannot silently change what gates
+mp-units. Regressions fail the job with actionable messages naming the workflows; improvements
+surface as warning annotations and in the job summary, so threshold-tightening never goes
+unnoticed.
 
 ## Roadmap
 

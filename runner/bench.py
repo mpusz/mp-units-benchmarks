@@ -206,7 +206,9 @@ def cmd_counts(args):
                  for n, v in rows],
                 lambda v: "n/a" if v in (None, False) else str(v))
     if args.output:
-        Path(args.output).write_text(json.dumps(
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)  # results/ is gitignored: absent in fresh checkouts
+        out.write_text(json.dumps(
             {"repo_version": ".".join(map(str, detect_version(repo))), "cxx": args.cxx,
              "host": platform.node(), "results": results}, indent=2))
 

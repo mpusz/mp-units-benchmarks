@@ -1,0 +1,55 @@
+# Ready-to-copy job for the mp-units repository - NOT a workflow of this repo.
+#
+# Copy this file into mp-units/.github/workflows/, or lift the `compile-time-gate` job into an
+# existing workflow there. It gates mp-units changes on the template-instantiation counts of
+# this suite's corpus: the metric is deterministic for a pinned clang, so unlike wall-clock
+# timings it is trustworthy on hosted runners.
+#
+# Two pins matter:
+#   * BENCH_REF - a reviewed commit or tag of mpusz/mp-units-benchmarks, so that adding a
+#     workflow here cannot silently change what gates mp-units.
+#   * CLANG_VERSION - must match the suite's baseline key (baselines/instantiations-<key>.json).
+#
+# When an mp-units change legitimately moves the counts, the gate fails with the offending
+# workflows named. The fix is a reviewed re-record in the benchmarks repo (`bench.py update`),
+# then bumping BENCH_REF here - i.e. growth is always a deliberate, reviewed decision. Umbrella
+# workflows are churn-expected and excluded from the framework-wide median alarm, so ordinary
+# growth of the systems does not trip it.
+name: Compile-time gate
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BENCH_REF: main
+  CLANG_VERSION: 21
+
+jobs:
+  compile-time-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check out the compile-time benchmark suite
+        uses: actions/checkout@v5
+        with:
+          repository: mpusz/mp-units-benchmarks
+          ref: ${{ env.BENCH_REF }}
+          path: benchmarks
+      - name: Install Clang ${{ env.CLANG_VERSION }}
+        shell: bash
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh ${{ env.CLANG_VERSION }}
+      - name: Install Libc++
+        shell: bash
+        run: |
+          sudo apt install -y libc++-${{ env.CLANG_VERSION }}-dev libc++abi-${{ env.CLANG_VERSION }}-dev libunwind-${{ env.CLANG_VERSION }}-dev
+      - name: Gate against the reviewed baselines
+        run: benchmarks/runner/bench.py --repo . --cxx clang++-${{ env.CLANG_VERSION }} check --baseline-key clang${{ env.CLANG_VERSION }}
