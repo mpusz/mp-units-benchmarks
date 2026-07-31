@@ -9,8 +9,8 @@ int main()
   using namespace mp_units;
   using namespace mp_units::si::unit_symbols;
 
-  const quantity_point room = si::ice_point + 21.5 * deg_C;
-  const quantity_point body = usc::fahrenheit_zero + 98.6 * usc::degree_Fahrenheit;
+  const quantity_point room = si::ice_point + delta<deg_C>(21.5);
+  const quantity_point body = usc::fahrenheit_zero + delta<usc::degree_Fahrenheit>(98.6);
   const quantity diff = body - room;
   std::printf("%f\n", diff.numerical_value_in(deg_C));
   std::printf("%f\n", room.numerical_value_in(usc::degree_Fahrenheit));
