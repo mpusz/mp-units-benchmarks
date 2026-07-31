@@ -69,13 +69,15 @@ the baseline file. `results/` and `.worktrees/` are gitignored scratch space.
 
 ## CI
 
-- `.github/workflows/ci-instantiation-gate.yml` - this repo's own gate. Pins `MP_UNITS_REF` and
-  `CLANG_VERSION` (both bumps require an `update` in the same PR), records provenance into
-  `GITHUB_STEP_SUMMARY`, writes `counts --output` BEFORE `check` so numbers are published even
-  when the gate fails, then smoke-tests `time` on one workflow (a shared runner's wall time is
-  not comparable to anything - the step only proves the code path runs).
+- `.github/workflows/ci-self-test.yml` - tests THIS repo, does not gate mp-units. Pins
+  `MP_UNITS_REF` and `CLANG_VERSION` (either bump requires an `update` in the same PR), records
+  provenance into `GITHUB_STEP_SUMMARY`, writes `counts --output` BEFORE `check` so numbers are
+  published even when the check fails, then smoke-tests `time` on one workflow (a shared
+  runner's wall time is not comparable to anything - the step only proves the path runs).
 - `ci/mp-units-compile-time-gate.yml` - copy target for the mp-units repo, NOT a workflow here.
-  It pins this suite by ref, so a corpus change cannot silently change what gates mp-units.
+  This is the gate that actually blocks compile-time regressions, because it runs where the
+  offending change is authored. It pins this suite by ref, so a corpus change here cannot
+  silently change what gates mp-units.
 
 ## mp-units checkouts
 

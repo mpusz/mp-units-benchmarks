@@ -1,4 +1,11 @@
-name: Instantiation gate
+# Self-test of the benchmark suite - it does NOT gate mp-units.
+#
+# Both the library ref and the compiler are pinned here, so the only variable is a change to
+# this repo: it catches a workflow that stopped compiling, a runner bug, a corpus edit that
+# moved the counts unintentionally, and a baseline file that no longer matches the corpus.
+# The gate that protects mp-units from compile-time regressions is a job in THAT repository -
+# see ci/mp-units-compile-time-gate.yml.
+name: Self-test
 
 on: [push, pull_request]
 
@@ -10,15 +17,15 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # The gate compares this corpus against baselines/instantiations-clang21.json, so both the
-  # library and the compiler have to be pinned - otherwise unrelated mp-units or LLVM drift
-  # fails PRs here. Bump MP_UNITS_REF to v2.6.0 once it is tagged. Any bump of either pin
-  # requires re-recording the baselines (`bench.py update`) in the same PR.
+  # Both pins keep this job about THIS repo: unpinned, mp-units or LLVM drift would fail PRs
+  # here for reasons that have nothing to do with the change under review. Bump MP_UNITS_REF to
+  # v2.6.0 once it is tagged; either bump requires re-recording the baselines
+  # (`bench.py update`) in the same PR.
   MP_UNITS_REF: master
   CLANG_VERSION: 21
 
 jobs:
-  gate:
+  self-test:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -55,7 +62,7 @@ jobs:
         with:
           name: instantiation-counts
           path: results/counts.json
-      - name: Gate against baselines
+      - name: Verify the counts still match the recorded baselines
         run: runner/bench.py --repo mp-units --cxx clang++-${{ env.CLANG_VERSION }} check --baseline-key clang${{ env.CLANG_VERSION }}
       - name: Smoke-test the wall-clock path
         # Wall time from a shared runner is not comparable to anything; this only proves the

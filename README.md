@@ -79,10 +79,12 @@ runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 update
 
 ## Continuous integration
 
-This repository gates itself with `.github/workflows/ci-instantiation-gate.yml`: it pins both
-the mp-units ref and the clang version, publishes what was measured (ref, sha, library version,
-exact compiler build) to the job summary, uploads the counts table as an artifact, and only then
-runs the gate. Bumping either pin means re-recording the baselines in the same PR.
+`.github/workflows/ci-self-test.yml` tests **the suite**, not the library: both the mp-units ref
+and the clang version are pinned, so it catches a workflow that stopped compiling, a runner bug,
+a corpus edit that moved the counts unintentionally, or a baseline file that no longer matches
+the corpus. It publishes what was measured (ref, sha, library version, exact compiler build) to
+the job summary and uploads the counts table as an artifact. Bumping either pin means
+re-recording the baselines in the same PR.
 
 The mp-units repository can consume the suite the same way to gate its own PRs - instantiation
 counts are deterministic, so they are valid on hosted runners where wall-clock timings are not.
