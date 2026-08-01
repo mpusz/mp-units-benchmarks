@@ -26,8 +26,11 @@ int main()
   std::println("{:>16:N[.1f]}", readings::speed);
 
   // consteval symbol generation with non-default solidus and separator
-  std::println("{}", unit_symbol<{.solidus = unit_symbol_solidus::never,
-                                  .separator = unit_symbol_separator::half_high_dot}>(kg * m / s2));
+  // the type is named rather than deduced: clang 17 rejects designated initializers in a deduced
+  // template argument, and this spelling is identical in meaning
+  std::println("{}", unit_symbol<unit_symbol_formatting{.solidus = unit_symbol_solidus::never,
+                                                       .separator = unit_symbol_separator::half_high_dot}>(
+                         kg * m / s2));
 
   // the affine-space counterpart goes through the same grammar
   const quantity_point room = si::ice_point + delta<deg_C>(21.5);

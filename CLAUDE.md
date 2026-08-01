@@ -116,9 +116,11 @@ loose in mp-units).
   improvement past `TIGHTEN_NOTICE` opens the re-record PR (never from a `pull_request` event, never
   when a regression is present), `check` runs with `continue-on-error` so reactions happen before a
   final step fails the job, and a guard exits before compiling when the baseline's `mp_units_sha`
-  already describes the checked-out tree. `measure`: one runner per compiler (clang++-21, g++-14,
-  g++-15, plus g++-16 as `experimental: true` -> `continue-on-error`), `-std=c++26`, each uploading
-  a `report --output` artifact. `summary`: `needs: measure`, `if: always()`, downloads the artifacts
+  already describes the checked-out tree. `measure`: one runner per compiler - clang++-17/18/20/21
+  and g++-14/15, plus g++-16 as `experimental: true` -> `continue-on-error` - all at `-std=c++26`,
+  each uploading a `report --output` artifact. That set is mp-units' supported compilers that can do
+  c++26; clang 16 (spells it c++2c), gcc 12/13 (no c++26, and gcc 13 has no `<print>`), clang 19
+  (unsupported by mp-units) and clang 22 (currently fails to compile the library) are out. `summary`: `needs: measure`, `if: always()`, downloads the artifacts
   and posts `bench.py summary` into `GITHUB_STEP_SUMMARY`.
 - Dispatch inputs: `ref` and optional `compare_ref` (measured by every arm alongside the first).
 - Bands are CLI flags (`--slack`, `--median-alarm`, `--tighten-notice`, `--advisory-slack`, all

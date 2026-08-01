@@ -218,18 +218,21 @@ jobs:
           exit 1
 
   measure:
-    # One runner per compiler: arms cannot interfere, and a compiler that cannot build the corpus
-    # only costs its own arm. C++26 everywhere it works - that is what the library targets next.
+    # One runner per compiler: arms cannot interfere, and a compiler that cannot build the corpus only
+    # costs its own arm. The set is exactly mp-units' supported compilers that can do -std=c++26, so
+    # every column is the same standard and therefore comparable. Deliberately absent: clang 16 (only
+    # spells it -std=c++2c), gcc 12 and 13 (no c++26; gcc 13 also has no <print>), clang 19 (mp-units
+    # does not support it) and clang 22 (LLVM trunk currently fails to compile the library).
     strategy:
       fail-fast: false
       matrix:
         include:
+          - { id: clang17, cxx: clang++-17, std: c++26, install: clang }
+          - { id: clang18, cxx: clang++-18, std: c++26, install: clang }
+          - { id: clang20, cxx: clang++-20, std: c++26, install: clang }
           - { id: clang21, cxx: clang++-21, std: c++26, install: clang }
           - { id: gcc14, cxx: g++-14, std: c++26, install: gcc }
           - { id: gcc15, cxx: g++-15, std: c++26, install: gcc-ppa }
-          # GCC trunk: expected to have holes, so it never fails the run. As of this writing it
-          # cannot build affine/temperature_points under -std=c++26 (mp-units enables its
-          # throwing-constraints path on __cpp_constexpr_exceptions, and that path is fmtlib-only).
           - { id: gcc16, cxx: g++-16, std: c++26, install: gcc-ppa, experimental: true }
     runs-on: ubuntu-24.04
     continue-on-error: ${{ matrix.experimental || false }}

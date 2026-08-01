@@ -121,10 +121,10 @@ baselines of workflows that ref cannot compile.
   build, so borderline growth is investigated here rather than in mp-units; an improvement past the
   tighten band opens a PR re-recording the baselines, because stale baselines silently desensitize
   the gate. It exits before compiling when the checked-out sha is the one the baselines record.
-- **measure** — one runner per compiler (`clang++-21`, `g++-14`, `g++-15`, and `g++-16` as a
-  never-fatal experimental arm), each with `-std=c++26`, each producing every metric it can and
-  uploading it as an artifact. Arms cannot interfere, and a compiler that cannot build the corpus
-  costs only its own arm.
+- **measure** — one runner per compiler: `clang++-17/18/20/21` and `g++-14/15`, plus `g++-16` as a
+  never-fatal experimental arm. That set is exactly mp-units' supported compilers that can do
+  `-std=c++26`, so every column shares one standard and stays comparable. Arms cannot interfere, and
+  a compiler that cannot build the corpus costs only its own arm.
 - **summary** — merges those artifacts into one markdown report in the job summary: a table per
   metric, a column per (ref, compiler), and a provenance block naming each compiler build, standard,
   CPU and library tree. Counts and memory are comparable across all columns; time is not, and the
