@@ -517,10 +517,12 @@ def cmd_report(args):
     metrics = {"instantiations": {}, "time_ms": {}, "peak_mib": {}}
     for ref in refs:
         for name, entry in sorted(counts[ref].items()):
-            metrics["instantiations"].setdefault(name, {})[ref] = total(entry)
+            metrics["instantiations"].setdefault(name, {})[ref] = "FAIL" if entry == "FAIL" else total(entry)
         for name, entry in sorted(timed[ref].items()):
-            metrics["time_ms"].setdefault(name, {})[ref] = entry["ms"] if isinstance(entry, dict) else None
-            metrics["peak_mib"].setdefault(name, {})[ref] = entry["peak_mib"] if isinstance(entry, dict) else None
+            # None means the workflow does not apply to this ref (version floor); "FAIL" means it
+            # applies and did not compile. Collapsing both into n/a hides a real failure.
+            for metric, field in (("time_ms", "ms"), ("peak_mib", "peak_mib")):
+                metrics[metric].setdefault(name, {})[ref] = entry[field] if isinstance(entry, dict) else entry
     payload = {"cxx": args.cxx, "cxx_version": tc.version(), "std": tc.std, "reps": args.reps,
                "stdlib": tc.standard_library, "config_label": tc.label, "config_key": config_key(tc),
                "host": platform.node(), "cpu": cpu_model(), "extra_flags": tc.extra,
@@ -535,51 +537,113 @@ def cmd_report(args):
         print(f"\nreport written to {out}", file=sys.stderr)
 
 
-def render_report(payloads):
-    """One markdown table per metric, with a column per (ref, compiler) pair across all payloads."""
-    columns, cells, notes = [], {}, []
+FAMILIES = ("clang", "gcc")
+
+
+def family_of(key):
+    """Compiler families get their own tables: the supported set grows, and a clang column next to a
+    gcc column invites a comparison that only the metric's determinism justifies."""
+    return next((f for f in FAMILIES if key.startswith(f)), "other")
+
+
+def version_of(key):
+    m = re.match(r"[a-z]+(\d+)", key)
+    return int(m.group(1)) if m else 0
+
+
+def refs_oldest_first(payloads):
+    """Order refs by the library version they measured, so a comparison reads old -> new."""
+    versions = {}
     for p in payloads:
-        notes.append(f"- `{p['cxx']}` - {p['cxx_version']}, `-std={p['std']}`, best of {p['reps']}"
-                     + (f", `-stdlib={p['stdlib']}`" if p.get("stdlib") else "")
-                     + (f", extra flags `{p['extra_flags']}`" if p.get("extra_flags") else "")
-                     + (f", configuration `{p['config_key']}`" if p.get("config_key") else "")
-                     + f"<br>on {p.get('cpu', 'unknown CPU')} (`{p.get('host', '?')}`)")
         for ref, info in p["refs"].items():
-            # Label by CONFIGURATION, not by compiler: clang+libc++ and clang+libstdc++ are two
-            # different measurements, and sharing a column would silently overwrite one with the other.
-            label = f"{ref} @ {p.get('config_key') or p['cxx']}"
-            columns.append(label)
-            notes.append(f"    - `{ref}`: mp-units {info['mp_units_version']}"
-                         f" ({info.get('mp_units_describe', 'unknown tree')})")
-            for metric, per_workflow in p["metrics"].items():
-                for name, by_ref in per_workflow.items():
-                    if by_ref.get(ref) is not None:
-                        cells.setdefault(metric, {}).setdefault(name, {})[label] = by_ref[ref]
-    lines = []
+            versions.setdefault(ref, info.get("mp_units_version", ""))
+    return sorted(versions, key=lambda r: (tuple(int(x) for x in re.findall(r"\d+", versions[r])), r))
+
+
+def fmt_value(v):
+    if v is None:
+        return "n/a"  # workflow does not apply to this ref
+    return f"{v:.1f}" if isinstance(v, float) else str(v)
+
+
+def fmt_change(old, new):
+    """One cell telling the whole story: where it was, where it is, and by how much it moved."""
+    if not isinstance(old, (int, float)) or not isinstance(new, (int, float)):
+        return f"{fmt_value(old)} -> {fmt_value(new)}"
+    return f"{fmt_value(old)} -> {fmt_value(new)} ({(new - old) / old:+.1%})" if old else fmt_value(new)
+
+
+def markdown_table(header, rows):
+    widths = [max(len(str(r[i])) for r in [header, *rows]) for i in range(len(header))]
+    lines = ["| " + " | ".join(h.ljust(w) for h, w in zip(header, widths)) + " |",
+             "|" + "|".join("-" * (w + 2) for w in widths) + "|"]
+    for row in rows:
+        lines.append("| " + row[0].ljust(widths[0]) + " | "
+                     + " | ".join(str(c).rjust(w) for c, w in zip(row[1:], widths[1:])) + " |")
+    return lines
+
+
+def render_report(payloads):
+    """A table per metric per compiler family. With exactly two refs each cell carries the change, so
+    one column per configuration replaces a pair of columns the reader has to diff by eye."""
+    refs = refs_oldest_first(payloads)
+    keys, cells, notes = [], {}, []
+    for p in payloads:
+        key = p.get("config_key") or p["cxx"]
+        keys.append(key)
+        notes.append(f"- `{key}` - {p['cxx_version']}, `-std={p['std']}`"
+                     + (f", `-stdlib={p['stdlib']}`" if p.get("stdlib") else "")
+                     + f", best of {p['reps']}"
+                     + (f", extra flags `{p['extra_flags']}`" if p.get("extra_flags") else "")
+                     + f"<br>on {p.get('cpu', 'unknown CPU')} (`{p.get('host', '?')}`)")
+        for metric, per_workflow in p["metrics"].items():
+            for name, by_ref in per_workflow.items():
+                for ref, value in by_ref.items():
+                    if value is not None:
+                        cells.setdefault(metric, {}).setdefault(name, {})[(key, ref)] = value
+    for ref in refs:
+        info = next(p["refs"][ref] for p in payloads if ref in p["refs"])
+        notes.append(f"- `{ref}` - mp-units {info['mp_units_version']}"
+                     f" ({info.get('mp_units_describe', 'unknown tree')})")
+
+    legend = ["**n/a** - the workflow does not apply to that ref, because its "
+              "`// REQUIRES: mp-units >= X.Y` floor is newer. **FAIL** - it applies but did not compile."]
+    if len(refs) == 2:
+        legend.insert(0, f"Cells read `{refs[0]} -> {refs[1]} (change)`, oldest library version first.")
+    lines = [" ".join(legend), ""]
     for metric, title in METRICS:
         by_workflow = cells.get(metric)
         if not by_workflow:
             continue
-        lines += [f"### {title}", ""]
-        present = [c for c in columns if any(c in row for row in by_workflow.values())]
-        width = max([len("workflow")] + [len(n) for n in by_workflow])
-        lines.append("| " + "workflow".ljust(width) + " | " + " | ".join(present) + " |")
-        lines.append("|" + "-" * (width + 2) + "|" + "|".join("-" * (len(c) + 2) for c in present) + "|")
-        for name, row in sorted(by_workflow.items()):
-            values = [f"{row[c]:.1f}" if isinstance(row.get(c), float) else str(row.get(c, "n/a"))
-                      for c in present]
-            lines.append("| " + name.ljust(width) + " | "
-                         + " | ".join(v.rjust(len(c)) for v, c in zip(values, present)) + " |")
-        lines.append("")
-    if not any(cells.get(m) for m, _ in METRICS):
+        for family in (*FAMILIES, "other"):
+            present = sorted({k for k in keys if family_of(k) == family
+                              and any(any(c[0] == k for c in row) for row in by_workflow.values())},
+                             key=lambda k: (version_of(k), k))
+            if not present:
+                continue
+            lines += [f"### {title} - {family}" if family != "other" else f"### {title}", ""]
+            if len(refs) == 2:
+                old, new = refs
+                header = ["workflow", *present]
+                rows = [[name, *[fmt_change(row.get((k, old)), row.get((k, new))) for k in present]]
+                        for name, row in sorted(by_workflow.items())]
+                lines += markdown_table(header, rows) + [""]
+            else:
+                header = ["workflow", *[f"{k} @ {ref}" for k in present for ref in refs
+                                       if any((k, ref) in row for row in by_workflow.values())]]
+                pairs = [(k, ref) for k in present for ref in refs
+                         if any((k, ref) in row for row in by_workflow.values())]
+                rows = [[name, *[fmt_value(row.get(pair)) for pair in pairs]]
+                        for name, row in sorted(by_workflow.items())]
+                lines += markdown_table(header, rows) + [""]
+    if not any(line.startswith("###") for line in lines):
         return "no measurements to report"
     lines += ["<details><summary>How this was measured</summary>", ""] + notes + [
         "", "Instantiation counts are bit-deterministic for a pinned compiler and peak memory varies by",
-        "<0.1% between runs, so both are comparable across every column below. Wall time is not:",
-        "each compiler is measured on its own runner, and CI runners differ in CPU and in load, so",
-        "compare time only within a column (ref against ref), never between columns. Presentation",
-        "quality timings need a quiet machine and `bench.py time`, which interleaves the arms.",
-        "", "</details>"]
+        "<0.1% between runs, so both are comparable across every column above. Wall time is not: each",
+        "configuration is measured on its own runner, and CI runners differ in CPU and in load, so",
+        "compare time only within a column, never between columns. Presentation-quality timings need a",
+        "quiet machine and `bench.py time`, which interleaves the arms.", "", "</details>"]
     return "\n".join(lines)
 
 

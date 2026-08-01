@@ -125,10 +125,14 @@ baselines of workflows that ref cannot compile.
   never-fatal experimental arm. That set is exactly mp-units' supported compilers that can do
   `-std=c++26`, so every column shares one standard and stays comparable. Arms cannot interfere, and
   a compiler that cannot build the corpus costs only its own arm.
-- **summary** — merges those artifacts into one markdown report in the job summary: a table per
-  metric, a column per (ref, compiler), and a provenance block naming each compiler build, standard,
-  CPU and library tree. Counts and memory are comparable across all columns; time is not, and the
-  report says so.
+- **report** — merges those artifacts into one markdown report in the job summary: a table per metric
+  **per compiler family**, since the supported set grows and one wide table stops being readable. Refs
+  are ordered by the library version they measured, oldest first, and when two refs are compared each
+  cell reads `old -> new (change)` — one column per configuration, with the delta read rather than
+  computed across columns. `n/a` marks a workflow whose `REQUIRES` floor excludes that ref, `FAIL` one
+  that applies and did not compile. A provenance block names each compiler build, standard, CPU and
+  library tree. Counts and memory are comparable across all columns; time is not, and the report says
+  so.
 
 `workflow_dispatch` takes a `ref` (any tag, sha or `origin/<branch>`) and an optional `compare_ref`,
 which every arm then measures alongside the first.

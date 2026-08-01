@@ -39,6 +39,12 @@ runner/bench.py summary r1.json r2.json                     # merge reports (als
 runner/bench.py --std c++26 --cxx g++-16 $R report          # any compiler/standard
 ```
 
+`report`/`summary` render one table per metric PER COMPILER FAMILY (clang, gcc, other - the supported
+set grows, so a single wide table stops being readable). Refs are ordered by measured library version,
+oldest first; with exactly two refs each cell becomes `old -> new (change)` so the delta is read rather
+than computed. `n/a` means the workflow's `REQUIRES` floor excludes that ref, `FAIL` means it applies
+and did not compile - never collapse those two, a FAIL is a finding.
+
 Metrics: counts are GATED (clang only, bit-deterministic, and `-std`-dependent - so the gate must
 keep the standard its baselines were recorded with); peak RSS from the child's `rusage` varies <0.1%
 between runs on both clang and GCC, so it is trustworthy everywhere but not gated; wall time is
