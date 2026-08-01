@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'mp-units ref to measure (tag, sha or origin/<branch>)'
+        description: 'mp-units ref to measure - branch, tag or sha (a feature branch is the point)'
         default: master
       compare_ref:
         description: 'optional second mp-units ref - measured alongside the first in every arm'

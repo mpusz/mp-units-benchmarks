@@ -133,8 +133,11 @@ baselines of workflows that ref cannot compile.
 `workflow_dispatch` takes a `ref` (any tag, sha or `origin/<branch>`) and an optional `compare_ref`,
 which every arm then measures alongside the first.
 
-mp-units carries the other half itself, in its own `.github/workflows/ci-compile-time.yml`, running
-on its pushes as well as its pull requests. Its bands are deliberately **loose** (3% per workflow,
+mp-units carries only the gate, in its own `.github/workflows/ci-compile-time.yml`, running on its
+pushes and pull requests and behaving identically when triggered by hand — counts are what belongs in
+every build, while wall time and peak memory across a fleet of compilers are asked for occasionally
+and answered *here*, by dispatching the workflow above against any mp-units ref (a feature branch
+included). Its bands are deliberately **loose** (3% per workflow,
 2% median) with an advisory band at 1%: a minor framework extension that grows a workflow by a couple
 of percent is annotated but does not block library work, and goes red in this repo instead. It pins
 this suite by an exact commit, so a corpus change here cannot silently change what gates mp-units,
