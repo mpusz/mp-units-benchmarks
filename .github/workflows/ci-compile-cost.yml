@@ -82,6 +82,17 @@ jobs:
             echo "| library version | $(sed -nE 's/.*VERSION[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' mp-units/src/CMakeLists.txt | head -1) |"
             echo "| compiler | $(clang++-${GATE_CLANG} --version | head -1), \`-std=c++23\` |"
             echo "| bands | slack ${SLACK}%, median ${MEDIAN_ALARM}%, tighten ${TIGHTEN_NOTICE}% |"
+            echo
+            echo "**slack ${SLACK}%** - one workflow growing more than this fails the build."
+            echo "**median ${MEDIAN_ALARM}%** - the median growth across non-umbrella workflows"
+            echo "(umbrella/ is excluded: it grows legitimately when the systems do). A median this"
+            echo "size means the whole framework got more expensive, not one workflow, and should"
+            echo "almost never be re-recorded away."
+            echo "**tighten ${TIGHTEN_NOTICE}%** - an improvement this large opens a PR re-recording"
+            echo "the baselines, because a stale baseline hides a later regression of the same size."
+            echo
+            echo "mp-units gates the same numbers loosely (slack 3%, median 2%, advisory 1%), so"
+            echo "growth it merely annotates goes red here - which is the point of the split."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Skip trees the baselines already describe
         id: guard
