@@ -13,11 +13,13 @@
 # each arm runs on its own runner. The report says so itself.
 name: Compile cost
 
-# A dispatched comparison should say what it compared, straight from the runs list.
+# A dispatched run should say what it measured, straight from the runs list. Every other trigger
+# yields an empty string here, which GitHub documents as "use the event-specific default" - so a
+# push keeps showing the commit message that caused it.
 run-name: >-
   ${{ github.event_name == 'workflow_dispatch'
       && format('Compile cost: {0}{1}', inputs.ref, inputs.compare_ref != '' && format(' vs {0}', inputs.compare_ref) || '')
-      || format('Compile cost: {0}', github.ref_name) }}
+      || '' }}
 
 on:
   push:
