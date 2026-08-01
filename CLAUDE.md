@@ -137,8 +137,10 @@ loose in mp-units).
   the baselines), counts, TIGHT bands (`SLACK: 1`, `MEDIAN_ALARM: 0.5`), growth fails the build, an
   improvement past `TIGHTEN_NOTICE` opens the re-record PR (never from a `pull_request` event, never
   when a regression is present), `check` runs with `continue-on-error` so reactions happen before a
-  final step fails the job, and a guard exits before compiling when the baseline's `mp_units_sha`
-  already describes the checked-out tree. `measure`: one runner per compiler - clang++-17/18/20/21
+  final step fails the job, and a guard skips measuring ONLY on a `schedule` when the baseline's
+  `mp_units_sha` already describes the checked-out tree - a push or dispatch always measures,
+  because the table is the point of the run, and a skipped arm writes a summary saying why it has
+  no table (an empty job summary reads as a bug). `measure`: one runner per compiler - clang++-17/18/20/21
   and g++-14/15, plus g++-16 as `experimental: true` -> `continue-on-error` - all at `-std=c++26`,
   each uploading a `report --output` artifact. That set is mp-units' supported compilers that can do
   c++26; clang 16 (spells it c++2c), gcc 12/13 (no c++26, and gcc 13 has no `<print>`), clang 19

@@ -114,6 +114,8 @@ jobs:
       - name: Skip trees the baselines already describe
         id: guard
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           # Checked explicitly: `set -e` does not abort on a failing command substitution in an
           # assignment, and an empty path would be read as '.' further down.
@@ -126,18 +128,25 @@ jobs:
           import json, os, pathlib, subprocess
 
           key = os.environ["GATE_CLANG"]
-          # The runner resolves the file from the configuration, so nothing here hardcodes its name.
           data = json.loads(pathlib.Path(os.environ["BASELINE_FILE"]).read_text())
           head = subprocess.run(["git", "-C", "mp-units", "rev-parse", "HEAD"],
                                 capture_output=True, text=True).stdout.strip()
           recorded = data.get("mp_units_sha")
           # Same tree AND same compiler means the comparison cannot have moved since the baselines
-          # were recorded - measuring would burn CI to prove 0.0%.
-          same = bool(recorded) and recorded == head and data.get("cxx") == f"clang++-{key}"
+          # were recorded. Only worth skipping on a schedule: when a human pushed or dispatched, the
+          # table is the point of the run, and two minutes is a cheap price for it.
+          unchanged = bool(recorded) and recorded == head and data.get("cxx") == f"clang++-{key}"
+          skip = unchanged and os.environ.get("EVENT_NAME") == "schedule"
           print(f"baselines describe {recorded or '(no sha recorded)'}, checked out {head}"
-                f" -> {'nothing to measure' if same else 'measuring'}")
+                f" -> {'nothing to measure' if skip else 'measuring'}")
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write(f"measure={'false' if same else 'true'}\n")
+              out.write(f"measure={'false' if skip else 'true'}\n")
+          if skip:  # never leave a job with an empty summary: say why there is no table
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+                  summary.write(f"### instantiation counts - not re-measured\n\nThe baselines already "
+                                f"describe this exact tree (`{head[:9]}`) for this compiler, so a scheduled "
+                                f"run would only prove +0.00%. A push, a pull request or a dispatch always "
+                                f"measures.\n\n")
           PY
       - name: Compare against the reviewed baselines
         id: check
