@@ -261,12 +261,12 @@ jobs:
           runner/bench.py --repo mp-units --cxx "${{ matrix.cxx }}" --std "${{ matrix.std }}" \
             report ${MP_UNITS_REF} ${COMPARE_REF} --reps 2 \
             --output "results/report-${{ matrix.id }}.json"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: measurements-${{ matrix.id }}
           path: results/report-${{ matrix.id }}.json
 
-  summary:
+  report:
     # Aggregates the fleet. `always()` so an experimental arm that died still leaves a table for the
     # arms that succeeded.
     needs: measure
@@ -274,7 +274,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           pattern: measurements-*
           path: results
