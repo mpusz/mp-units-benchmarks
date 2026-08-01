@@ -45,7 +45,11 @@ runner/bench.py $R --std c++26 --modules --import-std report   # consume mp-unit
 builds (time, memory, size on disk, instantiations, each with a total row) first, then the consumers
 - because a `bmi/*` row interleaved with workflows is noise to every configuration that has no
 modules, and the corpus grows a column per compiler. Column headers there drop the tokens all of
-them share. Everything else renders one table per metric PER COMPILER FAMILY (clang, gcc, other - the supported
+them share. A configuration with extra tokens (`-importstd`, `-modules-importstd`) is rendered with
+a percentage against the plainer build of the SAME compiler when both were measured in one run, so
+modules and `import std` read as deltas instead of numbers the reader has to divide by eye. Those
+deltas are consumer cost only - the interface build is paid once per configuration, and the modules
+section says so above the table. Everything else renders one table per metric PER COMPILER FAMILY (clang, gcc, other - the supported
 set grows, so a single wide table stops being readable). Refs are ordered by measured library version,
 oldest first; with exactly two refs each cell becomes `old -> new (change)` so the delta is read rather
 than computed. `n/a` means the workflow's `REQUIRES` floor excludes that ref, `FAIL` means it applies

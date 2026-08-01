@@ -753,6 +753,26 @@ def fmt_change(old, new):
     return f"{fmt_value(old)} -> {fmt_value(new)} ({(new - old) / old:+.1%})" if old else fmt_value(new)
 
 
+def counterparts(columns, candidates):
+    """Map a configuration to the plainer one it should be read against: `...-modules-importstd` and
+    `...-importstd` both against `...`, when that was measured in the same run."""
+    found = {}
+    for col in columns:
+        for stripped in (col.replace("-modules", "").replace("-importstd", ""),
+                         col.replace("-modules", ""), col.replace("-importstd", "")):
+            if stripped != col and stripped in candidates:
+                found[col] = stripped
+                break
+    return found
+
+
+def fmt_against(value, reference):
+    """The value, and how it compares with the same measurement in another configuration."""
+    if not isinstance(value, (int, float)) or not isinstance(reference, (int, float)) or not reference:
+        return fmt_value(value)
+    return f"{fmt_value(value)} ({(value - reference) / reference:+.0%})"
+
+
 def markdown_table(header, rows):
     widths = [max(len(str(r[i])) for r in [header, *rows]) for i in range(len(header))]
     lines = ["| " + " | ".join(h.ljust(w) for h, w in zip(header, widths)) + " |",
@@ -769,7 +789,7 @@ BMI_ORDER = ("bmi/std", "bmi/mp_units.core", "bmi/mp_units.systems", "bmi/mp_uni
 TOTALS = {"time_ms": sum, "mib_on_disk": sum, "instantiations": sum, "peak_mib": max}
 
 
-def metric_table(by_workflow, rows_wanted, columns, refs, extra_rows=(), labels=None):
+def metric_table(by_workflow, rows_wanted, columns, refs, extra_rows=(), labels=None, against=None):
     """One table: a row per entry, a column per configuration. With exactly two refs the cell
     carries the change, so a comparison is read rather than computed across columns."""
     present = [c for c in columns if any(c in by_workflow.get(r, {}) or
@@ -788,8 +808,14 @@ def metric_table(by_workflow, rows_wanted, columns, refs, extra_rows=(), labels=
         pairs = [(c, ref) for c in present for ref in refs
                  if any((c, ref) in by_workflow.get(r, {}) for r in rows_wanted)]
         header += [f"{labels[c]} @ {ref}" if len(refs) > 1 else labels[c] for c, ref in pairs]
-        rows = [[name.removeprefix("bmi/"), *[fmt_value(by_workflow[name].get(pair)) for pair in pairs]]
-                for name in rows_wanted]
+        rows = []
+        for name in rows_wanted:
+            cells = []
+            for col, ref in pairs:
+                value = by_workflow[name].get((col, ref))
+                other = by_workflow[name].get(((against or {}).get(col), ref))
+                cells.append(fmt_against(value, other))
+            rows.append([name.removeprefix("bmi/"), *cells])
     return markdown_table(header, [*rows, *extra_rows])
 
 
@@ -853,7 +879,8 @@ def render_report(payloads):
             cols = sorted([k for k in header_keys if family_of(k) == family],
                           key=lambda k: (version_of(k), k))
             rows = [w for w in workflows if any((c, r) in by_workflow.get(w, {}) for c in cols for r in refs)]
-            table = metric_table(by_workflow, rows, cols, refs) if rows else []
+            against = counterparts(cols, header_keys) if len(refs) == 1 else None
+            table = metric_table(by_workflow, rows, cols, refs, (), None, against) if rows else []
             if table:
                 lines += [f"### {title} - {family}" if family != "other" else f"### {title}", "", *table, ""]
 
@@ -873,16 +900,28 @@ def render_report(payloads):
             table = metric_table(by_workflow, rows, cols, refs, total, labels) if rows else []
             if table:
                 lines += [f"### module interfaces - {title}", "", *table, ""]
+        # Each modules column is read against the same compiler's header build, when that was
+        # measured in the same run: "how much cheaper is this TU as a module consumer".
+        against = counterparts(cols, header_keys)
+        if against and len(refs) == 1:
+            example = next(iter(against.items()))
+            lines += [f"In brackets: change against the same compiler's header build "
+                      f"(`{example[1]}`). Consumer cost only - the interface build above is paid "
+                      f"once per configuration, not per translation unit.", ""]
         for metric, title in METRICS:
             by_workflow = cells.get(metric, {})
             rows = [w for w in workflows if any((c, r) in by_workflow.get(w, {}) for c in cols for r in refs)]
-            table = metric_table(by_workflow, rows, cols, refs, (), labels) if rows else []
+            table = metric_table(by_workflow, rows, cols, refs, (), labels,
+                                 against if len(refs) == 1 else None) if rows else []
             if table:
                 lines += [f"### module consumers - {title}", "", *table, ""]
 
     if not any(line.startswith("###") for line in lines):
         return "no measurements to report"
-    legend = ["- **n/a** - the workflow does not apply to that ref: its `// REQUIRES:` floor (library"
+    legend = ["- A percentage in brackets is the change against the plainer build of the same compiler"
+              " - an `import std` or modules column read against its header column, where both were"
+              " measured.",
+              "- **n/a** - the workflow does not apply to that ref: its `// REQUIRES:` floor (library"
               " version or language standard) is newer.",
               "- **FAIL** - the workflow applies to that ref but did not compile."]
     if len(refs) == 2:
