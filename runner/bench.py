@@ -330,9 +330,10 @@ def cmd_counts(args):
     if len(refs) == 1:
         results = measured[refs[0]]
         print_table(["inst_class", "inst_func"],
-                    [(n, v and v != "FAIL" and v["InstantiateClass"], v and v != "FAIL" and v["InstantiateFunction"])
+                    [(n, v["InstantiateClass"] if isinstance(v, dict) else v,
+                      v["InstantiateFunction"] if isinstance(v, dict) else v)
                      for n, v in sorted(results.items())],
-                    lambda v: "n/a" if v in (None, False) else str(v))
+                    lambda v: "n/a" if v is None else str(v))
     else:
         # Several refs: totals side by side, plus the delta of the last against the first. Counts are
         # deterministic per compiler, so unlike `time` this comparison is valid anywhere.
@@ -402,6 +403,38 @@ def assert_same_config(recorded, tc: Toolchain, where):
                      f"counts are only comparable within one configuration")
 
 
+def gate_summary_table(details, median, args):
+    """Every workflow with its measured value, its limit and the headroom left - so the distance to
+    the bands is visible by observation, not inferred from a single pass/fail line."""
+    if not details:
+        return
+    rows = []
+    for name, d in sorted(details.items()):
+        delta = d["rel"] * 100
+        if delta > args.slack:
+            status = "FAILS"
+        elif args.advisory_slack is not None and delta > args.advisory_slack:
+            status = "advisory"
+        elif delta < -args.tighten_notice:
+            status = "can tighten"
+        else:
+            status = "ok"
+        rows.append([name + (" (churn-expected)" if d["umbrella"] else ""), str(d["baseline"]),
+                     str(d["current"]), f"{delta:+.2f}%", f"{args.slack:g}%",
+                     f"{args.slack - delta:+.2f}pp", status])
+    lines = markdown_table(["workflow", "baseline", "current", "delta", "limit", "headroom", ""], rows)
+    lines += ["", f"median across non-umbrella workflows: **{median:+.2%}** against a "
+                  f"{args.median_alarm:g}% alarm ({args.median_alarm - median * 100:+.2f}pp headroom)",
+              "", "`headroom` is how much further a workflow could grow before it fails: negative means "
+              "it already has. A re-record resets every headroom to the full band, which is why "
+              "`bench.py update --workflows <filters>` exists - it moves only what you name.", ""]
+    text = "\n".join(lines)
+    print(text)
+    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(summary, "a") as f:
+            f.write(text + "\n")
+
+
 def cmd_check(args):
     repo = Path(args.repo).resolve()
     tc = toolchain(args)
@@ -433,6 +466,7 @@ def cmd_check(args):
              "median_non_umbrella": median, "regressions": list(regressions),
              "improvements": list(improvements), "advisory": list(advisory),
              "workflows": details}, indent=2) + "\n")
+    gate_summary_table(details, median, args)
     for name, d in regressions.items():
         gate_summary_line(f"instantiation regression: {name} {d['baseline']} -> {d['current']} "
                           f"({d['rel']:+.1%}, band {args.slack:g}%); if intentional, run bench.py update "

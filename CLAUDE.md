@@ -111,6 +111,9 @@ loose in mp-units).
   a loose gate still reports borderline growth (and names the repo that will go red on it).
 - Improvement > `--tighten-notice` -> `::warning::` annotation + GITHUB_STEP_SUMMARY entry
   suggesting baseline tightening (visible on the run page, never buried in logs).
+- Every `check` prints (and posts to `GITHUB_STEP_SUMMARY`) a table of measured value vs baseline,
+  delta, the limit and the HEADROOM left before that limit - the distance to the bands has to be
+  visible by observation, not inferred from a pass/fail line.
 - `check` iterates the *baseline* keys, so a newly added workflow is ungated until an
   `update` records it; a workflow that stops compiling is reported as `FAIL` by
   `measure_counts` and skipped by the gate rather than failing it.
