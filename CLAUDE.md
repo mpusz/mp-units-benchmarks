@@ -37,6 +37,8 @@ runner/bench.py $R update --workflows isq/ affine           # re-record only the
 runner/bench.py $R report WORKTREE v2.5.0 --output r.json   # counts+time+memory, markdown + JSON
 runner/bench.py summary r1.json r2.json                     # merge reports (also -> STEP_SUMMARY)
 runner/bench.py --std c++26 --cxx g++-16 $R report          # any compiler/standard
+runner/bench.py $R --std c++26 --import-std counts          # `import std;` instead of std headers
+runner/bench.py $R --std c++26 --modules --import-std report   # consume mp-units as C++20 modules
 ```
 
 `report`/`summary` render one table per metric PER COMPILER FAMILY (clang, gcc, other - the supported
@@ -44,6 +46,17 @@ set grows, so a single wide table stops being readable). Refs are ordered by mea
 oldest first; with exactly two refs each cell becomes `old -> new (change)` so the delta is read rather
 than computed. `n/a` means the workflow's `REQUIRES` floor excludes that ref, `FAIL` means it applies
 and did not compile - never collapse those two, a FAIL is a finding.
+
+Consumption is a configuration axis, driven by the corpus's two-macro preamble (the same one
+mp-units' examples use): `--import-std` defines `MP_UNITS_IMPORT_STD`, `--modules` defines
+`MP_UNITS_MODULES`. Both need a BMI pre-step, which `build_modules()` runs once per ref before any
+workflow: the standard library's module, then mp_units.core/systems/utility and the umbrella. Its
+cost is reported as `bmi/*` rows (time, peak memory, size on disk, and instantiation counts from a
+traced build) - under modules the consumer instantiates almost nothing because the work happened in
+the BMI, so omitting those rows would make modules look free. The std module is built with a MINIMAL
+flag set - no `-O2`, no `MP_UNITS_*` macros - because it is not part of mp-units and because GCC 16
+ICEs in consumers otherwise. GCC finds BMIs via `gcm.cache` relative to the working directory, so
+those compiles run with `cwd` set to the BMI directory.
 
 Metrics: counts are GATED (clang only, bit-deterministic, and `-std`-dependent - so the gate must
 keep the standard its baselines were recorded with); peak RSS from the child's `rusage` varies <0.1%

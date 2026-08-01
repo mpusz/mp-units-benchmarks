@@ -19,6 +19,22 @@ Each workflow is a small idiomatic translation unit in `workflows/<category>/<na
 | `text/`    | quantity text output: the same workload printed through `printf`, `operator<<`, `std::format` and `std::println`, plus the format-spec grammar in depth |
 | `umbrella/`| bare umbrella-header inclusion cost — **churn-expected**: these grow when systems legitimately grow and are excluded from the framework-regression alarm |
 
+Every workflow is compiled in each of three configurations from **one** source, using the two-macro
+preamble mp-units' own examples use — `MP_UNITS_IMPORT_STD` selects `import std;` over standard
+library headers, `MP_UNITS_MODULES` selects `import mp_units;` over the library's headers. The
+workload is therefore identical across configurations by construction, not by promise:
+
+| configuration | clang 17–21 | gcc 15 | gcc 16 |
+|---|:---:|:---:|:---:|
+| headers | ✅ | ✅ | ✅ |
+| headers + `import std` | ✅ | ICE | ✅ |
+| modules + `import std` | ✅ | ❌ | ❌ |
+
+GCC cannot build the `mp_units.systems` BMI ([mp-units#717](https://github.com/mpusz/mp-units/issues/717)).
+Building the BMIs is itself measured and reported as `bmi/*` rows, because under modules a consumer
+instantiates almost nothing — the work moved into the interface build, and a report that hid it
+would make modules look free.
+
 Conventions:
 
 - `// REQUIRES: mp-units >= X.Y` — the workflow is reported as `n/a` for older refs.

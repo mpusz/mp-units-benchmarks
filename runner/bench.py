@@ -63,6 +63,14 @@ def detect_version(repo: Path):
     return int(m.group(1)), int(m.group(2))
 
 
+class BuildContext(NamedTuple):
+    """What consumers need after the module pre-step: flags to find the BMIs, a working directory
+    (GCC looks for gcm.cache relative to it), and what building those BMIs cost."""
+    flags: tuple = ()
+    cwd: str | None = None
+    steps: tuple = ()
+
+
 class Toolchain(NamedTuple):
     """Everything that has to be identical for two measurements to be comparable. The library's own
     configuration (formatting backend, contracts, freestanding, ...) rides along in `extra` and in
@@ -72,6 +80,8 @@ class Toolchain(NamedTuple):
     extra: str = ""
     stdlib: str = ""
     label: str = ""
+    modules: bool = False
+    import_std: bool = False
 
     @property
     def is_clang(self):
@@ -104,6 +114,10 @@ def config_key(tc: Toolchain):
     parts = [base, tc.std.replace("+", "x")]
     if tc.standard_library:
         parts.append(tc.standard_library.replace("+", "x").replace("-", ""))
+    if tc.modules:
+        parts.append("modules")
+    if tc.import_std:
+        parts.append("importstd")
     if tc.label:
         parts.append(re.sub(r"[^a-zA-Z0-9]+", "", tc.label))
     extra = " ".join(tc.extra.split())
@@ -186,7 +200,26 @@ def select_workflows(version, patterns=None):
     return result
 
 
-def compile_cmd(tc: Toolchain, repo, out, src, trace=False):
+MODULE_UNITS = (("mp_units.core", "src/core/mp-units-core.cpp"),
+                ("mp_units.systems", "src/systems/mp-units-systems.cpp"),
+                ("mp_units.utility", "src/utility/mp-units-utility.cpp"),
+                ("mp_units", "src/mp-units.cpp"))
+
+
+def std_module_source(tc: Toolchain):
+    """Where the standard library keeps its module interface - libc++ ships std.cppm next to the
+    toolchain, libstdc++ names it in a manifest."""
+    if tc.is_clang:
+        resource = Path(run([tc.cxx, "-print-resource-dir"]).stdout.strip())
+        return resource.parents[2] / "share/libc++/v1/std.cppm"
+    manifest = Path(run([tc.cxx, "-print-file-name=libstdc++.modules.json"]).stdout.strip())
+    if not manifest.is_absolute() or not manifest.exists():
+        sys.exit(f"{tc.cxx} does not ship a libstdc++ module manifest; `import std` needs a newer GCC")
+    entry = next(m for m in json.loads(manifest.read_text())["modules"] if m["logical-name"] == "std")
+    return (manifest.parent / entry["source-path"]).resolve()
+
+
+def compile_cmd(tc: Toolchain, repo, out, src, trace=False, ctx: BuildContext = BuildContext()):
     ver = detect_version(repo)
     cmd = [tc.cxx, f"-std={tc.std}", "-O2", "-DNDEBUG", "-DMP_UNITS_API_CONTRACTS=0",
            # The throwing-constraints path targets an experimental constexpr-exceptions compiler and
@@ -203,9 +236,87 @@ def compile_cmd(tc: Toolchain, repo, out, src, trace=False):
         # Tracing inflates BOTH wall time (~11-15%) and peak RSS (~12-17%), so counts must never
         # come from the same compile as the time/memory numbers.
         cmd += ["-ftime-trace", "-ftime-trace-granularity=0"]
+    if tc.import_std:
+        cmd += ["-DMP_UNITS_IMPORT_STD"]
+    if tc.modules:
+        cmd += ["-DMP_UNITS_MODULES"]
+    if (tc.modules or tc.import_std) and not tc.is_clang:
+        cmd += ["-fmodules"]  # GCC finds the BMIs through gcm.cache, relative to the working directory
+    cmd += list(ctx.flags)
     cmd += tc.extra.split() + [f"-I{d}" for d in include_dirs(repo)]
     cmd += ["-c", str(src), "-o", str(out)]
     return cmd
+
+
+def trace_counts(trace: Path):
+    data = json.loads(trace.read_text())
+    counts = {"InstantiateClass": 0, "InstantiateFunction": 0}
+    for e in data["traceEvents"]:
+        if e.get("ph") == "X" and e["name"] in counts:
+            counts[e["name"]] += 1
+    return counts
+
+
+def build_modules(repo: Path, tc: Toolchain, workdir: Path, trace=False):
+    """Build the BMIs a configuration needs, once, before any workflow is measured - and record what
+    that cost, because it is a real cost users pay that consumer numbers would otherwise hide."""
+    if not (tc.modules or tc.import_std):
+        return BuildContext()
+    workdir.mkdir(parents=True, exist_ok=True)
+    flags, steps = [], []
+    base = [tc.cxx, f"-std={tc.std}", "-O2", "-DNDEBUG", "-DMP_UNITS_API_CONTRACTS=0",
+            "-DMP_UNITS_API_THROWING_CONSTRAINTS=0"]
+    if trace:
+        # Counting the BMI build matters: under modules the consumer instantiates almost nothing,
+        # because the work happened here. Tracing does not change the BMI, so consumers can reuse it.
+        base += ["-ftime-trace", "-ftime-trace-granularity=0"]
+    if tc.standard_library:
+        base += [f"-stdlib={tc.standard_library}"]
+    if tc.import_std:
+        base += ["-DMP_UNITS_IMPORT_STD"]
+    if not tc.is_clang:
+        base += ["-fmodules"]
+    cwd = None if tc.is_clang else str(workdir)
+
+    def step(name, cmd, artifact):
+        try:
+            got = compile_once(cmd, cwd=cwd)
+        except subprocess.CalledProcessError:
+            sys.exit(f"failed to build {name} for {config_key(tc)}:\n  " + " ".join(map(str, cmd)))
+        got["mib_on_disk"] = round(artifact.stat().st_size / (1024 * 1024), 1) if artifact.exists() else None
+        if trace:
+            trace_file = artifact.with_suffix(".json")
+            got["counts"] = trace_counts(trace_file) if trace_file.exists() else None
+        steps.append({"name": f"bmi/{name}", **got})
+
+    if tc.import_std:
+        # The standard library's own module is built with a MINIMAL flag set: it is not part of
+        # mp-units, so it must not inherit its configuration macros or -O2. Doing so is not merely
+        # untidy - GCC 16 miscompiles consumers of a std module built that way, ICEing in
+        # nonnull_arg_p during GIMPLE ealias.
+        std_base = [tc.cxx, f"-std={tc.std}"]
+        if tc.standard_library:
+            std_base += [f"-stdlib={tc.standard_library}"]
+        if not tc.is_clang:
+            std_base += ["-fmodules", "-fsearch-include-path"]
+        else:
+            std_base += ["-Wno-reserved-module-identifier"]
+        source = std_module_source(tc)
+        out = workdir / ("std.pcm" if tc.is_clang else "std.o")
+        cmd = [*std_base, "--precompile" if tc.is_clang else "-c", str(source)]
+        step("std", [*cmd, "-o", str(out)], out)
+        if tc.is_clang:
+            flags.append(f"-fmodule-file=std={out}")
+    if tc.modules:
+        includes = [f"-I{d}" for d in include_dirs(repo)]
+        for name, rel in MODULE_UNITS:
+            out = workdir / (f"{name}.pcm" if tc.is_clang else f"{name}.o")
+            cmd = [*base, *includes, *flags]
+            cmd += ["-x", "c++-module", "--precompile"] if tc.is_clang else ["-c"]
+            step(name, [*cmd, str(repo / rel), "-o", str(out)], out)
+            if tc.is_clang:
+                flags.append(f"-fmodule-file={name}={out}")
+    return BuildContext(tuple(flags), cwd, tuple(steps))
 
 
 def checkout(repo: Path, ref, cache: Path):
@@ -223,6 +334,9 @@ def measure_counts(repo: Path, tc: Toolchain, patterns=None):
     version = detect_version(repo)
     results = {}
     with tempfile.TemporaryDirectory() as tmp:
+        ctx = build_modules(repo, tc, Path(tmp) / "bmi", trace=True)
+        for step in ctx.steps:
+            results[step["name"]] = step.get("counts")
         for name, src in select_workflows(version, patterns).items():
             if src is None:
                 results[name] = None
@@ -230,7 +344,7 @@ def measure_counts(repo: Path, tc: Toolchain, patterns=None):
             out = Path(tmp) / "wf.o"
             trace = Path(tmp) / "wf.json"
             try:
-                run(compile_cmd(tc, repo, out, src, trace=True))
+                run(compile_cmd(tc, repo, out, src, trace=True, ctx=ctx), cwd=ctx.cwd)
             except subprocess.CalledProcessError as exc:
                 print(f"::error::{name} failed to compile: {exc.stderr.splitlines()[:1]}")
                 results[name] = "FAIL"
@@ -244,11 +358,11 @@ def measure_counts(repo: Path, tc: Toolchain, patterns=None):
     return results
 
 
-def compile_once(cmd):
+def compile_once(cmd, cwd=None):
     """Wall time and peak RSS of one compile. os.wait4 gives this child's own rusage, so no
     /usr/bin/time dependency and no interference between measurements."""
     started = time.perf_counter_ns()
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=cwd)
     _, status, usage = os.wait4(proc.pid, 0)
     ms = (time.perf_counter_ns() - started) // 1_000_000
     if status != 0:
@@ -260,11 +374,17 @@ def measure_time(repos, tc: Toolchain, reps, patterns=None):
     """Interleaved best-of-K wall-clock and peak RSS across checkouts (rep-major, arm-minor)."""
     versions = {ref: detect_version(repo) for ref, repo in repos.items()}
     selections = {ref: select_workflows(versions[ref], patterns) for ref in repos}
-    names = sorted({n for sel in selections.values() for n in sel})
+    names = sorted({n for sel in selections.values() for n in sel})  # BMI rows are added below
     best = {ref: {} for ref in repos}
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "wf.o"
-        for name in names:
+        contexts = {ref: build_modules(repo, tc, Path(tmp) / f"bmi-{ref.replace('/', '_')}")
+                    for ref, repo in repos.items()}
+        for ref, ctx in contexts.items():
+            for s in ctx.steps:  # the BMI build is measured once; it is not a per-rep cost
+                best[ref][s["name"]] = {k: v for k, v in s.items() if k != "name"}
+        names = [*sorted(n for r in best.values() for n in r), *names]
+        for name in [n for n in names if not n.startswith("bmi/")]:
             # warmup + applicability
             for ref, repo in repos.items():
                 src = selections[ref].get(name)
@@ -272,7 +392,7 @@ def measure_time(repos, tc: Toolchain, reps, patterns=None):
                     best[ref][name] = None
                     continue
                 try:
-                    run(compile_cmd(tc, repo, out, src))
+                    run(compile_cmd(tc, repo, out, src, ctx=contexts[ref]), cwd=contexts[ref].cwd)
                 except subprocess.CalledProcessError:
                     best[ref][name] = "FAIL"
             for _ in range(reps):
@@ -280,12 +400,13 @@ def measure_time(repos, tc: Toolchain, reps, patterns=None):
                     src = selections[ref].get(name)
                     if src is None or best[ref].get(name) == "FAIL":
                         continue
-                    got = compile_once(compile_cmd(tc, repo, out, src))
+                    got = compile_once(compile_cmd(tc, repo, out, src, ctx=contexts[ref]),
+                                       cwd=contexts[ref].cwd)
                     cur = best[ref].get(name)
                     # Best-of-K per metric: the minimum of each is the least contaminated estimate,
                     # and peak RSS barely moves between reps anyway (measured spread <0.1%).
                     best[ref][name] = got if not isinstance(cur, dict) else {
-                        k: min(cur[k], got[k]) for k in got}
+                        k: min(cur[k], got[k]) for k in got if k in cur}
     return best
 
 
@@ -319,7 +440,8 @@ def materialize(args, refs):
 
 
 def toolchain(args):
-    return Toolchain(args.cxx, args.std, args.extra_flags, args.stdlib, args.config_label)
+    return Toolchain(args.cxx, args.std, args.extra_flags, args.stdlib, args.config_label,
+                     args.modules, args.import_std)
 
 
 def cmd_counts(args):
@@ -357,7 +479,9 @@ def cmd_counts(args):
 
 
 def metric_cell(entry, key, fmt="{}"):
-    return "n/a" if not isinstance(entry, dict) else fmt.format(entry[key])
+    if isinstance(entry, dict):
+        return fmt.format(entry[key]) if entry.get(key) is not None else "-"
+    return entry if isinstance(entry, str) else "n/a"  # "FAIL" is not the same as "not applicable"
 
 
 def cmd_time(args):
@@ -535,7 +659,8 @@ def cmd_update(args):
 
 METRICS = (("instantiations", "template instantiations (InstantiateClass + InstantiateFunction)"),
            ("time_ms", "wall time (ms, best of K - only trustworthy on a quiet machine)"),
-           ("peak_mib", "peak compiler memory (MiB, best of K)"))
+           ("peak_mib", "peak compiler memory (MiB, best of K)"),
+           ("mib_on_disk", "BMI size on disk (MiB)"))
 
 
 def cmd_report(args):
@@ -548,15 +673,18 @@ def cmd_report(args):
     timed = measure_time(repos, tc, args.reps, args.workflows)
     counts = {ref: measure_counts(r, tc, args.workflows) if tc.is_clang else {}
               for ref, r in repos.items()}
-    metrics = {"instantiations": {}, "time_ms": {}, "peak_mib": {}}
+    metrics = {metric: {} for metric, _ in METRICS}
     for ref in refs:
         for name, entry in sorted(counts[ref].items()):
             metrics["instantiations"].setdefault(name, {})[ref] = "FAIL" if entry == "FAIL" else total(entry)
         for name, entry in sorted(timed[ref].items()):
             # None means the workflow does not apply to this ref (version floor); "FAIL" means it
             # applies and did not compile. Collapsing both into n/a hides a real failure.
-            for metric, field in (("time_ms", "ms"), ("peak_mib", "peak_mib")):
-                metrics[metric].setdefault(name, {})[ref] = entry[field] if isinstance(entry, dict) else entry
+            for metric, field in (("time_ms", "ms"), ("peak_mib", "peak_mib"),
+                                  ("mib_on_disk", "mib_on_disk")):
+                value = entry.get(field) if isinstance(entry, dict) else entry
+                if value is not None or metric != "mib_on_disk":
+                    metrics[metric].setdefault(name, {})[ref] = value
     payload = {"cxx": args.cxx, "cxx_version": tc.version(), "std": tc.std, "reps": args.reps,
                "stdlib": tc.standard_library, "config_label": tc.label, "config_key": config_key(tc),
                "host": platform.node(), "cpu": cpu_model(), "extra_flags": tc.extra,
@@ -640,11 +768,14 @@ def render_report(payloads):
         notes.append(f"- `{ref}` - mp-units {info['mp_units_version']}"
                      f" ({info.get('mp_units_describe', 'unknown tree')})")
 
-    legend = ["**n/a** - the workflow does not apply to that ref, because its "
-              "`// REQUIRES: mp-units >= X.Y` floor is newer. **FAIL** - it applies but did not compile."]
+    legend = ["- **n/a** - the workflow does not apply to that ref: its `// REQUIRES: mp-units >= X.Y`"
+              " floor is newer than that library version.",
+              "- **FAIL** - the workflow applies to that ref but did not compile.",
+              "- **`bmi/*`** - building a module interface, not a workflow: a one-off cost every"
+              " consumer of that configuration shares."]
     if len(refs) == 2:
-        legend.insert(0, f"Cells read `{refs[0]} -> {refs[1]} (change)`, oldest library version first.")
-    lines = [" ".join(legend), ""]
+        legend.insert(0, f"- Cells read `{refs[0]} -> {refs[1]} (change)`, oldest library version first.")
+    lines = [*legend, ""]
     for metric, title in METRICS:
         by_workflow = cells.get(metric)
         if not by_workflow:
@@ -699,6 +830,12 @@ def main():
     p.add_argument("--extra-flags", default="", help="extra compiler flags; pass them attached, as "
                                                      "--extra-flags=-DFOO=1, since argparse takes a "
                                                      "detached value starting with '-' for an option")
+    p.add_argument("--modules", action="store_true",
+                   help="consume mp-units as C++20 modules (builds the BMIs first and reports what "
+                        "that cost); implies the corpus's MP_UNITS_MODULES branch")
+    p.add_argument("--import-std", action="store_true",
+                   help="use `import std;` instead of standard library headers (builds the std "
+                        "module first)")
     p.add_argument("--stdlib", default="", help="standard library for clang (default libc++); GCC "
                                                 "has no such switch")
     p.add_argument("--config-label", default="", help="readable name for a configuration axis that "

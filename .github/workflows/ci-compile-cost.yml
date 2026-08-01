@@ -13,6 +13,12 @@
 # each arm runs on its own runner. The report says so itself.
 name: Compile cost
 
+# A dispatched comparison should say what it compared, straight from the runs list.
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && format('Compile cost: {0}{1}', inputs.ref, inputs.compare_ref != '' && format(' vs {0}', inputs.compare_ref) || '')
+      || format('Compile cost: {0}', github.ref_name) }}
+
 on:
   push:
   pull_request:
@@ -234,6 +240,14 @@ jobs:
           - { id: gcc14, cxx: g++-14, std: c++26, install: gcc }
           - { id: gcc15, cxx: g++-15, std: c++26, install: gcc-ppa }
           - { id: gcc16, cxx: g++-16, std: c++26, install: gcc-ppa, experimental: true }
+          # How the library is consumed is a configuration axis of its own. `import std;` needs the
+          # standard library's own module built first; modules need that plus the mp-units BMIs, and
+          # the runner reports what building them cost as `bmi/*` rows.
+          - { id: clang21-importstd, cxx: clang++-21, std: c++26, install: clang, args: --import-std }
+          - { id: clang21-modules, cxx: clang++-21, std: c++26, install: clang, args: --modules --import-std }
+          # GCC cannot build the mp-units modules yet (mp-units#717: `recursive lazy load` in the
+          # systems BMI), so it gets the `import std;` arm only.
+          - { id: gcc16-importstd, cxx: g++-16, std: c++26, install: gcc-ppa, args: --import-std, experimental: true }
     runs-on: ubuntu-24.04
     continue-on-error: ${{ matrix.experimental || false }}
     steps:
@@ -273,7 +287,7 @@ jobs:
         shell: bash
         run: |
           runner/bench.py --repo mp-units --cxx "${{ matrix.cxx }}" --std "${{ matrix.std }}" \
-            report ${MP_UNITS_REF} ${COMPARE_REF} --reps 2 \
+            ${{ matrix.args }} report ${MP_UNITS_REF} ${COMPARE_REF} --reps 2 \
             --output "results/report-${{ matrix.id }}.json"
       - uses: actions/upload-artifact@v7
         with:
