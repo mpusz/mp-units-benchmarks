@@ -23,6 +23,8 @@ The measured mp-units version is parsed from the checkout's src/CMakeLists.txt a
 injected as -DMP_UNITS_BENCH_VERSION=<major*100+minor> for compat shims.
 """
 
+from __future__ import annotations  # 3.12 evaluates annotations eagerly, 3.14 does not
+
 import argparse
 import hashlib
 import json
@@ -59,6 +61,33 @@ def detect_version(repo: Path):
     if not m:
         sys.exit(f"cannot detect mp-units version in {repo}")
     return int(m.group(1)), int(m.group(2))
+
+
+class Toolchain(NamedTuple):
+    """Everything that has to be identical for two measurements to be comparable. The library's own
+    configuration (formatting backend, contracts, freestanding, ...) rides along in `extra` and in
+    `label`: `extra` is what the compiler sees, `label` is what a human calls it."""
+    cxx: str
+    std: str = "c++23"
+    extra: str = ""
+    stdlib: str = ""
+    label: str = ""
+
+    @property
+    def is_clang(self):
+        return "clang" in Path(self.cxx).name
+
+    @property
+    def standard_library(self):
+        """Explicit choice, else clang's non-default libc++ (what mp-units CI exercises), else the
+        compiler's own default - GCC has no -stdlib switch to override it with."""
+        return self.stdlib or ("libc++" if self.is_clang else "")
+
+    def version(self):
+        try:
+            return run([self.cxx, "--version"]).stdout.splitlines()[0]
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return self.cxx
 
 
 def config_key(tc: Toolchain):
@@ -155,33 +184,6 @@ def select_workflows(version, patterns=None):
         else:
             result[name] = path
     return result
-
-
-class Toolchain(NamedTuple):
-    """Everything that has to be identical for two measurements to be comparable. The library's own
-    configuration (formatting backend, contracts, freestanding, ...) rides along in `extra` and in
-    `label`: `extra` is what the compiler sees, `label` is what a human calls it."""
-    cxx: str
-    std: str = "c++23"
-    extra: str = ""
-    stdlib: str = ""
-    label: str = ""
-
-    @property
-    def is_clang(self):
-        return "clang" in Path(self.cxx).name
-
-    @property
-    def standard_library(self):
-        """Explicit choice, else clang's non-default libc++ (what mp-units CI exercises), else the
-        compiler's own default - GCC has no -stdlib switch to override it with."""
-        return self.stdlib or ("libc++" if self.is_clang else "")
-
-    def version(self):
-        try:
-            return run([self.cxx, "--version"]).stdout.splitlines()[0]
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return self.cxx
 
 
 def compile_cmd(tc: Toolchain, repo, out, src, trace=False):

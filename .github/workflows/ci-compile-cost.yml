@@ -59,6 +59,12 @@ jobs:
           repository: mpusz/mp-units
           ref: ${{ env.MP_UNITS_REF }}
           path: mp-units
+      - name: Smoke-test the runner
+        # Catches import-time breakage (the runner's Python is not necessarily the author's) before
+        # this job spends minutes installing a toolchain.
+        run: |
+          runner/bench.py --help > /dev/null
+          runner/bench.py --cxx clang++-${{ env.GATE_CLANG }} key
       - name: Install Clang ${{ env.GATE_CLANG }}
         shell: bash
         run: |
@@ -81,7 +87,14 @@ jobs:
         id: guard
         shell: bash
         run: |
-          BASELINE_FILE="$(runner/bench.py --cxx clang++-${GATE_CLANG} key)" python3 - <<'PY'
+          # Checked explicitly: `set -e` does not abort on a failing command substitution in an
+          # assignment, and an empty path would be read as '.' further down.
+          if ! BASELINE_FILE="$(runner/bench.py --cxx clang++-${GATE_CLANG} key)" || [ -z "$BASELINE_FILE" ]; then
+            echo "::error::could not resolve the baseline file for clang++-${GATE_CLANG}"
+            exit 1
+          fi
+          export BASELINE_FILE
+          python3 - <<'PY'
           import json, os, pathlib, subprocess
 
           key = os.environ["GATE_CLANG"]
@@ -219,6 +232,8 @@ jobs:
           path: mp-units
           # Full history only when a second ref is requested, since each ref becomes a worktree.
           fetch-depth: ${{ inputs.compare_ref != '' && '0' || '1' }}
+      - name: Smoke-test the runner
+        run: runner/bench.py --help > /dev/null
       - name: Install ${{ matrix.cxx }}
         shell: bash
         run: |
