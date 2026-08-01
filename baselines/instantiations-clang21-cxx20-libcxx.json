@@ -1,0 +1,66 @@
+{
+  "mp_units_version": "2.6",
+  "mp_units_sha": "87c0ed799dfddeede582fa8bae837bd2a9b30389",
+  "mp_units_describe": "v2.5.0-662-g87c0ed799-dirty",
+  "cxx": "clang++-21",
+  "std": "c++20",
+  "stdlib": "libc++",
+  "config_label": "",
+  "extra_flags": "",
+  "results": {
+    "affine/custom_origins": {
+      "InstantiateClass": 9248,
+      "InstantiateFunction": 4012
+    },
+    "affine/temperature_points": {
+      "InstantiateClass": 9976,
+      "InstantiateFunction": 5325
+    },
+    "generic/generic_interfaces": {
+      "InstantiateClass": 11424,
+      "InstantiateFunction": 5237
+    },
+    "isq/custom_hierarchy": {
+      "InstantiateClass": 13856,
+      "InstantiateFunction": 6791
+    },
+    "isq/hierarchy_conversions": {
+      "InstantiateClass": 13753,
+      "InstantiateFunction": 6844
+    },
+    "isq/kind_safe_interfaces": {
+      "InstantiateClass": 14557,
+      "InstantiateFunction": 7186
+    },
+    "parity/kinetic_energy": {
+      "InstantiateClass": 9139,
+      "InstantiateFunction": 3951
+    },
+    "parity/unit_conversions": {
+      "InstantiateClass": 9713,
+      "InstantiateFunction": 4850
+    },
+    "text/output_format": {
+      "InstantiateClass": 9941,
+      "InstantiateFunction": 5113
+    },
+    "text/output_format_advanced": null,
+    "text/output_ostream": {
+      "InstantiateClass": 9248,
+      "InstantiateFunction": 4037
+    },
+    "text/output_printf": {
+      "InstantiateClass": 9195,
+      "InstantiateFunction": 3962
+    },
+    "text/output_println": null,
+    "umbrella/isq_umbrella": {
+      "InstantiateClass": 15369,
+      "InstantiateFunction": 8425
+    },
+    "umbrella/si_umbrella": {
+      "InstantiateClass": 8260,
+      "InstantiateFunction": 3292
+    }
+  }
+}

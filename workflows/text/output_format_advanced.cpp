@@ -1,3 +1,4 @@
+// REQUIRES: c++23  (std::println)
 // REQUIRES: mp-units >= 2.6
 // The quantity format-spec grammar exercised in depth: component layout (%N/%U/%D/%?), per-component
 // format specs (N[...]/U[...]), quantity-level fill/align/width, consteval unit symbol generation

@@ -1,0 +1,72 @@
+{
+  "mp_units_version": "2.6",
+  "mp_units_sha": "87c0ed799dfddeede582fa8bae837bd2a9b30389",
+  "mp_units_describe": "v2.5.0-662-g87c0ed799-dirty",
+  "cxx": "clang++-21",
+  "std": "c++26",
+  "stdlib": "libc++",
+  "config_label": "",
+  "extra_flags": "",
+  "results": {
+    "affine/custom_origins": {
+      "InstantiateClass": 8707,
+      "InstantiateFunction": 4073
+    },
+    "affine/temperature_points": {
+      "InstantiateClass": 9512,
+      "InstantiateFunction": 5383
+    },
+    "generic/generic_interfaces": {
+      "InstantiateClass": 10634,
+      "InstantiateFunction": 5292
+    },
+    "isq/custom_hierarchy": {
+      "InstantiateClass": 12754,
+      "InstantiateFunction": 6850
+    },
+    "isq/hierarchy_conversions": {
+      "InstantiateClass": 12672,
+      "InstantiateFunction": 6906
+    },
+    "isq/kind_safe_interfaces": {
+      "InstantiateClass": 13379,
+      "InstantiateFunction": 7244
+    },
+    "parity/kinetic_energy": {
+      "InstantiateClass": 8646,
+      "InstantiateFunction": 4001
+    },
+    "parity/unit_conversions": {
+      "InstantiateClass": 9264,
+      "InstantiateFunction": 4908
+    },
+    "text/output_format": {
+      "InstantiateClass": 9426,
+      "InstantiateFunction": 5129
+    },
+    "text/output_format_advanced": {
+      "InstantiateClass": 9528,
+      "InstantiateFunction": 5356
+    },
+    "text/output_ostream": {
+      "InstantiateClass": 8741,
+      "InstantiateFunction": 4080
+    },
+    "text/output_printf": {
+      "InstantiateClass": 8684,
+      "InstantiateFunction": 4006
+    },
+    "text/output_println": {
+      "InstantiateClass": 9424,
+      "InstantiateFunction": 5136
+    },
+    "umbrella/isq_umbrella": {
+      "InstantiateClass": 13696,
+      "InstantiateFunction": 8516
+    },
+    "umbrella/si_umbrella": {
+      "InstantiateClass": 7865,
+      "InstantiateFunction": 3354
+    }
+  }
+}

@@ -166,7 +166,20 @@ def workflow_requires(path: Path):
     return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
 
 
-def select_workflows(version, patterns=None):
+def std_number(std):
+    """c++23 -> 23, and the pre-ratification spellings clang uses for the same thing."""
+    digits = re.sub(r"[^0-9a-z]", "", std.lower()).removeprefix("c").removeprefix("gnu")
+    return {"2a": 20, "2b": 23, "2c": 26}.get(digits[-2:], int(digits[-2:]) if digits[-2:].isdigit() else 0)
+
+
+def workflow_std_floor(path: Path):
+    """A workflow measuring a facility that does not exist in an older standard is not applicable
+    there - the same distinction as the library floor, and not a compile failure."""
+    m = re.search(r"//\s*REQUIRES:\s*(c\+\+\d\w)", path.read_text())
+    return std_number(m.group(1)) if m else 0
+
+
+def select_workflows(version, patterns=None, std=None):
     """Pick the right variant of every workflow for the given library version."""
     chosen = {}
     for path in sorted(WORKFLOWS.glob("*/*.cpp")):
@@ -193,8 +206,9 @@ def select_workflows(version, patterns=None):
                 # base requirement decides between base and newest variant
                 base_req = workflow_requires(entry["base"]) if entry["base"] else (99, 99)
                 path = entry["base"] if version >= base_req else applicable[-1]
-        if path is None or version < workflow_requires(path):
-            result[name] = None  # n/a for this version
+        too_new_std = path is not None and std is not None and std_number(std) < workflow_std_floor(path)
+        if path is None or version < workflow_requires(path) or too_new_std:
+            result[name] = None  # n/a for this library version or language standard
         else:
             result[name] = path
     return result
@@ -337,7 +351,7 @@ def measure_counts(repo: Path, tc: Toolchain, patterns=None):
         ctx = build_modules(repo, tc, Path(tmp) / "bmi", trace=True)
         for step in ctx.steps:
             results[step["name"]] = step.get("counts")
-        for name, src in select_workflows(version, patterns).items():
+        for name, src in select_workflows(version, patterns, tc.std).items():
             if src is None:
                 results[name] = None
                 continue
@@ -373,7 +387,7 @@ def compile_once(cmd, cwd=None):
 def measure_time(repos, tc: Toolchain, reps, patterns=None):
     """Interleaved best-of-K wall-clock and peak RSS across checkouts (rep-major, arm-minor)."""
     versions = {ref: detect_version(repo) for ref, repo in repos.items()}
-    selections = {ref: select_workflows(versions[ref], patterns) for ref in repos}
+    selections = {ref: select_workflows(versions[ref], patterns, tc.std) for ref in repos}
     names = sorted({n for sel in selections.values() for n in sel})  # BMI rows are added below
     best = {ref: {} for ref in repos}
     with tempfile.TemporaryDirectory() as tmp:
@@ -527,7 +541,7 @@ def assert_same_config(recorded, tc: Toolchain, where):
                      f"counts are only comparable within one configuration")
 
 
-def gate_summary_table(details, median, args):
+def gate_summary_table(details, median, args, tc: Toolchain):
     """Every workflow with its measured value, its limit and the headroom left - so the distance to
     the bands is visible by observation, not inferred from a single pass/fail line."""
     if not details:
@@ -546,7 +560,10 @@ def gate_summary_table(details, median, args):
         rows.append([name + (" (churn-expected)" if d["umbrella"] else ""), str(d["baseline"]),
                      str(d["current"]), f"{delta:+.2f}%", f"{args.slack:g}%",
                      f"{args.slack - delta:+.2f}pp", status])
-    lines = markdown_table(["workflow", "baseline", "current", "delta", "limit", "headroom", ""], rows)
+    # Name the configuration: the same compiler at a different -std produces different counts, so a
+    # table without it looks like it contradicts the measurement fleet's numbers.
+    lines = [f"### instantiation counts - `{config_key(tc)}`", ""]
+    lines += markdown_table(["workflow", "baseline", "current", "delta", "limit", "headroom", ""], rows)
     lines += ["", f"median across non-umbrella workflows: **{median:+.2%}** against a "
                   f"{args.median_alarm:g}% alarm ({args.median_alarm - median * 100:+.2f}pp headroom)",
               "", "`headroom` is how much further a workflow could grow before it fails: negative means "
@@ -590,7 +607,7 @@ def cmd_check(args):
              "median_non_umbrella": median, "regressions": list(regressions),
              "improvements": list(improvements), "advisory": list(advisory),
              "workflows": details}, indent=2) + "\n")
-    gate_summary_table(details, median, args)
+    gate_summary_table(details, median, args, tc)
     for name, d in regressions.items():
         gate_summary_line(f"instantiation regression: {name} {d['baseline']} -> {d['current']} "
                           f"({d['rel']:+.1%}, band {args.slack:g}%); if intentional, run bench.py update "

@@ -1,3 +1,4 @@
+// REQUIRES: c++23  (std::println)
 // Quantity text output via std::println - the same workload as the rest of the text/ family.
 #include <mp-units/compat_macros.h>
 #ifdef MP_UNITS_IMPORT_STD

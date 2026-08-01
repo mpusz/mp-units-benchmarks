@@ -52,10 +52,19 @@ env:
   SLACK: 1
   MEDIAN_ALARM: 0.5
   TIGHTEN_NOTICE: 2
-  BRANCH: auto/tighten-baselines
+  BRANCH_PREFIX: auto/tighten-baselines
 
 jobs:
   gate:
+    # One gate per language standard the library supports: counts differ per -std, and a regression
+    # can appear in one standard alone (a c++26-only code path, a c++20 fallback).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { std: c++20, id: cxx20 }
+          - { std: c++23, id: cxx23 }
+          - { std: c++26, id: cxx26 }
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -86,7 +95,7 @@ jobs:
             echo "|---|---|"
             echo "| mp-units ref | \`${MP_UNITS_REF}\` @ $(git -C mp-units describe --tags --always --dirty) |"
             echo "| library version | $(sed -nE 's/.*VERSION[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' mp-units/src/CMakeLists.txt | head -1) |"
-            echo "| compiler | $(clang++-${GATE_CLANG} --version | head -1), \`-std=c++23\` |"
+            echo "| compiler | $(clang++-${GATE_CLANG} --version | head -1), \`-std=${{ matrix.std }}\` |"
             echo "| bands | slack ${SLACK}%, median ${MEDIAN_ALARM}%, tighten ${TIGHTEN_NOTICE}% |"
             echo
             echo "**slack ${SLACK}%** - one workflow growing more than this fails the build."
@@ -106,8 +115,8 @@ jobs:
         run: |
           # Checked explicitly: `set -e` does not abort on a failing command substitution in an
           # assignment, and an empty path would be read as '.' further down.
-          if ! BASELINE_FILE="$(runner/bench.py --cxx clang++-${GATE_CLANG} key)" || [ -z "$BASELINE_FILE" ]; then
-            echo "::error::could not resolve the baseline file for clang++-${GATE_CLANG}"
+          if ! BASELINE_FILE="$(runner/bench.py --cxx clang++-${GATE_CLANG} --std ${{ matrix.std }} key)" || [ -z "$BASELINE_FILE" ]; then
+            echo "::error::could not resolve the baseline file for clang++-${GATE_CLANG} ${{ matrix.std }}"
             exit 1
           fi
           export BASELINE_FILE
@@ -133,7 +142,7 @@ jobs:
         if: steps.guard.outputs.measure == 'true'
         continue-on-error: true # the reactions below run first; the job fails at the end
         run: |
-          runner/bench.py --repo mp-units --cxx clang++-${{ env.GATE_CLANG }} check \
+          runner/bench.py --repo mp-units --cxx clang++-${{ env.GATE_CLANG }} --std ${{ matrix.std }} check \
             --report results/report.json \
             --slack ${{ env.SLACK }} --median-alarm ${{ env.MEDIAN_ALARM }} \
             --tighten-notice ${{ env.TIGHTEN_NOTICE }}
@@ -203,19 +212,20 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          BRANCH="${BRANCH_PREFIX}-${{ matrix.id }}"  # one branch per standard: the gates run in parallel
           git switch -c "$BRANCH"
-          runner/bench.py --repo mp-units --cxx "clang++-${GATE_CLANG}" update
+          runner/bench.py --repo mp-units --cxx "clang++-${GATE_CLANG}" --std ${{ matrix.std }} update
           git add baselines
           git commit -m "chore: tighten instantiation baselines
 
-          Re-recorded against mp-units ${MP_UNITS_REF} (see the PR body for per-workflow deltas)."
+          Re-recorded against mp-units ${MP_UNITS_REF} for ${{ matrix.std }} (see the PR body for deltas)."
           git push -f origin "$BRANCH"
           if gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -qx OPEN; then
             gh pr edit "$BRANCH" --body-file pr-body.md
             echo "refreshed the open PR"
           else
             gh pr create --base "${{ github.event.repository.default_branch }}" --head "$BRANCH" \
-              --title "chore: tighten instantiation baselines" --body-file pr-body.md
+              --title "chore: tighten instantiation baselines (${{ matrix.std }})" --body-file pr-body.md
           fi
       - name: Fail on regression
         if: steps.check.outcome == 'failure'
