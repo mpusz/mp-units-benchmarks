@@ -3,3 +3,5 @@ results/
 *.o
 __pycache__/
 .claude/
+gcm.cache/
+*.pcm
