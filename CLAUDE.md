@@ -18,8 +18,9 @@ The official compile-time performance suite for mp-units (see README.md for user
 ## Commands
 
 There is no build system: `runner/bench.py` invokes the compiler directly on each workflow TU
-with `-I<repo>/src/{core,systems,utility}/include`. `counts`/`check`/`update` require clang
-(they parse `-ftime-trace` output); `time` works with any compiler.
+with `-I<repo>/src/{core,systems,utility}/include`. `counts`/`check`/`update` require clang (they
+parse `-ftime-trace` output and exit with a clear message on any other compiler); `time`, `report`
+and `summary` work with any compiler - GCC builds the whole corpus, it just cannot produce counts.
 
 ```bash
 R="--repo ~/repos/mp-units --cxx clang++-21"
@@ -33,7 +34,16 @@ runner/bench.py $R check                                    # two-sided gate (ex
 runner/bench.py $R check --report results/report.json       # + machine-readable deltas
 runner/bench.py $R update                                   # re-record every entry
 runner/bench.py $R update --workflows isq/ affine           # re-record only these
+runner/bench.py $R report WORKTREE v2.5.0 --output r.json   # counts+time+memory, markdown + JSON
+runner/bench.py summary r1.json r2.json                     # merge reports (also -> STEP_SUMMARY)
+runner/bench.py --std c++26 --cxx g++-16 $R report          # any compiler/standard
 ```
+
+Metrics: counts are GATED (clang only, bit-deterministic, and `-std`-dependent - so the gate must
+keep the standard its baselines were recorded with); peak RSS from the child's `rusage` varies <0.1%
+between runs on both clang and GCC, so it is trustworthy everywhere but not gated; wall time is
+quiet-machine-only. `-ftime-trace` inflates time ~11-15% and memory ~12-17%, so counts come from a
+traced compile and time/memory from an untraced one - NEVER report both from one compile.
 
 `update` without filters is authoritative (drops entries whose workflow is gone) but blesses the
 sub-band drift of every other workflow too - that is the one way baseline creep can happen, since
@@ -41,9 +51,27 @@ sub-band drift of every other workflow too - that is the one way baseline creep 
 matching entries and lists the rest under `not_re_recorded`. Neither form overwrites a reviewed
 number with `n/a`/`FAIL`, so re-recording against an older ref cannot erase newer workflows.
 
-Fixed compile flags: `-std=c++23 -O2 -DNDEBUG -DMP_UNITS_API_CONTRACTS=0` plus `-stdlib=libc++`
-for clang; add anything else via `--extra-flags`. `--baseline-key` (default `clang21`) selects
-the baseline file. `results/` and `.worktrees/` are gitignored scratch space.
+Fixed compile flags: `-O2 -DNDEBUG -DMP_UNITS_API_CONTRACTS=0 -DMP_UNITS_API_THROWING_CONSTRAINTS=0`
+plus `-std=<--std>` and `-stdlib=libc++` for clang; add anything else via `--extra-flags`. The
+throwing-constraints pin matters: that path targets an unadopted constexpr-exceptions extension (the
+standard C++26 feature is NOT SFINAE-friendly and is a different thing), yet mp-units auto-enables it
+on `__cpp_constexpr_exceptions`, which GCC 16 defines at `-std=c++26` - leaving it unpinned would
+have one arm measuring a different library configuration than the rest.
+
+Baselines are keyed by the WHOLE configuration, not the compiler - compiler, `--std`, `--stdlib`,
+`--config-label`, and a digest of `--extra-flags`:
+
+```text
+clang21-cxx23-libcxx     clang21-cxx23-libstdcxx     gcc15-cxx26
+clang21-cxx23-libcxx-fmtlib-d2da0f   (--config-label fmtlib --extra-flags=-DMP_UNITS_API_STD_FORMAT=0)
+```
+
+`runner/bench.py --cxx <c> [...] key` prints the file a configuration resolves to - use it instead of
+hardcoding names (the CI guard step does). `check`/`update` derive the key (override with
+`--baseline-key`), and refuse to compare against numbers recorded with a different
+`cxx`/`std`/`stdlib`/`config_label`/`extra_flags`, so each configuration keeps its own reference file
+and a formatting-backend or stdlib swap can never be silently compared against another one. Pass
+extra flags attached (`--extra-flags=-DFOO=1`): argparse reads a detached `-D...` as an option. `results/` and `.worktrees/` are gitignored scratch space.
 
 ## Layout
 
@@ -83,23 +111,16 @@ loose in mp-units).
 
 ## CI
 
-- `.github/workflows/ci-instantiations.yml` - ONE measurement per run, several reactions. Runs on
-  push, PR, weekly cron and `workflow_dispatch` (inputs: `ref`, plus `compare_ref` to report two
-  refs side by side instead of gating). Measures mp-units master (or the given ref) with TIGHT
-  bands (`SLACK: 1`, `MEDIAN_ALARM: 0.5`): growth fails the build, an improvement past
-  `TIGHTEN_NOTICE` opens the re-record PR (never from a `pull_request` event, and never when any
-  regression is present - mixed signals need a human), and counts are uploaded as an artifact
-  before the comparison so they survive a red build. `check` runs with `continue-on-error` so the
-  reactions happen first and a final step fails the job. Nothing accumulates between runs - `check`
-  always compares against the committed file - so the cron only polls for ref movement, and the job
-  short-circuits before compiling when the checked-out sha equals the baseline's `mp_units_sha`
-  (recorded by `update`) for the same compiler.
-- The other half lives in the mp-units repo itself as `.github/workflows/ci-compile-time.yml`
-  (written there directly, not mirrored here); it runs on its pushes as well as its PRs. LOOSE
-  bands (`--slack 3 --median-alarm 2`) plus `--advisory-slack 1`, so a couple of percent of growth
-  annotates without blocking library work and goes red in this repo instead - that split is the
-  point. It pins this suite by ref, so a corpus change here cannot silently change what gates
-  mp-units.
+- `.github/workflows/ci-compile-cost.yml` - three job kinds. `gate`: clang `-std=c++23` (matches
+  the baselines), counts, TIGHT bands (`SLACK: 1`, `MEDIAN_ALARM: 0.5`), growth fails the build, an
+  improvement past `TIGHTEN_NOTICE` opens the re-record PR (never from a `pull_request` event, never
+  when a regression is present), `check` runs with `continue-on-error` so reactions happen before a
+  final step fails the job, and a guard exits before compiling when the baseline's `mp_units_sha`
+  already describes the checked-out tree. `measure`: one runner per compiler (clang++-21, g++-14,
+  g++-15, plus g++-16 as `experimental: true` -> `continue-on-error`), `-std=c++26`, each uploading
+  a `report --output` artifact. `summary`: `needs: measure`, `if: always()`, downloads the artifacts
+  and posts `bench.py summary` into `GITHUB_STEP_SUMMARY`.
+- Dispatch inputs: `ref` and optional `compare_ref` (measured by every arm alongside the first).
 - Bands are CLI flags (`--slack`, `--median-alarm`, `--tighten-notice`, `--advisory-slack`, all
   percents), NOT constants: the same baseline file is read strictly here and loosely there.
 

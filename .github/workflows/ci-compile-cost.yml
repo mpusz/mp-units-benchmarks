@@ -1,32 +1,33 @@
-# One measurement, several reactions.
+# Compile cost of the corpus: one gate, plus a measurement fleet whose results are aggregated into
+# a single table at the end of the run.
 #
-# Every trigger runs the same thing - instantiation counts of the corpus against the reviewed
-# baselines - and only the reaction differs: growth past the (tight) band fails the build so it can
-# be investigated here rather than in mp-units, and an improvement opens a PR re-recording the
-# baselines, because a stale baseline silently desensitizes the gate.
+#   gate     - clang, -std=c++23 (what the recorded baselines were measured with), instantiation
+#              counts against those baselines with TIGHT bands. Growth fails the build so borderline
+#              growth is investigated here rather than in mp-units, whose own workflow blocks only on
+#              egregious growth; an improvement opens a PR re-recording the baselines.
+#   measure  - one runner per compiler, each producing every metric it can (counts only from clang;
+#              wall time and peak memory from any compiler), uploaded as an artifact.
+#   summary  - merges those artifacts into one markdown report in the job summary.
 #
-# The library ref is mp-units master by default and can be pointed at any tag or sha on demand;
-# giving a second ref turns the run into a side-by-side comparison instead of a gate.
-#
-# The loose gate that mp-units itself runs, on both pushes and PRs, lives in
-# ci/mp-units-compile-time-gate.yml - it blocks only egregious growth, so this repo is where
-# borderline growth surfaces first.
-name: Instantiations
+# Counts and peak memory are comparable across every column of that report; wall time is NOT, since
+# each arm runs on its own runner. The report says so itself.
+name: Compile cost
 
 on:
   push:
   pull_request:
-  # Only polling for movement of MP_UNITS_REF: nothing accumulates between runs, and the guard
-  # below exits before compiling when master has not moved since the baselines were recorded.
+  # Only polling for movement of MP_UNITS_REF: nothing accumulates between runs, and the gate job
+  # exits before compiling when master has not moved since the baselines were recorded. Timed for
+  # the middle of the night in Europe/Warsaw so a fleet of runners never competes with working hours.
   schedule:
-    - cron: '17 5 * * 1' # Mondays, 05:17 UTC
+    - cron: '30 0 * * 1' # Mondays, 00:30 UTC = 01:30 CET / 02:30 CEST
   workflow_dispatch:
     inputs:
       ref:
         description: 'mp-units ref to measure (tag, sha or origin/<branch>)'
         default: master
       compare_ref:
-        description: 'optional second mp-units ref - reports both side by side instead of gating'
+        description: 'optional second mp-units ref - measured alongside the first in every arm'
         default: ''
 
 permissions:
@@ -40,7 +41,7 @@ concurrency:
 env:
   MP_UNITS_REF: ${{ inputs.ref || 'master' }}
   COMPARE_REF: ${{ inputs.compare_ref || '' }}
-  CLANG_VERSION: 21
+  GATE_CLANG: 21
   # Tighter than the bands mp-units blocks on: borderline growth must go red here first.
   SLACK: 1
   MEDIAN_ALARM: 0.5
@@ -48,7 +49,7 @@ env:
   BRANCH: auto/tighten-baselines
 
 jobs:
-  instantiations:
+  gate:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -58,52 +59,34 @@ jobs:
           repository: mpusz/mp-units
           ref: ${{ env.MP_UNITS_REF }}
           path: mp-units
-          # Full history only when comparing, since the runner materialises a worktree per ref.
-          fetch-depth: ${{ inputs.compare_ref != '' && '0' || '1' }}
-      - name: Install Clang ${{ env.CLANG_VERSION }}
+      - name: Install Clang ${{ env.GATE_CLANG }}
         shell: bash
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh ${{ env.CLANG_VERSION }}
-      - name: Install Libc++
-        shell: bash
-        run: |
-          sudo apt install -y libc++-${{ env.CLANG_VERSION }}-dev libc++abi-${{ env.CLANG_VERSION }}-dev libunwind-${{ env.CLANG_VERSION }}-dev
+          sudo ./llvm.sh ${{ env.GATE_CLANG }}
+          sudo apt install -y libc++-${{ env.GATE_CLANG }}-dev libc++abi-${{ env.GATE_CLANG }}-dev libunwind-${{ env.GATE_CLANG }}-dev
       - name: Record what was measured
         shell: bash
         run: |
           {
-            echo "| measured | value |"
+            echo "| gated against | value |"
             echo "|---|---|"
             echo "| mp-units ref | \`${MP_UNITS_REF}\` @ $(git -C mp-units describe --tags --always --dirty) |"
             echo "| library version | $(sed -nE 's/.*VERSION[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' mp-units/src/CMakeLists.txt | head -1) |"
-            echo "| compiler | $(clang++-${CLANG_VERSION} --version | head -1) |"
+            echo "| compiler | $(clang++-${GATE_CLANG} --version | head -1), \`-std=c++23\` |"
             echo "| bands | slack ${SLACK}%, median ${MEDIAN_ALARM}%, tighten ${TIGHTEN_NOTICE}% |"
           } >> "$GITHUB_STEP_SUMMARY"
-
-      # --- comparison mode: two refs, no gating ------------------------------------------------
-      - name: Compare ${{ env.MP_UNITS_REF }} against ${{ env.COMPARE_REF }}
-        if: env.COMPARE_REF != ''
-        shell: bash
-        run: |
-          {
-            echo '```'
-            runner/bench.py --repo mp-units --cxx "clang++-${CLANG_VERSION}" counts "$MP_UNITS_REF" "$COMPARE_REF"
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-
-      # --- gate mode --------------------------------------------------------------------------
       - name: Skip trees the baselines already describe
         id: guard
-        if: env.COMPARE_REF == ''
         shell: bash
         run: |
-          python3 - <<'PY'
+          BASELINE_FILE="$(runner/bench.py --cxx clang++-${GATE_CLANG} key)" python3 - <<'PY'
           import json, os, pathlib, subprocess
 
-          key = os.environ["CLANG_VERSION"]
-          data = json.loads(pathlib.Path(f"baselines/instantiations-clang{key}.json").read_text())
+          key = os.environ["GATE_CLANG"]
+          # The runner resolves the file from the configuration, so nothing here hardcodes its name.
+          data = json.loads(pathlib.Path(os.environ["BASELINE_FILE"]).read_text())
           head = subprocess.run(["git", "-C", "mp-units", "rev-parse", "HEAD"],
                                 capture_output=True, text=True).stdout.strip()
           recorded = data.get("mp_units_sha")
@@ -115,22 +98,13 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
               out.write(f"measure={'false' if same else 'true'}\n")
           PY
-      - name: Instantiation counts
-        if: steps.guard.outputs.measure == 'true'
-        # Recorded before the comparison so the numbers are published even when the build goes red.
-        run: runner/bench.py --repo mp-units --cxx clang++-${{ env.CLANG_VERSION }} counts --output results/counts.json
-      - uses: actions/upload-artifact@v5
-        if: steps.guard.outputs.measure == 'true'
-        with:
-          name: instantiation-counts
-          path: results/counts.json
       - name: Compare against the reviewed baselines
         id: check
         if: steps.guard.outputs.measure == 'true'
-        continue-on-error: true # the reaction steps below run first; the job fails at the end
+        continue-on-error: true # the reactions below run first; the job fails at the end
         run: |
-          runner/bench.py --repo mp-units --cxx clang++-${{ env.CLANG_VERSION }} check \
-            --baseline-key clang${{ env.CLANG_VERSION }} --report results/report.json \
+          runner/bench.py --repo mp-units --cxx clang++-${{ env.GATE_CLANG }} check \
+            --report results/report.json \
             --slack ${{ env.SLACK }} --median-alarm ${{ env.MEDIAN_ALARM }} \
             --tighten-notice ${{ env.TIGHTEN_NOTICE }}
       - name: Decide whether the baselines can be tightened
@@ -184,7 +158,7 @@ jobs:
           for name, d in sorted(workflows.items(), key=lambda kv: kv[1]["rel"]):
               label = f"{name} (churn-expected)" if d["umbrella"] else name
               lines.append(f"| {label} | {d['baseline']} | {d['current']} | {d['rel']:+.1%} |")
-          lines += ["", "Generated by the `Instantiations` workflow. Review the numbers before merging:",
+          lines += ["", "Generated by the `Compile cost` workflow. Review the numbers before merging:",
                     "a re-record blesses the current counts of *every* workflow, not only the improved ones."]
           pathlib.Path("pr-body.md").write_text("\n".join(lines) + "\n")
           print("\n".join(lines))
@@ -200,7 +174,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$BRANCH"
-          runner/bench.py --repo mp-units --cxx "clang++-${CLANG_VERSION}" update --baseline-key "clang${CLANG_VERSION}"
+          runner/bench.py --repo mp-units --cxx "clang++-${GATE_CLANG}" update
           git add baselines
           git commit -m "chore: tighten instantiation baselines
 
@@ -218,3 +192,85 @@ jobs:
         run: |
           echo "counts grew past the ${SLACK}% band (or the ${MEDIAN_ALARM}% median) - see the annotations above"
           exit 1
+
+  measure:
+    # One runner per compiler: arms cannot interfere, and a compiler that cannot build the corpus
+    # only costs its own arm. C++26 everywhere it works - that is what the library targets next.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: clang21, cxx: clang++-21, std: c++26, install: clang }
+          - { id: gcc14, cxx: g++-14, std: c++26, install: gcc }
+          - { id: gcc15, cxx: g++-15, std: c++26, install: gcc-ppa }
+          # GCC trunk: expected to have holes, so it never fails the run. As of this writing it
+          # cannot build affine/temperature_points under -std=c++26 (mp-units enables its
+          # throwing-constraints path on __cpp_constexpr_exceptions, and that path is fmtlib-only).
+          - { id: gcc16, cxx: g++-16, std: c++26, install: gcc-ppa, experimental: true }
+    runs-on: ubuntu-24.04
+    continue-on-error: ${{ matrix.experimental || false }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check out mp-units at ${{ env.MP_UNITS_REF }}
+        uses: actions/checkout@v5
+        with:
+          repository: mpusz/mp-units
+          ref: ${{ env.MP_UNITS_REF }}
+          path: mp-units
+          # Full history only when a second ref is requested, since each ref becomes a worktree.
+          fetch-depth: ${{ inputs.compare_ref != '' && '0' || '1' }}
+      - name: Install ${{ matrix.cxx }}
+        shell: bash
+        run: |
+          case "${{ matrix.install }}" in
+            clang)
+              version="$(echo '${{ matrix.cxx }}' | tr -dc '0-9')"
+              wget https://apt.llvm.org/llvm.sh
+              chmod +x llvm.sh
+              sudo ./llvm.sh "$version"
+              sudo apt install -y libc++-"$version"-dev libc++abi-"$version"-dev libunwind-"$version"-dev
+              ;;
+            gcc-ppa)
+              sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+              sudo apt update
+              sudo apt install -y "${{ matrix.cxx }}"
+              ;;
+            *)
+              sudo apt install -y "${{ matrix.cxx }}"
+              ;;
+          esac
+          ${{ matrix.cxx }} --version | head -1
+      - name: Measure every metric ${{ matrix.cxx }} can produce
+        shell: bash
+        run: |
+          runner/bench.py --repo mp-units --cxx "${{ matrix.cxx }}" --std "${{ matrix.std }}" \
+            report ${MP_UNITS_REF} ${COMPARE_REF} --reps 2 \
+            --output "results/report-${{ matrix.id }}.json"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: measurements-${{ matrix.id }}
+          path: results/report-${{ matrix.id }}.json
+
+  summary:
+    # Aggregates the fleet. `always()` so an experimental arm that died still leaves a table for the
+    # arms that succeeded.
+    needs: measure
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: measurements-*
+          path: results
+          merge-multiple: true
+      - name: Post the combined table
+        shell: bash
+        run: |
+          shopt -s nullglob
+          reports=(results/report-*.json)
+          if [ ${#reports[@]} -eq 0 ]; then
+            echo "no measurement artifacts to summarise" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          runner/bench.py summary "${reports[@]}"

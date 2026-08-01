@@ -35,17 +35,29 @@ Conventions:
 
 ## Metrics and methodology
 
-Two complementary metrics:
+Three metrics, with very different trust levels:
 
-1. **Wall-clock time** (`bench.py time`) — the user-visible truth, but machine-sensitive.
-   Refs are compiled interleaved (rep-major, arm-minor) with best-of-K per workflow, so
-   load drift affects all arms equally; totals only sum workflows comparable across all
-   refs. Meaningful on a quiet machine; on shared CI only *relative* A/B of two refs in the
-   same job is trustworthy.
-2. **Template-instantiation counts** (`bench.py counts`) — the number of `InstantiateClass`
-   + `InstantiateFunction` events from clang's `-ftime-trace` (granularity 0). Bit-stable
-   for a pinned compiler, machine-independent, and it measures exactly what makes C++
-   headers slow. This is the gated metric.
+1. **Template-instantiation counts** (`bench.py counts`) — `InstantiateClass` + `InstantiateFunction`
+   events from clang's `-ftime-trace` (granularity 0). Bit-stable for a pinned compiler and
+   standard, machine-independent, and it measures exactly what makes C++ headers slow. This is the
+   **gated** metric. It needs clang, and the count depends on `-std`, so the gate always runs with
+   the standard the baselines were recorded with.
+2. **Peak compiler memory** (`bench.py time`, `report`) — peak RSS of the compiler process, taken
+   from the child's own `rusage`. Measured spread between runs is <0.1% on both clang and GCC, which
+   makes it almost as trustworthy as counts, works with **any** compiler, and maps directly onto
+   what users feel: how many parallel compiles fit in RAM.
+3. **Wall-clock time** (`bench.py time`, `report`) — the user-visible truth, but machine-sensitive.
+   Refs are compiled interleaved (rep-major, arm-minor) with best-of-K per workflow, so load drift
+   hits all arms equally. Meaningful on a quiet machine; on CI, only compare within one arm, never
+   between arms measured on different runners.
+
+Counts and memory must never come from the same compile: `-ftime-trace` inflates wall time by
+11–15% and peak memory by 12–17%, so the runner takes counts from a traced compile and time/memory
+from an untraced one.
+
+Only counts require clang. GCC (and anything else) can produce time and memory, which is what makes
+cross-compiler comparison — and comparing a template-based implementation against a reflection-based
+one, where instantiation counts stop being a fair measure — possible.
 
 ## The two-sided gate (`bench.py check`)
 
@@ -60,8 +72,15 @@ hidden threshold:
 - improvements beyond the band emit a `::warning::` annotation and a job-summary entry
   ("baselines can be tightened") — visible on the workflow run page, not buried in logs.
 
-Baselines are recorded per compiler key; bumping the pinned CI clang re-records them in the
-same PR. Each record also stores the sha and `git describe` of the mp-units tree it was measured
+Baselines are recorded per **configuration**, not per compiler. The file name carries the compiler,
+the language standard, the standard library and any label you give a configuration —
+`instantiations-clang21-cxx23-libcxx.json`, `instantiations-gcc15-cxx26.json`,
+`instantiations-clang21-cxx23-libcxx-fmtlib-d2da0f.json` — because the formatting backend, the
+standard library and any other library option change what is being measured just as much as the
+compiler does. The runner derives that key itself (`bench.py … key` prints it), and `check` refuses to
+compare a run against numbers recorded with a different configuration. So any number of
+configurations can be gated side by side, and bumping the pinned CI compiler or standard re-records
+its own file in the same PR without touching the others. Each record also stores the sha and `git describe` of the mp-units tree it was measured
 from — `project(... VERSION)` alone cannot tell a tag from any dev tree of the same era, and that
 sha is what lets CI skip re-measuring a tree it already describes.
 
@@ -73,6 +92,11 @@ runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 time WORKTREE v2.5.0 v2
 
 # deterministic counts for the current checkout
 runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 counts
+
+# every metric a compiler can produce, as a markdown report + JSON
+runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 report WORKTREE v2.5.0 --output results/clang.json
+runner/bench.py --repo ~/repos/mp-units --cxx g++-15 --std c++26 report --output results/gcc.json
+runner/bench.py summary results/clang.json results/gcc.json   # one table per metric, all compilers
 
 # gate / re-record
 runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 check
@@ -90,34 +114,32 @@ baselines of workflows that ref cannot compile.
 
 ## Continuous integration
 
-Two workflows, one measurement each, differing in how strict they are - because the same reviewed
-baselines are read by two audiences.
+`.github/workflows/ci-compile-cost.yml` runs three kinds of job:
 
-`.github/workflows/ci-instantiations.yml` runs here on every commit and pull request, weekly, and
-on demand. It measures mp-units `master` (or any ref given to `workflow_dispatch`) against the
-baselines with **tight** bands (1% per workflow, 0.5% median) and reacts to that one result in both
-directions: growth fails the build, so borderline growth gets investigated here rather than in
-mp-units, and an improvement past the tighten band opens a PR re-recording the baselines - stale
-baselines are not harmless, since a later regression of the same size would land inside the band.
-Every run publishes what it measured (ref, `git describe`, library version, exact compiler build,
-bands) to the job summary and uploads the counts table as an artifact. Nothing accumulates between
-runs, since `check` always compares against the committed file: the schedule only polls for
-movement of the ref, and the job exits before compiling when the checked-out sha is the one the
-baselines already record. Dispatching with a second ref turns the run into a side-by-side
-comparison of two refs instead of a gate.
+- **gate** — clang with `-std=c++23` (what the baselines were recorded with), instantiation counts
+  against those baselines with **tight** bands (1% per workflow, 0.5% median). Growth fails the
+  build, so borderline growth is investigated here rather than in mp-units; an improvement past the
+  tighten band opens a PR re-recording the baselines, because stale baselines silently desensitize
+  the gate. It exits before compiling when the checked-out sha is the one the baselines record.
+- **measure** — one runner per compiler (`clang++-21`, `g++-14`, `g++-15`, and `g++-16` as a
+  never-fatal experimental arm), each with `-std=c++26`, each producing every metric it can and
+  uploading it as an artifact. Arms cannot interfere, and a compiler that cannot build the corpus
+  costs only its own arm.
+- **summary** — merges those artifacts into one markdown report in the job summary: a table per
+  metric, a column per (ref, compiler), and a provenance block naming each compiler build, standard,
+  CPU and library tree. Counts and memory are comparable across all columns; time is not, and the
+  report says so.
+
+`workflow_dispatch` takes a `ref` (any tag, sha or `origin/<branch>`) and an optional `compare_ref`,
+which every arm then measures alongside the first.
 
 mp-units carries the other half itself, in its own `.github/workflows/ci-compile-time.yml`, running
-on its pushes as well as its pull requests - instantiation counts are deterministic, so they are
-valid on hosted runners where wall-clock timings are not. Its bands are deliberately **loose** (3%
-per workflow, 2% median) with an advisory band at 1%: a minor framework extension that grows a
-workflow by a couple of percent is annotated but does not block library work, and goes red in this
-repo instead. It pins this suite by ref, so adding a workflow here cannot silently change what gates
-mp-units.
-
-Two bands over one baseline file are what make the split work: +2% growth annotates in mp-units and
-fails here, so the investigation happens where a red build blocks nobody. Because this repo tracks
-mp-units `master`, that failure arrives once the change has merged; the advisory annotations in the
-mp-units job are what give the same warning before merge.
+on its pushes as well as its pull requests. Its bands are deliberately **loose** (3% per workflow,
+2% median) with an advisory band at 1%: a minor framework extension that grows a workflow by a couple
+of percent is annotated but does not block library work, and goes red in this repo instead. It pins
+this suite by an exact commit, so a corpus change here cannot silently change what gates mp-units,
+and a maintenance branch can keep pointing at the last suite commit that supports its library
+version.
 
 ## Roadmap
 

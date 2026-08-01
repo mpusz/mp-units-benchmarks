@@ -1,6 +1,10 @@
 {
   "mp_units_version": "2.6",
   "cxx": "clang++-21",
+  "std": "c++23",
+  "stdlib": "libc++",
+  "config_label": "",
+  "extra_flags": "",
   "results": {
     "affine/custom_origins": {
       "InstantiateClass": 9101,

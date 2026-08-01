@@ -24,6 +24,7 @@ injected as -DMP_UNITS_BENCH_VERSION=<major*100+minor> for compat shims.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -34,6 +35,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / "workflows"
@@ -57,6 +59,46 @@ def detect_version(repo: Path):
     if not m:
         sys.exit(f"cannot detect mp-units version in {repo}")
     return int(m.group(1)), int(m.group(2))
+
+
+def config_key(tc: Toolchain):
+    """Baselines are only comparable within one configuration, so the key names the whole of it:
+    compiler, standard, and a digest of any extra flags."""
+    name = Path(tc.cxx).name
+    digits = "".join(ch for ch in name if ch.isdigit())
+    if "clang" in name:
+        base = f"clang{digits}"
+    elif name.startswith("g++") or "gcc" in name:
+        base = f"gcc{digits}"
+    else:
+        base = re.sub(r"[^a-zA-Z0-9]+", "", name)
+    parts = [base, tc.std.replace("+", "x")]
+    if tc.standard_library:
+        parts.append(tc.standard_library.replace("+", "x").replace("-", ""))
+    if tc.label:
+        parts.append(re.sub(r"[^a-zA-Z0-9]+", "", tc.label))
+    extra = " ".join(tc.extra.split())
+    if extra:
+        # Any other flag changes what is being measured, so it changes the key - opaquely, but
+        # `--config-label` exists precisely so a meaningful configuration gets a readable name.
+        parts.append(hashlib.sha1(extra.encode()).hexdigest()[:6])
+    return "-".join(parts)
+
+
+def baseline_path(args, tc: Toolchain):
+    override = getattr(args, "baseline_key", None)  # not every subcommand offers the override
+    return BASELINES / f"instantiations-{override or config_key(tc)}.json"
+
+
+def cpu_model():
+    """Which machine produced the wall-clock numbers - two runners are never comparable."""
+    try:
+        for line in Path("/proc/cpuinfo").read_text().splitlines():
+            if line.startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor() or "unknown"
 
 
 def git_provenance(repo: Path):
@@ -115,15 +157,51 @@ def select_workflows(version, patterns=None):
     return result
 
 
-def compile_cmd(cxx, repo, extra, out, src, trace=False):
+class Toolchain(NamedTuple):
+    """Everything that has to be identical for two measurements to be comparable. The library's own
+    configuration (formatting backend, contracts, freestanding, ...) rides along in `extra` and in
+    `label`: `extra` is what the compiler sees, `label` is what a human calls it."""
+    cxx: str
+    std: str = "c++23"
+    extra: str = ""
+    stdlib: str = ""
+    label: str = ""
+
+    @property
+    def is_clang(self):
+        return "clang" in Path(self.cxx).name
+
+    @property
+    def standard_library(self):
+        """Explicit choice, else clang's non-default libc++ (what mp-units CI exercises), else the
+        compiler's own default - GCC has no -stdlib switch to override it with."""
+        return self.stdlib or ("libc++" if self.is_clang else "")
+
+    def version(self):
+        try:
+            return run([self.cxx, "--version"]).stdout.splitlines()[0]
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return self.cxx
+
+
+def compile_cmd(tc: Toolchain, repo, out, src, trace=False):
     ver = detect_version(repo)
-    cmd = [cxx, "-std=c++23", "-O2", "-DNDEBUG", "-DMP_UNITS_API_CONTRACTS=0",
+    cmd = [tc.cxx, f"-std={tc.std}", "-O2", "-DNDEBUG", "-DMP_UNITS_API_CONTRACTS=0",
+           # The throwing-constraints path targets an experimental constexpr-exceptions compiler and
+           # is not standard-compliant, but mp-units auto-enables it on __cpp_constexpr_exceptions -
+           # which GCC 16 defines at -std=c++26. Left alone, that arm would silently measure a
+           # different library configuration than every other column (and fails to compile).
+           "-DMP_UNITS_API_THROWING_CONSTRAINTS=0",
            f"-DMP_UNITS_BENCH_VERSION={ver[0] * 100 + ver[1]}"]
-    if "clang" in cxx:
-        cmd += ["-stdlib=libc++"]
+    if tc.standard_library:
+        if not tc.is_clang:
+            sys.exit(f"{tc.cxx} has no -stdlib switch; drop --stdlib for GCC")
+        cmd += [f"-stdlib={tc.standard_library}"]
     if trace:
+        # Tracing inflates BOTH wall time (~11-15%) and peak RSS (~12-17%), so counts must never
+        # come from the same compile as the time/memory numbers.
         cmd += ["-ftime-trace", "-ftime-trace-granularity=0"]
-    cmd += extra.split() + [f"-I{d}" for d in include_dirs(repo)]
+    cmd += tc.extra.split() + [f"-I{d}" for d in include_dirs(repo)]
     cmd += ["-c", str(src), "-o", str(out)]
     return cmd
 
@@ -136,7 +214,10 @@ def checkout(repo: Path, ref, cache: Path):
     return wt
 
 
-def measure_counts(repo: Path, cxx, extra, patterns=None):
+def measure_counts(repo: Path, tc: Toolchain, patterns=None):
+    if not tc.is_clang:
+        sys.exit(f"instantiation counts need clang's -ftime-trace; {tc.cxx} cannot produce them "
+                 f"(time and peak memory work with any compiler)")
     version = detect_version(repo)
     results = {}
     with tempfile.TemporaryDirectory() as tmp:
@@ -147,7 +228,7 @@ def measure_counts(repo: Path, cxx, extra, patterns=None):
             out = Path(tmp) / "wf.o"
             trace = Path(tmp) / "wf.json"
             try:
-                run(compile_cmd(cxx, repo, extra, out, src, trace=True))
+                run(compile_cmd(tc, repo, out, src, trace=True))
             except subprocess.CalledProcessError as exc:
                 print(f"::error::{name} failed to compile: {exc.stderr.splitlines()[:1]}")
                 results[name] = "FAIL"
@@ -161,8 +242,20 @@ def measure_counts(repo: Path, cxx, extra, patterns=None):
     return results
 
 
-def measure_time(repos, cxx, extra, reps, patterns=None):
-    """Interleaved best-of-K wall-clock across checkouts (rep-major, arm-minor)."""
+def compile_once(cmd):
+    """Wall time and peak RSS of one compile. os.wait4 gives this child's own rusage, so no
+    /usr/bin/time dependency and no interference between measurements."""
+    started = time.perf_counter_ns()
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _, status, usage = os.wait4(proc.pid, 0)
+    ms = (time.perf_counter_ns() - started) // 1_000_000
+    if status != 0:
+        raise subprocess.CalledProcessError(status, cmd)
+    return {"ms": ms, "peak_mib": round(usage.ru_maxrss / 1024, 1)}  # ru_maxrss is KiB on Linux
+
+
+def measure_time(repos, tc: Toolchain, reps, patterns=None):
+    """Interleaved best-of-K wall-clock and peak RSS across checkouts (rep-major, arm-minor)."""
     versions = {ref: detect_version(repo) for ref, repo in repos.items()}
     selections = {ref: select_workflows(versions[ref], patterns) for ref in repos}
     names = sorted({n for sel in selections.values() for n in sel})
@@ -176,9 +269,8 @@ def measure_time(repos, cxx, extra, reps, patterns=None):
                 if src is None:
                     best[ref][name] = None
                     continue
-                cmd = compile_cmd(cxx, repo, extra, out, src)
                 try:
-                    run(cmd)
+                    run(compile_cmd(tc, repo, out, src))
                 except subprocess.CalledProcessError:
                     best[ref][name] = "FAIL"
             for _ in range(reps):
@@ -186,13 +278,12 @@ def measure_time(repos, cxx, extra, reps, patterns=None):
                     src = selections[ref].get(name)
                     if src is None or best[ref].get(name) == "FAIL":
                         continue
-                    cmd = compile_cmd(cxx, repo, extra, out, src)
-                    t0 = time.perf_counter_ns()
-                    subprocess.run(cmd, check=True, capture_output=True)
-                    ms = (time.perf_counter_ns() - t0) // 1_000_000
+                    got = compile_once(compile_cmd(tc, repo, out, src))
                     cur = best[ref].get(name)
-                    if not isinstance(cur, int) or ms < cur:
-                        best[ref][name] = ms
+                    # Best-of-K per metric: the minimum of each is the least contaminated estimate,
+                    # and peak RSS barely moves between reps anyway (measured spread <0.1%).
+                    best[ref][name] = got if not isinstance(cur, dict) else {
+                        k: min(cur[k], got[k]) for k in got}
     return best
 
 
@@ -217,13 +308,23 @@ def total(entry):
     return entry["InstantiateClass"] + entry["InstantiateFunction"] if isinstance(entry, dict) else None
 
 
-def cmd_counts(args):
+def materialize(args, refs):
+    """Map each ref to a checkout: WORKTREE is the --repo tree as-is, anything else a worktree."""
     repo = Path(args.repo).resolve()
-    refs = args.refs or ["WORKTREE"]
     cache = Path(args.worktree_cache).resolve()
     cache.mkdir(parents=True, exist_ok=True)
-    repos = {ref: repo if ref == "WORKTREE" else checkout(repo, ref, cache) for ref in refs}
-    measured = {ref: measure_counts(r, args.cxx, args.extra_flags, args.workflows) for ref, r in repos.items()}
+    return {ref: repo if ref == "WORKTREE" else checkout(repo, ref, cache) for ref in refs}
+
+
+def toolchain(args):
+    return Toolchain(args.cxx, args.std, args.extra_flags, args.stdlib, args.config_label)
+
+
+def cmd_counts(args):
+    refs = args.refs or ["WORKTREE"]
+    repos = materialize(args, refs)
+    tc = toolchain(args)
+    measured = {ref: measure_counts(r, tc, args.workflows) for ref, r in repos.items()}
     if len(refs) == 1:
         results = measured[refs[0]]
         print_table(["inst_class", "inst_func"],
@@ -248,23 +349,31 @@ def cmd_counts(args):
         out.parent.mkdir(parents=True, exist_ok=True)  # results/ is gitignored: absent in fresh checkouts
         payload = {ref: {"repo_version": ".".join(map(str, detect_version(repos[ref]))),
                          **git_provenance(repos[ref]), "results": measured[ref]} for ref in refs}
-        out.write_text(json.dumps({"cxx": args.cxx, "host": platform.node(), "refs": payload}, indent=2) + "\n")
+        out.write_text(json.dumps({"cxx": args.cxx, "cxx_version": toolchain(args).version(),
+                                   "host": platform.node(), "refs": payload}, indent=2) + "\n")
+
+
+def metric_cell(entry, key, fmt="{}"):
+    return "n/a" if not isinstance(entry, dict) else fmt.format(entry[key])
 
 
 def cmd_time(args):
-    cache = Path(args.worktree_cache).resolve()
-    cache.mkdir(parents=True, exist_ok=True)
-    repo = Path(args.repo).resolve()
-    repos = {}
-    for ref in args.refs:
-        repos[ref] = repo if ref == "WORKTREE" else checkout(repo, ref, cache)
-    best = measure_time(repos, args.cxx, args.extra_flags, args.reps, args.workflows)
+    repos = materialize(args, args.refs)
+    best = measure_time(repos, toolchain(args), args.reps, args.workflows)
     names = sorted({n for r in best.values() for n in r})
-    rows = [(n, *[best[ref].get(n) for ref in args.refs]) for n in names]
-    print_table(list(args.refs), rows, lambda v: "n/a" if v is None else str(v))
-    totals = {ref: sum(v for v in best[ref].values() if isinstance(v, int)) for ref in args.refs}
-    print("\nTOTALS (comparable workflows only):",
-          "  ".join(f"{ref}={totals[ref]} ms" for ref in args.refs))
+    for title, key, fmt in (("wall time (ms, best of K)", "ms", "{}"),
+                            ("peak memory (MiB)", "peak_mib", "{:.1f}")):
+        print(f"\n{title}:")
+        print_table(list(args.refs),
+                    [(n, *[metric_cell(best[ref].get(n), key, fmt) for ref in args.refs]) for n in names],
+                    str)
+    # Only workflows every arm could measure - otherwise an n/a would silently shrink one total.
+    comparable = [n for n in names if all(isinstance(best[ref].get(n), dict) for ref in args.refs)]
+    print(f"\nTOTALS over the {len(comparable)}/{len(names)} workflows comparable across all arms:")
+    for ref in args.refs:
+        ms = sum(best[ref][n]["ms"] for n in comparable)
+        mib = max((best[ref][n]["peak_mib"] for n in comparable), default=0)
+        print(f"  {ref}: {ms} ms, peak {mib:.1f} MiB")
 
 
 def baseline_deltas(baseline, results):
@@ -281,13 +390,28 @@ def baseline_deltas(baseline, results):
     return details
 
 
+def assert_same_config(recorded, tc: Toolchain, where):
+    """Numbers from another configuration are not a baseline, they are a different measurement."""
+    for field, current in (("cxx", tc.cxx), ("std", tc.std), ("stdlib", tc.standard_library),
+                           ("config_label", tc.label), ("extra_flags", " ".join(tc.extra.split()))):
+        was = recorded.get(field)
+        if was is not None and was != current:
+            sys.exit(f"{where} was recorded with {field}={was!r}, this run uses {current!r}; "
+                     f"counts are only comparable within one configuration")
+
+
 def cmd_check(args):
     repo = Path(args.repo).resolve()
-    baseline_file = BASELINES / f"instantiations-{args.baseline_key}.json"
-    baseline = json.loads(baseline_file.read_text())["results"]
+    tc = toolchain(args)
+    baseline_file = baseline_path(args, tc)
+    if not baseline_file.exists():
+        sys.exit(f"no baselines for this configuration ({baseline_file.name}); run `update` first")
+    recorded = json.loads(baseline_file.read_text())
+    assert_same_config(recorded, tc, baseline_file.name)
+    baseline = recorded["results"]
     slack, alarm, notice = args.slack / 100, args.median_alarm / 100, args.tighten_notice / 100
     advisory_band = args.advisory_slack / 100 if args.advisory_slack is not None else None
-    details = baseline_deltas(baseline, measure_counts(repo, args.cxx, args.extra_flags))
+    details = baseline_deltas(baseline, measure_counts(repo, tc))
     regressions = {n: d for n, d in details.items() if d["rel"] > slack}
     improvements = {n: d for n, d in details.items() if d["rel"] < -notice}
     # Growth inside the blocking band but past the advisory one: reported, never fatal. This is how
@@ -301,7 +425,7 @@ def cmd_check(args):
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text(json.dumps(
             {"mp_units_version": ".".join(map(str, detect_version(repo))), **git_provenance(repo),
-             "cxx": args.cxx, "baseline_key": args.baseline_key,
+             "cxx": args.cxx, "std": tc.std, "baseline_key": baseline_file.stem.split("instantiations-")[-1],
              "bands": {"slack": args.slack, "median_alarm": args.median_alarm,
                        "tighten_notice": args.tighten_notice, "advisory_slack": args.advisory_slack},
              "median_non_umbrella": median, "regressions": list(regressions),
@@ -335,10 +459,15 @@ def cmd_update(args):
     which also blesses whatever sub-band drift the other workflows happen to have; with
     --workflows only the matching entries move and the rest keep their reviewed numbers."""
     repo = Path(args.repo).resolve()
-    measured = measure_counts(repo, args.cxx, args.extra_flags, args.workflows)
+    tc = toolchain(args)
+    measured = measure_counts(repo, tc, args.workflows)
     BASELINES.mkdir(exist_ok=True)
-    out = BASELINES / f"instantiations-{args.baseline_key}.json"
-    previous = json.loads(out.read_text())["results"] if out.exists() else {}
+    out = baseline_path(args, tc)
+    previous = {}
+    if out.exists():
+        recorded = json.loads(out.read_text())
+        assert_same_config(recorded, tc, out.name)
+        previous = recorded["results"]
     if args.workflows and not measured:
         sys.exit(f"no workflow matches {args.workflows}; baselines left untouched")
     recorded, preserved = {}, {}
@@ -352,7 +481,8 @@ def cmd_update(args):
     results = dict(sorted({**(previous if args.workflows else preserved), **recorded}.items()))
     carried = sorted(n for n in results if n not in recorded)
     data = {"mp_units_version": ".".join(map(str, detect_version(repo))), **git_provenance(repo),
-            "cxx": args.cxx}
+            "cxx": args.cxx, "std": tc.std, "stdlib": tc.standard_library,
+            "config_label": tc.label, "extra_flags": " ".join(tc.extra.split())}
     if carried:
         # The metadata above describes the re-recorded entries only; these predate it.
         data["not_re_recorded"] = carried
@@ -367,11 +497,114 @@ def cmd_update(args):
         print(f"carried over: {', '.join(carried)}")
 
 
+METRICS = (("instantiations", "template instantiations (InstantiateClass + InstantiateFunction)"),
+           ("time_ms", "wall time (ms, best of K - only trustworthy on a quiet machine)"),
+           ("peak_mib", "peak compiler memory (MiB, best of K)"))
+
+
+def cmd_report(args):
+    """Measure every metric this toolchain can produce and emit a markdown report plus JSON.
+    Counts come from a traced compile, time and memory from an untraced one - tracing inflates
+    both by >10%, so they can never share a compile."""
+    refs = args.refs or ["WORKTREE"]
+    repos = materialize(args, refs)
+    tc = toolchain(args)
+    timed = measure_time(repos, tc, args.reps, args.workflows)
+    counts = {ref: measure_counts(r, tc, args.workflows) if tc.is_clang else {}
+              for ref, r in repos.items()}
+    metrics = {"instantiations": {}, "time_ms": {}, "peak_mib": {}}
+    for ref in refs:
+        for name, entry in sorted(counts[ref].items()):
+            metrics["instantiations"].setdefault(name, {})[ref] = total(entry)
+        for name, entry in sorted(timed[ref].items()):
+            metrics["time_ms"].setdefault(name, {})[ref] = entry["ms"] if isinstance(entry, dict) else None
+            metrics["peak_mib"].setdefault(name, {})[ref] = entry["peak_mib"] if isinstance(entry, dict) else None
+    payload = {"cxx": args.cxx, "cxx_version": tc.version(), "std": tc.std, "reps": args.reps,
+               "stdlib": tc.standard_library, "config_label": tc.label, "config_key": config_key(tc),
+               "host": platform.node(), "cpu": cpu_model(), "extra_flags": tc.extra,
+               "refs": {ref: {"mp_units_version": ".".join(map(str, detect_version(repos[ref]))),
+                              **git_provenance(repos[ref])} for ref in refs},
+               "metrics": metrics}
+    print(render_report([payload]))
+    if args.output:
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, indent=2) + "\n")
+        print(f"\nreport written to {out}", file=sys.stderr)
+
+
+def render_report(payloads):
+    """One markdown table per metric, with a column per (ref, compiler) pair across all payloads."""
+    columns, cells, notes = [], {}, []
+    for p in payloads:
+        notes.append(f"- `{p['cxx']}` - {p['cxx_version']}, `-std={p['std']}`, best of {p['reps']}"
+                     + (f", `-stdlib={p['stdlib']}`" if p.get("stdlib") else "")
+                     + (f", extra flags `{p['extra_flags']}`" if p.get("extra_flags") else "")
+                     + (f", configuration `{p['config_key']}`" if p.get("config_key") else "")
+                     + f"<br>on {p.get('cpu', 'unknown CPU')} (`{p.get('host', '?')}`)")
+        for ref, info in p["refs"].items():
+            # Label by CONFIGURATION, not by compiler: clang+libc++ and clang+libstdc++ are two
+            # different measurements, and sharing a column would silently overwrite one with the other.
+            label = f"{ref} @ {p.get('config_key') or p['cxx']}"
+            columns.append(label)
+            notes.append(f"    - `{ref}`: mp-units {info['mp_units_version']}"
+                         f" ({info.get('mp_units_describe', 'unknown tree')})")
+            for metric, per_workflow in p["metrics"].items():
+                for name, by_ref in per_workflow.items():
+                    if by_ref.get(ref) is not None:
+                        cells.setdefault(metric, {}).setdefault(name, {})[label] = by_ref[ref]
+    lines = []
+    for metric, title in METRICS:
+        by_workflow = cells.get(metric)
+        if not by_workflow:
+            continue
+        lines += [f"### {title}", ""]
+        present = [c for c in columns if any(c in row for row in by_workflow.values())]
+        width = max([len("workflow")] + [len(n) for n in by_workflow])
+        lines.append("| " + "workflow".ljust(width) + " | " + " | ".join(present) + " |")
+        lines.append("|" + "-" * (width + 2) + "|" + "|".join("-" * (len(c) + 2) for c in present) + "|")
+        for name, row in sorted(by_workflow.items()):
+            values = [f"{row[c]:.1f}" if isinstance(row.get(c), float) else str(row.get(c, "n/a"))
+                      for c in present]
+            lines.append("| " + name.ljust(width) + " | "
+                         + " | ".join(v.rjust(len(c)) for v, c in zip(values, present)) + " |")
+        lines.append("")
+    if not any(cells.get(m) for m, _ in METRICS):
+        return "no measurements to report"
+    lines += ["<details><summary>How this was measured</summary>", ""] + notes + [
+        "", "Instantiation counts are bit-deterministic for a pinned compiler and peak memory varies by",
+        "<0.1% between runs, so both are comparable across every column below. Wall time is not:",
+        "each compiler is measured on its own runner, and CI runners differ in CPU and in load, so",
+        "compare time only within a column (ref against ref), never between columns. Presentation",
+        "quality timings need a quiet machine and `bench.py time`, which interleaves the arms.",
+        "", "</details>"]
+    return "\n".join(lines)
+
+
+def cmd_summary(args):
+    """Render one combined report from several `report --output` files (e.g. one per compiler)."""
+    payloads = [json.loads(Path(f).read_text()) for f in args.reports]
+    text = render_report(payloads)
+    print(text)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a") as f:
+            f.write(text + "\n")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--repo", default=".", help="path to an mp-units checkout")
     p.add_argument("--cxx", default="clang++", help="compiler (counts/check/update require clang)")
-    p.add_argument("--extra-flags", default="", help="extra compiler flags")
+    p.add_argument("--extra-flags", default="", help="extra compiler flags; pass them attached, as "
+                                                     "--extra-flags=-DFOO=1, since argparse takes a "
+                                                     "detached value starting with '-' for an option")
+    p.add_argument("--stdlib", default="", help="standard library for clang (default libc++); GCC "
+                                                "has no such switch")
+    p.add_argument("--config-label", default="", help="readable name for a configuration axis that "
+                                                     "is not visible in the flags (e.g. fmtlib)")
+    p.add_argument("--std", default="c++23", help="language standard (default c++23; use c++26 for "
+                                                 "reflection-based experiments)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     t = sub.add_parser("time", help="interleaved wall-clock A/B across refs")
@@ -388,7 +621,8 @@ def main():
     c.add_argument("--worktree-cache", default=str(ROOT / ".worktrees"))
 
     g = sub.add_parser("check", help="gate against baselines (two-sided)")
-    g.add_argument("--baseline-key", default="clang21")
+    g.add_argument("--baseline-key", help="baseline file to use (default: derived from the "
+                                          "configuration, e.g. clang21-cxx23, gcc15-cxx26)")
     g.add_argument("--report", help="write a JSON report (per-workflow deltas, median, regressions, improvements)")
     g.add_argument("--slack", type=float, default=GATE_SLACK, metavar="PCT",
                    help=f"per-workflow growth beyond this percent fails (default {GATE_SLACK:g})")
@@ -400,8 +634,21 @@ def main():
                    help="report growth beyond this percent as a warning without failing; use with a "
                         "looser --slack to block only on egregious growth while still flagging the rest")
 
+    r = sub.add_parser("report", help="all metrics this compiler can produce, as markdown + JSON")
+    r.add_argument("refs", nargs="*", help="git refs to measure (default: WORKTREE)")
+    r.add_argument("--reps", type=int, default=3)
+    r.add_argument("--workflows", nargs="*")
+    r.add_argument("--output", help="write the JSON payload (feed several of these to `summary`)")
+    r.add_argument("--worktree-cache", default=str(ROOT / ".worktrees"))
+
+    sub.add_parser("key", help="print the baseline file this configuration resolves to")
+
+    s = sub.add_parser("summary", help="merge report JSONs into one markdown report (+ job summary)")
+    s.add_argument("reports", nargs="+", help="JSON files written by `report --output`")
+
     u = sub.add_parser("update", help="re-record baselines")
-    u.add_argument("--baseline-key", default="clang21")
+    u.add_argument("--baseline-key", help="baseline file to write (default: derived from the "
+                                          "configuration, e.g. clang21-cxx23, gcc15-cxx26)")
     u.add_argument("--workflows", nargs="*",
                    help="substring filters: re-record only these, leaving the rest untouched "
                         "(default: rewrite every entry from this checkout)")
@@ -415,6 +662,12 @@ def main():
         sys.exit(cmd_check(args))
     elif args.cmd == "update":
         cmd_update(args)
+    elif args.cmd == "report":
+        cmd_report(args)
+    elif args.cmd == "summary":
+        cmd_summary(args)
+    elif args.cmd == "key":
+        print(baseline_path(args, toolchain(args)))
 
 
 if __name__ == "__main__":
