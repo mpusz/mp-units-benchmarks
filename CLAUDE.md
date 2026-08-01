@@ -101,7 +101,13 @@ extra flags attached (`--extra-flags=-DFOO=1`): argparse reads a detached `-D...
 - `workflows/<category>/<name>.cpp` - benchmark TUs; each is a standalone, idiomatic,
   compile-only-cost `main()` with no test framework. Categories: parity (cross-library
   basics), isq (hierarchies, kind-safe APIs), affine (quantity_point, origins), generic,
-  text, umbrella (churn-expected, excluded from the median regression alarm).
+  text, scaling, umbrella (churn-expected, excluded from the median regression alarm).
+- `scaling/` is a SERIES, not a set of independent workflows: `<shape>_<steps>.cpp` at 16/64/256 over
+  `scaling_workload.h`. Read sizes against each other - the difference divided by the difference in
+  steps is the marginal cost of user code, which is the only way to separate it from the constant
+  cost of inclusion. `narrow` keeps five quantity types warm (3.0 instantiations/step), `broad` uses
+  a distinct scaled unit per step (53.3/step); never "fix" broad to reuse units, that erases the
+  axis it exists to measure.
 - Only `*.cpp` files are workflows, so a category may carry a shared header. `text/` does:
   `output_workload.h` holds the quantity computations that output_printf / output_ostream /
   output_format / output_println all print. Those four differ ONLY in the output facility -

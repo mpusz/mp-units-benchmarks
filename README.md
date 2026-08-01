@@ -17,6 +17,7 @@ Each workflow is a small idiomatic translation unit in `workflows/<category>/<na
 | `affine/`  | `quantity_point`: offset units, user-defined absolute/relative origins    |
 | `generic/` | templates over references and representation types                        |
 | `text/`    | quantity text output: the same workload printed through `printf`, `operator<<`, `std::format` and `std::println`, plus the format-spec grammar in depth |
+| `scaling/` | the **slope**: the same work at 16, 64 and 256 steps, so cost-per-operation falls out of the difference. `narrow_*` reuses five quantity types (a production file's shape), `broad_*` uses a distinct unit per step (what grows the instantiation table) |
 | `umbrella/`| bare umbrella-header inclusion cost — **churn-expected**: these grow when systems legitimately grow and are excluded from the framework-regression alarm |
 
 Every workflow is compiled in each of three configurations from **one** source, using the two-macro
@@ -49,6 +50,19 @@ Conventions:
   `output_format` and `output_println` all print, so the differences between those four
   measure the output facility and nothing else. Adding a quantity operation to one of them
   breaks that comparison - change the shared header instead.
+
+Every other category measures an **intercept** — pulling the library in, plus a few operations —
+which cannot tell you how a real file scales. `scaling/` measures the **slope**, and the two shapes
+diverge sharply (clang 21, C++23):
+
+| shape | instantiations per step | 16 → 256 steps | peak memory |
+|---|---:|---|---|
+| `narrow` (types reused) | 3.0 | 3564 → 3691 ms | 350 → 360 MiB |
+| `broad` (a new unit each step) | 53.3 | 3760 → 8000 ms | 363 → 595 MiB |
+
+So writing more code in units you already use is nearly free; introducing *distinct* unit types is
+what costs. A regression in the slope means every real translation unit got slower, which an
+intercept measurement cannot distinguish from a one-off tax on inclusion.
 
 ## Metrics and methodology
 
