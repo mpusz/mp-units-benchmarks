@@ -3,8 +3,13 @@
 // format specs (N[...]/U[...]), quantity-level fill/align/width, consteval unit symbol generation
 // and a formatted quantity_point. Deliberately not part of the four-way facility comparison - it
 // measures the cost of the grammar itself on top of the shared workload.
-#include "output_workload.h"
+#include <mp-units/compat_macros.h>
+#ifdef MP_UNITS_IMPORT_STD
+import std;
+#else
 #include <print>
+#endif
+#include "output_workload.h"
 
 int main()
 {

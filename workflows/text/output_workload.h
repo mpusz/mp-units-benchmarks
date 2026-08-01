@@ -6,7 +6,12 @@
 // itself - not the quantity arithmetic feeding it.
 #pragma once
 
+#include <mp-units/compat_macros.h>
+#ifdef MP_UNITS_MODULES
+import mp_units;
+#else
 #include <mp-units/systems/si.h>
+#endif
 
 namespace readings {
 

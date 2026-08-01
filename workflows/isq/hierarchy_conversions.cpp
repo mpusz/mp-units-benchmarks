@@ -1,8 +1,17 @@
 // Conversions along and across ISQ hierarchy branches, incl. common quantity specs.
+#include <mp-units/compat_macros.h>
+#ifdef MP_UNITS_IMPORT_STD
+import std;
+#else
+#include <cstdio>
+#endif
+#ifdef MP_UNITS_MODULES
+import mp_units;
+#else
 #include <mp-units/systems/isq/mechanics.h>
 #include <mp-units/systems/isq/space_and_time.h>
 #include <mp-units/systems/si.h>
-#include <cstdio>
+#endif
 
 int main()
 {

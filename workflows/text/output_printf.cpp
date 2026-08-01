@@ -2,8 +2,13 @@
 // Numerical values are extracted by hand and the units are spelled out in the literals, so no
 // library text facility is instantiated at all; the other members of the family are read
 // against this baseline.
-#include "output_workload.h"
+#include <mp-units/compat_macros.h>
+#ifdef MP_UNITS_IMPORT_STD
+import std;
+#else
 #include <cstdio>
+#endif
+#include "output_workload.h"
 
 int main()
 {

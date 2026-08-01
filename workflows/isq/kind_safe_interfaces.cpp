@@ -1,9 +1,18 @@
 // Strongly-typed APIs constrained on quantity kinds - the safety layer other libraries lack.
+#include <mp-units/compat_macros.h>
+#ifdef MP_UNITS_IMPORT_STD
+import std;
+#else
+#include <cstdio>
+#endif
+#ifdef MP_UNITS_MODULES
+import mp_units;
+#else
 #include <mp-units/math.h>
 #include <mp-units/systems/isq/mechanics.h>
 #include <mp-units/systems/isq/space_and_time.h>
 #include <mp-units/systems/si.h>
-#include <cstdio>
+#endif
 
 using namespace mp_units;
 

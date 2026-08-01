@@ -1,7 +1,16 @@
 // User-defined absolute and relative point origins with point arithmetic.
+#include <mp-units/compat_macros.h>
+#ifdef MP_UNITS_IMPORT_STD
+import std;
+#else
+#include <cstdio>
+#endif
+#ifdef MP_UNITS_MODULES
+import mp_units;
+#else
 #include <mp-units/systems/isq/space_and_time.h>
 #include <mp-units/systems/si.h>
-#include <cstdio>
+#endif
 
 namespace geo {
 
