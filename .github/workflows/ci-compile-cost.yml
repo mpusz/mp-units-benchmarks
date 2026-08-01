@@ -265,6 +265,10 @@ jobs:
           # standard library's own module built first; modules need that plus the mp-units BMIs, and
           # the runner reports what building them cost as `bmi/*` rows.
           - { id: clang21-importstd, cxx: clang++-21, std: c++26, install: clang, args: --import-std }
+          # Three clang versions in the modules configuration: comparing how the interface build
+          # itself evolves is half the point, and clang 17 is out because libc++ 17 ships no std.cppm.
+          - { id: clang18-modules, cxx: clang++-18, std: c++26, install: clang, args: --modules --import-std }
+          - { id: clang20-modules, cxx: clang++-20, std: c++26, install: clang, args: --modules --import-std }
           - { id: clang21-modules, cxx: clang++-21, std: c++26, install: clang, args: --modules --import-std }
           # GCC cannot build the mp-units modules yet (mp-units#717: `recursive lazy load` in the
           # systems BMI), so it gets the `import std;` arm only.

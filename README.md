@@ -31,9 +31,10 @@ workload is therefore identical across configurations by construction, not by pr
 | modules + `import std` | ✅ | ❌ | ❌ |
 
 GCC cannot build the `mp_units.systems` BMI ([mp-units#717](https://github.com/mpusz/mp-units/issues/717)).
-Building the BMIs is itself measured and reported as `bmi/*` rows, because under modules a consumer
-instantiates almost nothing — the work moved into the interface build, and a report that hid it
-would make modules look free.
+Building the BMIs is itself measured, and the report gives modules their own section: interface
+builds first (time, peak memory, size on disk and instantiation counts, with totals), then the
+consumers. Under modules a consumer instantiates almost nothing — the work moved into the interface
+build — so a report that folded that away would make modules look free.
 
 Conventions:
 

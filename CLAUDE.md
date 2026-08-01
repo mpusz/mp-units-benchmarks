@@ -41,7 +41,11 @@ runner/bench.py $R --std c++26 --import-std counts          # `import std;` inst
 runner/bench.py $R --std c++26 --modules --import-std report   # consume mp-units as C++20 modules
 ```
 
-`report`/`summary` render one table per metric PER COMPILER FAMILY (clang, gcc, other - the supported
+`report`/`summary` put every modules measurement in its OWN `## C++20 modules` section - interface
+builds (time, memory, size on disk, instantiations, each with a total row) first, then the consumers
+- because a `bmi/*` row interleaved with workflows is noise to every configuration that has no
+modules, and the corpus grows a column per compiler. Column headers there drop the tokens all of
+them share. Everything else renders one table per metric PER COMPILER FAMILY (clang, gcc, other - the supported
 set grows, so a single wide table stops being readable). Refs are ordered by measured library version,
 oldest first; with exactly two refs each cell becomes `old -> new (change)` so the delta is read rather
 than computed. `n/a` means the workflow's `REQUIRES` floor excludes that ref, `FAIL` means it applies

@@ -308,7 +308,8 @@ def build_modules(repo: Path, tc: Toolchain, workdir: Path, trace=False):
         # mp-units, so it must not inherit its configuration macros or -O2. Doing so is not merely
         # untidy - GCC 16 miscompiles consumers of a std module built that way, ICEing in
         # nonnull_arg_p during GIMPLE ealias.
-        std_base = [tc.cxx, f"-std={tc.std}"]
+        std_base = [tc.cxx, f"-std={tc.std}"] + (["-ftime-trace", "-ftime-trace-granularity=0"]
+                                                  if trace else [])
         if tc.standard_library:
             std_base += [f"-stdlib={tc.standard_library}"]
         if not tc.is_clang:
@@ -762,9 +763,62 @@ def markdown_table(header, rows):
     return lines
 
 
+BMI_ORDER = ("bmi/std", "bmi/mp_units.core", "bmi/mp_units.systems", "bmi/mp_units.utility",
+             "bmi/mp_units")
+# How a metric's total row is formed: peak memory is a high-water mark, not something to add up.
+TOTALS = {"time_ms": sum, "mib_on_disk": sum, "instantiations": sum, "peak_mib": max}
+
+
+def metric_table(by_workflow, rows_wanted, columns, refs, extra_rows=(), labels=None):
+    """One table: a row per entry, a column per configuration. With exactly two refs the cell
+    carries the change, so a comparison is read rather than computed across columns."""
+    present = [c for c in columns if any(c in by_workflow.get(r, {}) or
+                                         any(k[0] == c for k in by_workflow.get(r, {})) for r in rows_wanted)]
+    if not present:
+        return []
+    labels = labels or {c: c for c in present}
+    header = ["workflow" if not rows_wanted or not rows_wanted[0].startswith("bmi/") else "interface"]
+    if len(refs) == 2:
+        old, new_ = refs
+        header += [labels[c] for c in present]
+        rows = [[name.removeprefix("bmi/"),
+                 *[fmt_change(by_workflow[name].get((c, old)), by_workflow[name].get((c, new_)))
+                   for c in present]] for name in rows_wanted]
+    else:
+        pairs = [(c, ref) for c in present for ref in refs
+                 if any((c, ref) in by_workflow.get(r, {}) for r in rows_wanted)]
+        header += [f"{labels[c]} @ {ref}" if len(refs) > 1 else labels[c] for c, ref in pairs]
+        rows = [[name.removeprefix("bmi/"), *[fmt_value(by_workflow[name].get(pair)) for pair in pairs]]
+                for name in rows_wanted]
+    return markdown_table(header, [*rows, *extra_rows])
+
+
+def shorten_labels(keys):
+    """Strip the trailing tokens every column shares - in a modules section, repeating
+    `-modules-importstd` on every header buys nothing and costs width."""
+    parts = [k.split("-") for k in keys]
+    shared = 0
+    while all(len(p) > shared + 1 and p[-1 - shared] == parts[0][-1 - shared] for p in parts):
+        shared += 1
+    labels = {k: "-".join(p[:len(p) - shared]) for k, p in zip(keys, parts)}
+    suffix = "-".join(parts[0][len(parts[0]) - shared:]) if shared else ""
+    return labels, suffix
+
+
+def totals_row(metric, by_workflow, rows_wanted, columns, refs):
+    """Interfaces are built once and shared, so their sum is the number that matters."""
+    combine = TOTALS.get(metric, sum)
+    label = "**peak of all**" if combine is max else "**total**"
+    cells = []
+    for c in columns:
+        for ref in refs:
+            values = [by_workflow.get(r, {}).get((c, ref)) for r in rows_wanted]
+            numeric = [v for v in values if isinstance(v, (int, float))]
+            cells.append(fmt_value(round(combine(numeric), 1) if numeric else None))
+    return [label, *cells]
+
+
 def render_report(payloads):
-    """A table per metric per compiler family. With exactly two refs each cell carries the change, so
-    one column per configuration replaces a pair of columns the reader has to diff by eye."""
     refs = refs_oldest_first(payloads)
     keys, cells, notes = [], {}, []
     for p in payloads:
@@ -785,41 +839,55 @@ def render_report(payloads):
         notes.append(f"- `{ref}` - mp-units {info['mp_units_version']}"
                      f" ({info.get('mp_units_describe', 'unknown tree')})")
 
-    legend = ["- **n/a** - the workflow does not apply to that ref: its `// REQUIRES: mp-units >= X.Y`"
-              " floor is newer than that library version.",
-              "- **FAIL** - the workflow applies to that ref but did not compile.",
-              "- **`bmi/*`** - building a module interface, not a workflow: a one-off cost every"
-              " consumer of that configuration shares."]
-    if len(refs) == 2:
-        legend.insert(0, f"- Cells read `{refs[0]} -> {refs[1]} (change)`, oldest library version first.")
-    lines = [*legend, ""]
+    module_keys = [k for k in keys if "-modules" in k]
+    header_keys = [k for k in keys if "-modules" not in k]
+    workflows = sorted({n for m in cells.values() for n in m if not n.startswith("bmi/")})
+    interfaces = [n for n in BMI_ORDER if any(n in m for m in cells.values())]
+
+    lines = []
     for metric, title in METRICS:
-        by_workflow = cells.get(metric)
-        if not by_workflow:
+        by_workflow = cells.get(metric, {})
+        if not by_workflow or not header_keys:
             continue
         for family in (*FAMILIES, "other"):
-            present = sorted({k for k in keys if family_of(k) == family
-                              and any(any(c[0] == k for c in row) for row in by_workflow.values())},
-                             key=lambda k: (version_of(k), k))
-            if not present:
-                continue
-            lines += [f"### {title} - {family}" if family != "other" else f"### {title}", ""]
-            if len(refs) == 2:
-                old, new = refs
-                header = ["workflow", *present]
-                rows = [[name, *[fmt_change(row.get((k, old)), row.get((k, new))) for k in present]]
-                        for name, row in sorted(by_workflow.items())]
-                lines += markdown_table(header, rows) + [""]
-            else:
-                header = ["workflow", *[f"{k} @ {ref}" for k in present for ref in refs
-                                       if any((k, ref) in row for row in by_workflow.values())]]
-                pairs = [(k, ref) for k in present for ref in refs
-                         if any((k, ref) in row for row in by_workflow.values())]
-                rows = [[name, *[fmt_value(row.get(pair)) for pair in pairs]]
-                        for name, row in sorted(by_workflow.items())]
-                lines += markdown_table(header, rows) + [""]
+            cols = sorted([k for k in header_keys if family_of(k) == family],
+                          key=lambda k: (version_of(k), k))
+            rows = [w for w in workflows if any((c, r) in by_workflow.get(w, {}) for c in cols for r in refs)]
+            table = metric_table(by_workflow, rows, cols, refs) if rows else []
+            if table:
+                lines += [f"### {title} - {family}" if family != "other" else f"### {title}", "", *table, ""]
+
+    if module_keys:
+        lines += ["## C++20 modules", "",
+                  "Building the module interfaces is a cost every consumer of a configuration shares, so it is",
+                  "reported here in full rather than folded into the consumer numbers below it. Total cost of a",
+                  "configuration is the interface build (once) plus its consumers.", ""]
+        cols = sorted(module_keys, key=lambda k: (version_of(k), k))
+        labels, suffix = shorten_labels(cols)
+        if suffix:
+            lines += [f"Every column below is `{suffix}`; the headers name only what differs.", ""]
+        for metric, title in METRICS:
+            by_workflow = cells.get(metric, {})
+            rows = [i for i in interfaces if i in by_workflow]
+            total = [totals_row(metric, by_workflow, rows, cols, refs)] if rows else []
+            table = metric_table(by_workflow, rows, cols, refs, total, labels) if rows else []
+            if table:
+                lines += [f"### module interfaces - {title}", "", *table, ""]
+        for metric, title in METRICS:
+            by_workflow = cells.get(metric, {})
+            rows = [w for w in workflows if any((c, r) in by_workflow.get(w, {}) for c in cols for r in refs)]
+            table = metric_table(by_workflow, rows, cols, refs, (), labels) if rows else []
+            if table:
+                lines += [f"### module consumers - {title}", "", *table, ""]
+
     if not any(line.startswith("###") for line in lines):
         return "no measurements to report"
+    legend = ["- **n/a** - the workflow does not apply to that ref: its `// REQUIRES:` floor (library"
+              " version or language standard) is newer.",
+              "- **FAIL** - the workflow applies to that ref but did not compile."]
+    if len(refs) == 2:
+        legend.insert(0, f"- Cells read `{refs[0]} -> {refs[1]} (change)`, oldest library version first.")
+    lines = [*legend, "", *lines]
     lines += ["<details><summary>How this was measured</summary>", ""] + notes + [
         "", "Instantiation counts are bit-deterministic for a pinned compiler and peak memory varies by",
         "<0.1% between runs, so both are comparable across every column above. Wall time is not: each",
