@@ -325,6 +325,10 @@ def build_modules(repo: Path, tc: Toolchain, workdir: Path, trace=False):
     if tc.modules:
         includes = [f"-I{d}" for d in include_dirs(repo)]
         for name, rel in MODULE_UNITS:
+            if not (repo / rel).exists():
+                # The set of module units is a property of the ref: mp_units.utility arrived in 2.6,
+                # so comparing against v2.5.0 must build what that tree has, not what master has.
+                continue
             out = workdir / (f"{name}.pcm" if tc.is_clang else f"{name}.o")
             cmd = [*base, *includes, *flags]
             cmd += ["-x", "c++-module", "--precompile"] if tc.is_clang else ["-c"]
@@ -789,7 +793,7 @@ BMI_ORDER = ("bmi/std", "bmi/mp_units.core", "bmi/mp_units.systems", "bmi/mp_uni
 TOTALS = {"time_ms": sum, "mib_on_disk": sum, "instantiations": sum, "peak_mib": max}
 
 
-def metric_table(by_workflow, rows_wanted, columns, refs, extra_rows=(), labels=None, against=None):
+def metric_table(by_workflow, rows_wanted, columns, refs, totals_metric=None, labels=None, against=None):
     """One table: a row per entry, a column per configuration. With exactly two refs the cell
     carries the change, so a comparison is read rather than computed across columns."""
     present = [c for c in columns if any(c in by_workflow.get(r, {}) or
@@ -804,6 +808,11 @@ def metric_table(by_workflow, rows_wanted, columns, refs, extra_rows=(), labels=
         rows = [[name.removeprefix("bmi/"),
                  *[fmt_change(by_workflow[name].get((c, old)), by_workflow[name].get((c, new_)))
                    for c in present]] for name in rows_wanted]
+        if totals_metric:
+            rows.append([totals_label(totals_metric),
+                         *[fmt_change(combine_totals(totals_metric, by_workflow, rows_wanted, c, old),
+                                      combine_totals(totals_metric, by_workflow, rows_wanted, c, new_))
+                           for c in present]])
     else:
         pairs = [(c, ref) for c in present for ref in refs
                  if any((c, ref) in by_workflow.get(r, {}) for r in rows_wanted)]
@@ -816,7 +825,11 @@ def metric_table(by_workflow, rows_wanted, columns, refs, extra_rows=(), labels=
                 other = by_workflow[name].get(((against or {}).get(col), ref))
                 cells.append(fmt_against(value, other))
             rows.append([name.removeprefix("bmi/"), *cells])
-    return markdown_table(header, [*rows, *extra_rows])
+        if totals_metric:
+            rows.append([totals_label(totals_metric),
+                         *[fmt_value(combine_totals(totals_metric, by_workflow, rows_wanted, c, ref))
+                           for c, ref in pairs]])
+    return markdown_table(header, rows)
 
 
 def shorten_labels(keys):
@@ -831,17 +844,17 @@ def shorten_labels(keys):
     return labels, suffix
 
 
-def totals_row(metric, by_workflow, rows_wanted, columns, refs):
-    """Interfaces are built once and shared, so their sum is the number that matters."""
+def totals_label(metric):
+    return "**peak of all**" if TOTALS.get(metric, sum) is max else "**total**"
+
+
+def combine_totals(metric, by_workflow, rows_wanted, column, ref):
+    """Interfaces are built once and shared, so their sum is the number that matters - except peak
+    memory, which is a high-water mark and does not add up."""
     combine = TOTALS.get(metric, sum)
-    label = "**peak of all**" if combine is max else "**total**"
-    cells = []
-    for c in columns:
-        for ref in refs:
-            values = [by_workflow.get(r, {}).get((c, ref)) for r in rows_wanted]
-            numeric = [v for v in values if isinstance(v, (int, float))]
-            cells.append(fmt_value(round(combine(numeric), 1) if numeric else None))
-    return [label, *cells]
+    values = [by_workflow.get(r, {}).get((column, ref)) for r in rows_wanted]
+    numeric = [v for v in values if isinstance(v, (int, float))]
+    return round(combine(numeric), 1) if numeric else None
 
 
 def render_report(payloads):
@@ -880,7 +893,7 @@ def render_report(payloads):
                           key=lambda k: (version_of(k), k))
             rows = [w for w in workflows if any((c, r) in by_workflow.get(w, {}) for c in cols for r in refs)]
             against = counterparts(cols, header_keys) if len(refs) == 1 else None
-            table = metric_table(by_workflow, rows, cols, refs, (), None, against) if rows else []
+            table = metric_table(by_workflow, rows, cols, refs, None, None, against) if rows else []
             if table:
                 lines += [f"### {title} - {family}" if family != "other" else f"### {title}", "", *table, ""]
 
@@ -896,8 +909,7 @@ def render_report(payloads):
         for metric, title in METRICS:
             by_workflow = cells.get(metric, {})
             rows = [i for i in interfaces if i in by_workflow]
-            total = [totals_row(metric, by_workflow, rows, cols, refs)] if rows else []
-            table = metric_table(by_workflow, rows, cols, refs, total, labels) if rows else []
+            table = metric_table(by_workflow, rows, cols, refs, metric, labels) if rows else []
             if table:
                 lines += [f"### module interfaces - {title}", "", *table, ""]
         # Each modules column is read against the same compiler's header build, when that was
@@ -911,7 +923,7 @@ def render_report(payloads):
         for metric, title in METRICS:
             by_workflow = cells.get(metric, {})
             rows = [w for w in workflows if any((c, r) in by_workflow.get(w, {}) for c in cols for r in refs)]
-            table = metric_table(by_workflow, rows, cols, refs, (), labels,
+            table = metric_table(by_workflow, rows, cols, refs, None, labels,
                                  against if len(refs) == 1 else None) if rows else []
             if table:
                 lines += [f"### module consumers - {title}", "", *table, ""]

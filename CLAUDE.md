@@ -57,8 +57,9 @@ and did not compile - never collapse those two, a FAIL is a finding.
 
 Consumption is a configuration axis, driven by the corpus's two-macro preamble (the same one
 mp-units' examples use): `--import-std` defines `MP_UNITS_IMPORT_STD`, `--modules` defines
-`MP_UNITS_MODULES`. Both need a BMI pre-step, which `build_modules()` runs once per ref before any
-workflow: the standard library's module, then mp_units.core/systems/utility and the umbrella. Its
+`MP_UNITS_MODULES`. Both need a BMI pre-step, which `build_modules()` runs once per ref before any workflow, building
+only the module units THAT ref has (`mp_units.utility` arrived in 2.6, so a comparison against
+v2.5.0 must not demand it): the standard library's module, then mp_units.core/systems/utility and the umbrella. Its
 cost is reported as `bmi/*` rows (time, peak memory, size on disk, and instantiation counts from a
 traced build) - under modules the consumer instantiates almost nothing because the work happened in
 the BMI, so omitting those rows would make modules look free. The std module is built with a MINIMAL
