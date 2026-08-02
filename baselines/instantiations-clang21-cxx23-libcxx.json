@@ -1,37 +1,24 @@
 {
   "mp_units_version": "2.6",
   "mp_units_sha": "7c9108a81e8f8ff645cb4484f5024cb060e3e693",
-  "mp_units_describe": "v2.5.0-663-g7c9108a81-dirty",
+  "mp_units_describe": "v2.5.0-663-g7c9108a81",
   "cxx": "clang++-21",
   "std": "c++23",
   "stdlib": "libc++",
   "config_label": "",
   "extra_flags": "",
-  "not_re_recorded": [
-    "affine/custom_origins",
-    "affine/temperature_points",
-    "generic/generic_interfaces",
-    "isq/custom_hierarchy",
-    "isq/hierarchy_conversions",
-    "isq/kind_safe_interfaces",
-    "parity/kinetic_energy",
-    "parity/unit_conversions",
-    "text/quantity_text",
-    "umbrella/isq_umbrella",
-    "umbrella/si_umbrella"
-  ],
   "results": {
     "affine/custom_origins": {
       "InstantiateClass": 9101,
-      "InstantiateFunction": 4061
+      "InstantiateFunction": 4062
     },
     "affine/temperature_points": {
-      "InstantiateClass": 9868,
-      "InstantiateFunction": 5373
+      "InstantiateClass": 9870,
+      "InstantiateFunction": 5372
     },
     "generic/generic_interfaces": {
-      "InstantiateClass": 11206,
-      "InstantiateFunction": 5224
+      "InstantiateClass": 11238,
+      "InstantiateFunction": 5281
     },
     "isq/custom_hierarchy": {
       "InstantiateClass": 13558,
@@ -39,7 +26,7 @@
     },
     "isq/hierarchy_conversions": {
       "InstantiateClass": 13454,
-      "InstantiateFunction": 6896
+      "InstantiateFunction": 6895
     },
     "isq/kind_safe_interfaces": {
       "InstantiateClass": 14258,
@@ -51,35 +38,51 @@
     },
     "parity/unit_conversions": {
       "InstantiateClass": 9614,
-      "InstantiateFunction": 4899
+      "InstantiateFunction": 4897
     },
     "scaling/broad_016": {
-      "InstantiateClass": 14454,
-      "InstantiateFunction": 7651
+      "InstantiateClass": 14452,
+      "InstantiateFunction": 7640
     },
     "scaling/broad_064": {
-      "InstantiateClass": 15315,
-      "InstantiateFunction": 9307
+      "InstantiateClass": 15313,
+      "InstantiateFunction": 9296
     },
     "scaling/broad_256": {
-      "InstantiateClass": 18866,
-      "InstantiateFunction": 16027
+      "InstantiateClass": 18864,
+      "InstantiateFunction": 16016
     },
     "scaling/narrow_016": {
-      "InstantiateClass": 14213,
-      "InstantiateFunction": 7037
+      "InstantiateClass": 14211,
+      "InstantiateFunction": 7026
     },
     "scaling/narrow_064": {
-      "InstantiateClass": 14261,
-      "InstantiateFunction": 7133
+      "InstantiateClass": 14259,
+      "InstantiateFunction": 7122
     },
     "scaling/narrow_256": {
-      "InstantiateClass": 14453,
-      "InstantiateFunction": 7517
+      "InstantiateClass": 14451,
+      "InstantiateFunction": 7506
     },
-    "text/quantity_text": {
-      "InstantiateClass": 9080,
-      "InstantiateFunction": 4059
+    "text/output_format": {
+      "InstantiateClass": 9839,
+      "InstantiateFunction": 5118
+    },
+    "text/output_format_advanced": {
+      "InstantiateClass": 9941,
+      "InstantiateFunction": 5345
+    },
+    "text/output_ostream": {
+      "InstantiateClass": 9138,
+      "InstantiateFunction": 4069
+    },
+    "text/output_printf": {
+      "InstantiateClass": 9081,
+      "InstantiateFunction": 3995
+    },
+    "text/output_println": {
+      "InstantiateClass": 9837,
+      "InstantiateFunction": 5125
     },
     "umbrella/isq_umbrella": {
       "InstantiateClass": 14860,
