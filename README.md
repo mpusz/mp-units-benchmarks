@@ -13,7 +13,7 @@ Each workflow is a small idiomatic translation unit in `workflows/<category>/<na
 | category   | what it represents                                                        |
 |------------|---------------------------------------------------------------------------|
 | `parity/`  | basics common to all units libraries (arithmetic, conversions)            |
-| `isq/`     | ISQ hierarchies: user-defined `QUANTITY_SPEC` trees with equations, kind-safe `QuantityOf` interfaces, cross-branch conversions |
+| `isq/`     | ISQ hierarchies: user-defined `QUANTITY_SPEC` trees with equations, kind-safe `QuantityOf` interfaces, cross-branch conversions, `kind_of` at API edges, vector- and complex-field quantities, and fractional dimensional exponents |
 | `affine/`  | `quantity_point`: offset units, user-defined absolute/relative origins    |
 | `generic/` | templates over references and representation types                        |
 | `text/`    | quantity text output: the same workload printed through `printf`, `operator<<`, `std::format` and `std::println`, plus the format-spec grammar in depth |

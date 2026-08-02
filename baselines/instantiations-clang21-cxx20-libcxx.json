@@ -11,11 +11,11 @@
     "affine/custom_origins",
     "affine/temperature_points",
     "generic/generic_interfaces",
-    "isq/custom_hierarchy",
-    "isq/hierarchy_conversions",
-    "isq/kind_safe_interfaces",
     "parity/kinetic_energy",
     "parity/unit_conversions",
+    "scaling/broad_016",
+    "scaling/broad_064",
+    "scaling/broad_256",
     "scaling/narrow_016",
     "scaling/narrow_064",
     "scaling/narrow_256",
@@ -40,17 +40,33 @@
       "InstantiateClass": 11422,
       "InstantiateFunction": 5226
     },
+    "isq/complex_quantities": {
+      "InstantiateClass": 19263,
+      "InstantiateFunction": 9343
+    },
     "isq/custom_hierarchy": {
       "InstantiateClass": 13854,
       "InstantiateFunction": 6780
+    },
+    "isq/fractional_exponents": {
+      "InstantiateClass": 18273,
+      "InstantiateFunction": 8932
     },
     "isq/hierarchy_conversions": {
       "InstantiateClass": 13751,
       "InstantiateFunction": 6833
     },
+    "isq/kind_conversions": {
+      "InstantiateClass": 13313,
+      "InstantiateFunction": 6463
+    },
     "isq/kind_safe_interfaces": {
       "InstantiateClass": 14555,
       "InstantiateFunction": 7175
+    },
+    "isq/vector_quantities": {
+      "InstantiateClass": 13262,
+      "InstantiateFunction": 6383
     },
     "parity/kinetic_energy": {
       "InstantiateClass": 9137,

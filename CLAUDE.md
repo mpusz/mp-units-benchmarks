@@ -107,7 +107,8 @@ extra flags attached (`--extra-flags=-DFOO=1`): argparse reads a detached `-D...
 
 - `workflows/<category>/<name>.cpp` - benchmark TUs; each is a standalone, idiomatic,
   compile-only-cost `main()` with no test framework. Categories: parity (cross-library
-  basics), isq (hierarchies, kind-safe APIs), affine (quantity_point, origins), generic,
+  basics), isq (hierarchies, kind-safe APIs, `kind_of` edges, vector/complex fields, fractional
+  exponents), affine (quantity_point, origins), generic,
   text, scaling, umbrella (churn-expected, excluded from the median regression alarm).
 - `report`/`summary` derive a `## Marginal cost of user code` section from the series: slope (per
   step) and intercept per shape, per configuration, with the delta in comparison mode. That is where
