@@ -333,12 +333,27 @@ jobs:
           path: results
           merge-multiple: true
       - name: Post the combined table
+        id: post
         shell: bash
         run: |
           shopt -s nullglob
           reports=(results/report-*.json)
           if [ ${#reports[@]} -eq 0 ]; then
             echo "no measurement artifacts to summarise" >> "$GITHUB_STEP_SUMMARY"
+            echo "produced=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          runner/bench.py summary "${reports[@]}"
+          # The same markdown that lands in the job summary, kept as a file: a summary cannot be
+          # downloaded, diffed against last week's, or pasted into a talk.
+          name="compile-cost-$(echo "${MP_UNITS_REF}" | tr '/' '-')"
+          [ -n "$COMPARE_REF" ] && name="$name-vs-$(echo "${COMPARE_REF}" | tr '/' '-')"
+          runner/bench.py summary "${reports[@]}" > "results/$name.md"
+          echo "produced=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        if: steps.post.outputs.produced == 'true'
+        with:
+          # The markdown for reading, the per-arm JSON for anything that wants to compute on it.
+          name: compile-cost-report
+          path: |
+            results/*.md
+            results/report-*.json

@@ -167,8 +167,11 @@ loose in mp-units).
   and g++-14/15, plus g++-16 as `experimental: true` -> `continue-on-error` - all at `-std=c++26`,
   each uploading a `report --output` artifact. That set is mp-units' supported compilers that can do
   c++26; clang 16 (spells it c++2c), gcc 12/13 (no c++26, and gcc 13 has no `<print>`), clang 19
-  (unsupported by mp-units) and clang 22 (currently fails to compile the library) are out. `summary`: `needs: measure`, `if: always()`, downloads the artifacts
-  and posts `bench.py summary` into `GITHUB_STEP_SUMMARY`.
+  (unsupported by mp-units) and clang 22 (currently fails to compile the library) are out. `report`: `needs: measure`, `if: always()`, downloads the arm
+  artifacts, posts `bench.py summary` into `GITHUB_STEP_SUMMARY` AND uploads the same markdown plus
+  the per-arm JSON as the `compile-cost-report` artifact - a job summary cannot be downloaded,
+  diffed against last week's, or pasted into a talk. The markdown file is named after the refs it
+  measured.
 - Dispatch inputs: `ref` and optional `compare_ref` (measured by every arm alongside the first).
 - Bands are CLI flags (`--slack`, `--median-alarm`, `--tighten-notice`, `--advisory-slack`, all
   percents), NOT constants: the same baseline file is read strictly here and loosely there.
