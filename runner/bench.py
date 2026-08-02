@@ -758,16 +758,18 @@ def fmt_change(old, new):
 
 
 def counterparts(columns, candidates):
-    """Map a configuration to the plainer one it should be read against: `...-modules-importstd` and
-    `...-importstd` both against `...`, when that was measured in the same run."""
-    found = {}
+    """Map a configuration to the PLAIN build of the same compiler - no modules, no `import std`.
+
+    Always that one, never a partially-stripped intermediate: a modules delta measured against the
+    `import std` column would be incremental, and "modules are 60% cheaper" has to mean cheaper than
+    how the library is consumed today, not cheaper than one step along the way. If the plain build
+    was not measured in the same run, the cell shows no delta rather than a misleading one."""
+    plain = {}
     for col in columns:
-        for stripped in (col.replace("-modules", "").replace("-importstd", ""),
-                         col.replace("-modules", ""), col.replace("-importstd", "")):
-            if stripped != col and stripped in candidates:
-                found[col] = stripped
-                break
-    return found
+        stripped = col.replace("-modules", "").replace("-importstd", "")
+        if stripped != col and stripped in candidates:
+            plain[col] = stripped
+    return plain
 
 
 def fmt_against(value, reference):
@@ -916,10 +918,11 @@ def render_report(payloads):
         # measured in the same run: "how much cheaper is this TU as a module consumer".
         against = counterparts(cols, header_keys)
         if against and len(refs) == 1:
-            example = next(iter(against.items()))
-            lines += [f"In brackets: change against the same compiler's header build "
-                      f"(`{example[1]}`). Consumer cost only - the interface build above is paid "
-                      f"once per configuration, not per translation unit.", ""]
+            lines += ["In brackets: change against the same compiler's plain build - headers, no "
+                      "`import std` - so the number says what modules are worth against how the "
+                      "library is consumed today, not against an intermediate configuration. Consumer "
+                      "cost only: the interface build above is paid once per configuration, not per "
+                      "translation unit.", ""]
         for metric, title in METRICS:
             by_workflow = cells.get(metric, {})
             rows = [w for w in workflows if any((c, r) in by_workflow.get(w, {}) for c in cols for r in refs)]
@@ -930,9 +933,9 @@ def render_report(payloads):
 
     if not any(line.startswith("###") for line in lines):
         return "no measurements to report"
-    legend = ["- A percentage in brackets is the change against the plainer build of the same compiler"
-              " - an `import std` or modules column read against its header column, where both were"
-              " measured.",
+    legend = ["- A percentage in brackets is the change against the same compiler's PLAIN build"
+              " (headers, no `import std`), never against an intermediate configuration; it is absent"
+              " when that plain build was not measured in the same run.",
               "- **n/a** - the workflow does not apply to that ref: its `// REQUIRES:` floor (library"
               " version or language standard) is newer.",
               "- **FAIL** - the workflow applies to that ref but did not compile."]

@@ -46,8 +46,10 @@ builds (time, memory, size on disk, instantiations, each with a total row) first
 - because a `bmi/*` row interleaved with workflows is noise to every configuration that has no
 modules, and the corpus grows a column per compiler. Column headers there drop the tokens all of
 them share. A configuration with extra tokens (`-importstd`, `-modules-importstd`) is rendered with
-a percentage against the plainer build of the SAME compiler when both were measured in one run, so
-modules and `import std` read as deltas instead of numbers the reader has to divide by eye. Those
+a percentage against the PLAIN build of the same compiler - headers, no `import std` - never against
+an intermediate configuration, so a modules delta says what modules are worth against how the library
+is consumed today rather than against one step along the way. No plain build in the run means no
+percentage, not an incremental one. Those
 deltas are consumer cost only - the interface build is paid once per configuration, and the modules
 section says so above the table. Everything else renders one table per metric PER COMPILER FAMILY (clang, gcc, other - the supported
 set grows, so a single wide table stops being readable). Refs are ordered by measured library version,
