@@ -52,10 +52,15 @@ constexpr double narrow_step()
   return energy.numerical_value_in(kJ) + speed.numerical_value_in(km / h);
 }
 
-// One distinct unit per step, cycling through unrelated corners of SI so each index forces its own
-// specializations rather than reusing the previous one's.
+// One distinct unit per step, built by combining base units rather than by scaling them.
+//
+// An earlier version used `mag<I + 1> * unit`, which does produce a new type per step - but it makes
+// each step a new *magnitude*, so the series measured prime factorization and magnitude machinery
+// (~12% of its own slope) rather than unit diversity. A user reaching for another unit writes
+// `m / s` or `kg * m`, not a new scaling factor, so the shape now composes: base_a * pow<e>(base_b).
+// The (a, b, e) triple is unique for every index below 256, which is the largest size in the series.
 template<std::size_t I>
-constexpr auto unit_for()
+constexpr auto base_unit()
 {
   constexpr std::size_t which = I % 8;
   if constexpr (which == 0)
@@ -77,12 +82,15 @@ constexpr auto unit_for()
 }
 
 template<std::size_t I>
+constexpr auto unit_for()
+{
+  return base_unit<I % 8>() * pow<1 + (I / 64) % 4>(base_unit<(I / 8) % 8>());
+}
+
+template<std::size_t I>
 constexpr double broad_step()
 {
-  // A distinct scaled unit per step. Cycling a fixed list of base units would stop producing new
-  // specializations once the list is exhausted, which would make this series a copy of the narrow
-  // one; scaling by the index keeps every step's type genuinely new.
-  constexpr auto unit = mag<I + 1> * unit_for<I>();
+  constexpr auto unit = unit_for<I>();
   const quantity value = (1.0 + I) * unit;
   const quantity scaled = value * 2.0 + value;
   return scaled.numerical_value_in(unit);
