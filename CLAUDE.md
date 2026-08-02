@@ -109,6 +109,12 @@ extra flags attached (`--extra-flags=-DFOO=1`): argparse reads a detached `-D...
   compile-only-cost `main()` with no test framework. Categories: parity (cross-library
   basics), isq (hierarchies, kind-safe APIs), affine (quantity_point, origins), generic,
   text, scaling, umbrella (churn-expected, excluded from the median regression alarm).
+- `report`/`summary` derive a `## Marginal cost of user code` section from the series: slope (per
+  step) and intercept per shape, per configuration, with the delta in comparison mode. That is where
+  a slope regression becomes visible - v2.5.0 -> master improved every intercept ~9% while the broad
+  slope went 45.7 -> 53.3 per step (+16.7%), which is why `scaling/broad_256` shows only -0.2% while
+  every other workflow reports ~-20%. The gate covers the slope numerically: at the 1% band on
+  broad_256, a further regression of >=1.4 instantiations per step trips it.
 - `scaling/` is a SERIES, not a set of independent workflows: `<shape>_<steps>.cpp` at 16/64/256 over
   `scaling_workload.h`. Read sizes against each other - the difference divided by the difference in
   steps is the marginal cost of user code, which is the only way to separate it from the constant

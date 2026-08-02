@@ -859,6 +859,48 @@ def combine_totals(metric, by_workflow, rows_wanted, column, ref):
     return round(combine(numeric), 1) if numeric else None
 
 
+def scaling_fit(by_workflow, column, ref):
+    """Slope and intercept per shape from the scaling/ series: the marginal cost of one more step,
+    and the constant cost of pulling the library in. The whole point of the series is that these two
+    move independently - a release can improve the intercept while making the slope worse."""
+    fits = {}
+    for shape in ("narrow", "broad"):
+        sizes = {}
+        for name, row in by_workflow.items():
+            m = re.fullmatch(rf"scaling/{shape}_(\d+)", name)
+            value = row.get((column, ref)) if m else None
+            if isinstance(value, (int, float)):
+                sizes[int(m.group(1))] = value
+        if len(sizes) >= 2:
+            lo, hi = min(sizes), max(sizes)
+            slope = (sizes[hi] - sizes[lo]) / (hi - lo)
+            fits[shape] = (slope, sizes[lo] - slope * lo)
+    return fits
+
+
+def scaling_section(cells, columns, refs, labels=None):
+    """A table per metric: what one more operation costs, next to the constant cost."""
+    labels = labels or {c: c for c in columns}
+    lines = []
+    for metric, title in METRICS:
+        by_workflow = cells.get(metric, {})
+        rows = []
+        for shape in ("narrow", "broad"):
+            for what, index in (("per step", 0), ("intercept", 1)):
+                cols = []
+                for column in columns:
+                    values = [scaling_fit(by_workflow, column, ref).get(shape) for ref in refs]
+                    values = [v[index] if v else None for v in values]
+                    cols.append(fmt_change(values[0], values[1]) if len(refs) == 2 else fmt_value(
+                        None if values[0] is None else round(values[0], 1)))
+                if any(c != "n/a" for c in cols):
+                    rows.append([f"{shape} - {what}", *cols])
+        if rows:
+            present = [labels[c] for c in columns]
+            lines += [f"### {title}", "", *markdown_table(["scaling", *present], rows), ""]
+    return lines
+
+
 def render_report(payloads):
     refs = refs_oldest_first(payloads)
     keys, cells, notes = [], {}, []
@@ -898,6 +940,16 @@ def render_report(payloads):
             table = metric_table(by_workflow, rows, cols, refs, None, None, against) if rows else []
             if table:
                 lines += [f"### {title} - {family}" if family != "other" else f"### {title}", "", *table, ""]
+
+    series = scaling_section(cells, [*sorted(header_keys, key=lambda k: (version_of(k), k)),
+                                     *sorted(module_keys, key=lambda k: (version_of(k), k))], refs)
+    if series:
+        lines += ["## Marginal cost of user code", "",
+                  "From the scaling/ series: `per step` is what one more operation costs, `intercept` is",
+                  "the constant cost of pulling the library in. They move independently - a release can",
+                  "improve the intercept while making the slope worse, and only `broad` (a distinct unit",
+                  "per step) exercises the second. `narrow` reuses five types, as production code does.", ""]
+        lines += series
 
     if module_keys:
         lines += ["## C++20 modules", "",
