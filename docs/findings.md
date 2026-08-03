@@ -86,7 +86,7 @@ What the table did establish, and this part is solid and independent of any of t
 **shape**: for every library, cost is overwhelmingly *headers*, not *use*. mp-units' own split is
 4474 ms of inclusion against 74 ms of use.
 
-That shape is the whole reason `scaling/` exists (§3). It also means the headline number is dominated
+That shape is the whole reason `scaling/` exists (§4). It also means the headline number is dominated
 by *which headers you include* — which is a usage question, not a library-quality question. Hence
 Mateusz' first response: `si.h` and `isq.h` are the expensive ones, `<format>` is another, and
 fine-grained headers exist.
@@ -122,6 +122,69 @@ in any talk: the problem was never that the numbers were bad, it was that nobody
 slightly worse. Interestingly, the fixes moved lean so close to `si.h` that the lean advice may no
 longer be worth its ergonomic cost. That, too, is a measurement result.)
 
+### The starting point was already optimized
+
+This matters for reading everything below, so it goes first: **the suite is not measuring an
+unoptimized library.** Every cheap win was taken years before it existed, and the remaining findings
+are subtle *because* of that.
+
+[mp-units#643](https://github.com/mpusz/mp-units/issues/643), opened 16 November 2024, records the
+first serious round - reporting compilation time already **improved roughly 2x** by the commits landed
+that same day. The mechanism is worth stating precisely, because it is transferable advice that no
+compile-time talk gives: **memoize `consteval` metafunctions in a variable template so the compiler
+instantiates once per type instead of re-evaluating per call site.**
+
+```cpp
+// before: re-evaluated at every call site
+[[nodiscard]] consteval auto get_canonical_unit(Unit auto u) { return detail::get_canonical_unit_impl(u, u); }
+
+// after: one instantiation per type, reused everywhere
+template<Unit U>
+struct get_canonical_unit_result {
+  inline static constexpr auto value = get_canonical_unit_impl(U{}, U{});
+};
+[[nodiscard]] consteval auto get_canonical_unit(Unit auto u)
+{ return detail::get_canonical_unit_result<decltype(u)>::value; }
+```
+
+That pattern was applied to `get_canonical_unit`, `get_kind_tree_root`, `get_associated_quantity`, and
+later `get_complexity`, `explode` and `extract_convertible_quantities`; `first_100_primes` moved to
+static storage; `expr_projectable` was deleted outright. Roughly 2x, from perhaps 150 lines of change.
+
+The 2024 measurements, via `-ftime-trace` and ClangBuildAnalyzer over the example corpus:
+
+| configuration | frontend | codegen + optimizer |
+|---|---:|---:|
+| headers (50 TUs) | 590.1 s | 212.0 s |
+| modules (53 TUs) | 383.9 s | 232.1 s |
+
+with `explicitly_convertible<derived_quantity_spec<...>>` at 11305 ms and `detail::convertible<...>` at
+11301 ms as the top templates, and the worst headers being `systems/si.h` (166546 ms over 19
+inclusions) and `systems/si/unit_symbols.h` (157625 ms over 24).
+
+Two more rounds followed, and both are directly relevant to findings below:
+
+- **February 2026** - `perf: qualified calls added for lots of framework functions` across 20 files,
+  `get_unit` converted to a hidden friend, `sudo_cast` instantiations reduced, and *two* commits of
+  formatter compile-time work. So when §10 reports that a qualified-lookup audit finds almost nothing
+  left to fix, that is not luck; it is this commit.
+- **July 2026** - four commits in one day, prompted by the Discord exchange above: trimming
+  `<functional>`, `<cmath>` and `<algorithm>` out of the core header closure, rejecting stateless tag
+  types in the representation concepts up front, deriving `prefixed_unit` directly from `scaled_unit`,
+  and checking named-unit magnitude signs structurally. This is the "about a third off `si.h`" that
+  Chip measured.
+
+Two consequences worth carrying into the rest of the document.
+
+**The 10x gap is a post-optimization number.** It is what remains after two rounds of deliberate work,
+which strengthens rather than weakens the "expensive by construction" reading: the cost is in what the
+library *is*, not in obvious waste.
+
+**And the bottleneck has not moved in two years.** `si.h` and `unit_symbols.h` were the top cost
+centres in 2024 and inclusion is still 90-99% of a realistic TU today (§4). Every round of optimization
+has reduced the constant without changing which term dominates. That is the strongest argument for
+attacking inclusion cost next rather than anything else on the list.
+
 ### Two assumptions on the record, both wrong
 
 The exchange is unusually valuable because both sides committed to predictions in writing, and the
@@ -145,7 +208,7 @@ are almost entirely instantiations. Chip's response is the best one-line summary
 
 > *"Wow. So much for my ignorant assumptions!"*
 
-Which is exactly why the suite reports BMI build cost as first-class `bmi/*` rows (§5). Had it not,
+Which is exactly why the suite reports BMI build cost as first-class `bmi/*` rows (§6). Had it not,
 modules would have appeared free, and the assumption would have survived contact with the data.
 
 **"More metrics means more diverse signal."** When told the suite tracks instantiation counts, wall
@@ -153,14 +216,14 @@ time and peak memory, Chip's reaction was *"Nice! That's a wider diversity"* —
 was *"Not really. And that is interesting."* Peak memory correlates **0.97** with instantiation
 counts; three metrics were largely one metric wearing hats. That is §2, and it is the reason the suite
 went looking for numbers that are genuinely orthogonal — which is how it ended up at emitted code and
-symbol metadata (§6).
+symbol metadata (§7).
 
 **A third, from Khalil Estell**, on seeing the BMI sizes:
 
 > *"Wow, those are some large binaries. [...] some people complain about their object sizes being too
 > big. Which doesn't really matter because it's not the final binary that we run."*
 
-Half right, and the half that is wrong is measurable. Object size is *not* binary size — §6 shows two
+Half right, and the half that is wrong is measurable. Object size is *not* binary size — §7 shows two
 thirds of a 440 KB object file is mangled names that never reach the executable, and that the code
 which does reach it is 27–93 bytes for almost every workflow in the corpus. But it is not free either:
 that metadata is linker input, and it is why mp-units error messages are unreadable. The reason the
@@ -245,7 +308,77 @@ compile. This is easy to get wrong and produces plausible, wrong numbers.
 
 ---
 
-## 3. Choosing what to compile
+## 3. The second problem: drowning in what you measured
+
+Choosing a metric felt like the hard part. It was the first of two, and the second one is where the
+time actually went.
+
+One `report` run over the current matrix produces four deterministic metrics plus time and memory,
+across ~30 workflows, across up to eight compilers, across four consumption modes, times two refs when
+comparing. That is several thousand numbers. Every one is correct. Almost none of them, on their own,
+tells you whether the commit you are looking at is good or bad.
+
+The failure mode is specific and worth naming, because it is not "too much output" — it is **output
+that cannot be checked**. Early reports had all of these, and every one of them shipped a plausible
+wrong reading:
+
+- BMI rows interleaved with workflow rows, so a modules cost appeared to be a workflow cost.
+- Two configurations rendering under the same label (clang + libc++ and clang + libstdc++), so a
+  regression in one looked like noise in the other.
+- A totals row printing a bare number in comparison mode, so the reader could not tell which ref it
+  belonged to.
+- 40-character SHAs as column headers, pushing the data off the side of the page.
+- `n/a` counted as a failure, inflating the "how much did not compile" line.
+- "Largest growth" phrasing on a run where nothing grew.
+- A modules delta computed against an intermediate configuration, so the percentage answered a
+  question nobody asked.
+
+None of those were measurement bugs. All of them were **presentation bugs that produce false beliefs**,
+which makes them worse than a crash — a crash gets fixed.
+
+### What actually fixed it
+
+Three things, in increasing order of how much they helped.
+
+**Structure that matches how the data is read.** One table per metric per compiler family, not one wide
+table. Modules in their own section, because a `bmi/*` row is noise to every configuration without
+modules. Refs ordered oldest-first so `old -> new (change)` reads left to right. Column headers with
+the tokens every column shares removed. Percentages always against the plain build of the same
+compiler, never against an intermediate.
+
+**A findings section that states conclusions in prose.** Every report now opens with at most a handful
+of ranked, plain-language findings — compile failures first, then corpus-wide movement, then constant
+versus marginal cost diverging, then a wall-clock noise warning derived from the `bmi/std` control row,
+then what modules buy. The tables moved into a collapsed block beneath. The rule that makes this work
+is: **never state a number without saying what follows from it.** A finding that reads "instantiations
++2.3%" is a table row wearing a sentence.
+
+**Headroom, not verdicts.** The gate prints measured value, baseline, delta, limit, and the distance
+remaining to the limit. "Pass" is not information; "pass with 0.08pp of headroom" is.
+
+### And that is why the tooling exists
+
+The pattern behind all of it: **at this data volume, analysis is not a step after measurement, it is
+part of the instrument.** A suite that emits correct numbers a human cannot triage has not finished its
+job — it has moved the work somewhere less rigorous, namely someone skimming a CI log at the end of a
+day.
+
+Which is what the analysis and CI helpers are for, and why they are not conveniences:
+
+- `bench.py summary` merges per-arm artifacts into one document, so eight runners produce one thing to
+  read rather than eight.
+- `bench.py attribute` answers *which* when `counts` has answered *how many*. It is the difference
+  between "the slope regressed 9.8%" and "`type_list_merge_many_sorted_impl` costs 5.5 more per step",
+  and it is the reason the regression in §8 was found by reading rather than guessing.
+- The gate runs `attribute` automatically when it fails, so a red build arrives with a cause attached
+  instead of an invitation to go and measure.
+- The report is uploaded as a downloadable artifact, not only posted as a job summary, because a job
+  summary cannot be diffed against last week's or pasted into a talk.
+
+The general lesson, and it generalises past compile times: **the second hard problem in any measurement
+project is triage, and it is usually mistaken for a reporting detail.**
+
+## 4. Choosing what to compile
 
 ### Gotcha: one translation unit measures two things at once
 
@@ -296,7 +429,7 @@ it as a blank is actively lying.
 
 ---
 
-## 4. Building the gate
+## 5. Building the gate
 
 ### Wrong assumption (ours, corrected by Mateusz): baselines drift
 
@@ -351,7 +484,7 @@ The suite pins it explicitly for every arm.
 
 ---
 
-## 5. Modules: the assumption that modules are cheap
+## 6. Modules: the assumption that modules are cheap
 
 This is the section with the most wrong assumptions per square inch, including one that would have
 produced a genuinely misleading result.
@@ -407,7 +540,7 @@ plain, no reader can reconstruct what they are looking at.
 
 ---
 
-## 6. Chasing the metric that lied
+## 7. Chasing the metric that lied
 
 The best story in the project, because it started as a discrepancy, ran through two wrong hypotheses,
 and ended by changing what the suite gates.
@@ -466,6 +599,41 @@ They now gate as separate numbers.
 174 symbols is the tell. The *entire* write path is being instantiated per quantity type, including
 the parts that do not depend on the type at all.
 
+### How much of it is ours
+
+"Half of it is libc++'s" is the kind of claim that needs a control, because a libc++ template
+instantiated *for an mp-units type* is our cost wearing a `std::` name. So: a TU that formats six plain
+`double`s through `std::format` and includes no mp-units at all.
+
+That control alone costs **175008 bytes of object, 75165 bytes of code, 338 symbols.** Diffing the
+symbol sets:
+
+| bucket | symbols | bytes | ours to fix? |
+|---|---:|---:|---|
+| present in the control too - `std::format`'s fixed entry price | 213 | 64672 | **no** |
+| libc++ machinery only this TU provokes, no mp-units in the name | 275 | 3765 | negligible |
+| templates instantiated **for mp-units types** | 174 | **54774** | **yes** |
+
+So the libc++ half is a floor no change to mp-units can move, and mp-units roughly *doubles* both the
+object size and the symbol count on top of it.
+
+That matters beyond tidiness, because it is a real user-facing failure: on Compiler Explorer, printing
+a quantity with `std::format` or `std::println` can trip the compile watchdog, and a units library that
+cannot run in a shareable playground loses arguments it should win. Decomposing the ~4.2 s
+(interleaved best-of-3, one machine):
+
+| TU | ms |
+|---|---:|
+| `std::format` only, no mp-units | 1210 |
+| mp-units quantity work + `printf`, no `<format>` | 2368 |
+| mp-units + `std::format` | 4244 |
+| mp-units + `std::println` | 4366 |
+
+**~2.4 s is inclusion and arithmetic, ~1.2 s is `std::format`'s own floor, and ~0.7 s is the
+interaction** - formatting our types specifically, which is the 174-symbol bucket and the only part a
+formatter refactor can recover. Worth having, and still not the dominant term. Which is the same answer
+the scaling series gives from the other direction (§4): inclusion is where the money is.
+
 ### What this means for the library
 
 - **Everywhere except formatting, mp-units emits between 27 and 93 bytes.** `broad_064` does 53
@@ -492,7 +660,7 @@ logic.
 
 ---
 
-## 7. Finding a regression that no single number showed
+## 8. Finding a regression that no single number showed
 
 mp-units master had grown a **slope** regression: cost per unit of user code, not per TU. The totals
 looked unremarkable; only the scaling series exposed it, because the intercept swamped it.
@@ -524,7 +692,7 @@ That is the class of bug to design against.
 
 ---
 
-## 8. On doing this with an AI agent
+## 9. On doing this with an AI agent
 
 Worth its own section, because the division of labour turned out to be sharp and not what you would
 guess.
@@ -564,13 +732,18 @@ reproduces without re-deriving how it was obtained.
 
 ---
 
-## 9. The advice everyone gives, checked
+## 10. The advice everyone gives, checked
 
 Since the standard compile-time talk is IWYU plus "qualify your calls so ADL doesn't run", it is worth
 recording what happened when we audited mp-units against exactly that. Two useful results, one of them
 uncomfortable.
 
-**Most of it is already done, via a pattern rather than a rule.** Surveying every unqualified call to
+**Most of it is already done - deliberately, and on the record.** `perf: qualified calls added for lots
+of framework functions` (`4f6b3d972`, February 2026) did exactly this audit across 20 files, and
+`perf: get_unit made Hidden Friend` (`01c328221`) went further. So the survey below is measuring the
+residue of finished work, not finding neglect.
+
+Surveying every unqualified call to
 a free function in the headers turns up ~120 sites for `get_quantity_spec`, ~86 for `get_unit`, and
 similar for `get_dimension`, `get_character` and `equivalent`. Every one of those is a **hidden friend**
 — `friend consteval QuantitySpec auto get_quantity_spec(reference)` — which has *no* lookup path except
@@ -600,9 +773,9 @@ something to gate.
 
 Which is itself the talk's thesis in miniature: **the advice that circulates is the advice that is
 easy to state, not the advice with the largest measured effect.** A one-line constraint change worth
-4 instantiations per user expression (§7) never appears on anyone's slide deck.
+4 instantiations per user expression (§8) never appears on anyone's slide deck.
 
-## 10. What is gated today
+## 11. What is gated today
 
 Four bit-deterministic numbers, all from one traced compile, per configuration:
 
@@ -628,24 +801,30 @@ wrong predictions from named people who were reasoning sensibly, and numbers for
 1. **The challenge.** Chip Hogg's table: mp-units 10× the nearest competitor, and the author's own
    reaction to master being 10–31% slower than the release he'd already shipped past. Nobody was
    careless — nothing was watching. (§0)
-2. **What a comparison table cannot tell you.** "15 / 15" is not equal work — a cross-library corpus
+2. **We did not start from garbage.** ~2x already won in 2024 by memoizing consteval metafunctions,
+   qualified calls done in Feb 2026, header closure trimmed in July 2026. Everything that follows is
+   what is left *after* that — which is why it is subtle. (§0)
+3. **What a comparison table cannot tell you.** "15 / 15" is not equal work — a cross-library corpus
    encodes its author's feature set. Put the six safety levels on the slide and the 10× becomes a
    question with a denominator: mp-units' level-6 headers were compiling level-2 code. (§0)
-3. **Headers, not use.** 4474 ms vs 74 ms. Where the cost actually lives, and what that implies about
-   which benchmark you should build. (§0, §3)
-4. **The metric you want is the one you cannot use.** `bmi/std` varying 56% on identical work. (§2)
-5. **What is deterministic**, and proving it — 105 cells, 0 mismatches. (§2)
-6. **The twist: counts don't predict time.** 0.69 correlation; one workflow at rank 6 vs rank 17. (§2)
-7. **Intercept vs slope.** Why one TU can't answer, and the 3.0 vs 53.3 per-step spread. (§3)
-8. **"Modules make the problem go away."** 15–30% and 40–70% are big — and not that. Plus the
-   inverted intuition: mp-units' systems BMI is 2× the standard library's. (§0, §5)
-9. **Following the lying metric to the optimizer** — and finding two thirds of the "code" was mangled
-   names. Settles "object size doesn't matter" with numbers. (§6)
-10. **A one-line constraint change worth 4 instantiations per user expression.** (§7)
-11. **The advice everyone gives, checked** — and why this suite cannot verify it. (§9)
-12. **What we gate now, and what we deliberately don't** — including a metric rejected for being 0.97
-    correlated with one we had. (§2, §10)
-13. **Building the instrument with an agent**: what to trust, what to check. (§8)
+4. **Headers, not use.** 4474 ms vs 74 ms. Where the cost actually lives, and what that implies about
+   which benchmark you should build. (§0, §4)
+5. **The second hard problem: too much data.** Thousands of correct numbers and no way to tell whether
+   the commit was good. Seven presentation bugs that each shipped a false reading — and why analysis
+   belongs *inside* the instrument, not after it. (§3)
+6. **The metric you want is the one you cannot use.** `bmi/std` varying 56% on identical work. (§2)
+7. **What is deterministic**, and proving it — 105 cells, 0 mismatches. (§2)
+8. **The twist: counts don't predict time.** 0.69 correlation; one workflow at rank 6 vs rank 17. (§2)
+9. **Intercept vs slope.** Why one TU can't answer, and the 3.0 vs 53.3 per-step spread. (§4)
+10. **"Modules make the problem go away."** 15–30% and 40–70% are big — and not that. Plus the
+   inverted intuition: mp-units' systems BMI is 2× the standard library's. (§0, §6)
+11. **Following the lying metric to the optimizer** — and finding two thirds of the "code" was mangled
+   names. Settles "object size doesn't matter" with numbers. (§7)
+12. **A one-line constraint change worth 4 instantiations per user expression.** (§8)
+13. **The advice everyone gives, checked** — and why this suite cannot verify it. (§10)
+14. **What we gate now, and what we deliberately don't** — including a metric rejected for being 0.97
+    correlated with one we had. (§2, §11)
+15. **Building the instrument with an agent**: what to trust, what to check. (§9)
 
 **Blog-length cut:** §0 down to the 2.5.0-vs-master table as the hook, then §2 (metric choice,
 including the 0.69 and 0.97 correlations) and §6 (the `output_format` chase, ending on the
