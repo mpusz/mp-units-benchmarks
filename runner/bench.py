@@ -369,10 +369,16 @@ def measure_counts(repo: Path, tc: Toolchain, patterns=None):
                 results[name] = "FAIL"
                 continue
             data = json.loads(trace.read_text())
-            counts = {"InstantiateClass": 0, "InstantiateFunction": 0}
+            # Instantiations are frontend work. Two more deterministic numbers come free from the same
+            # compile and cover what they cannot see: constant evaluation (which a constexpr-based
+            # implementation trades instantiations for) and how much code was emitted (which is what
+            # the optimizer's time tracks - std::format costs 430 KiB of object code against 1 KiB for
+            # a template-heavy workflow, and no frontend metric notices).
+            counts = {"InstantiateClass": 0, "InstantiateFunction": 0, "EvaluateAsConstantExpr": 0}
             for e in data["traceEvents"]:
                 if e.get("ph") == "X" and e["name"] in counts:
                     counts[e["name"]] += 1
+            counts["object_bytes"] = out.stat().st_size if out.exists() else None
             results[name] = counts
     return results
 
@@ -470,9 +476,10 @@ def cmd_counts(args):
     measured = {ref: measure_counts(r, tc, args.workflows) for ref, r in repos.items()}
     if len(refs) == 1:
         results = measured[refs[0]]
-        print_table(["inst_class", "inst_func"],
-                    [(n, v["InstantiateClass"] if isinstance(v, dict) else v,
-                      v["InstantiateFunction"] if isinstance(v, dict) else v)
+        print_table(["inst_class", "inst_func", "const_eval", "obj_KiB"],
+                    [(n, *[v[k] if isinstance(v, dict) else v
+                           for k in ("InstantiateClass", "InstantiateFunction", "EvaluateAsConstantExpr")],
+                      round(v["object_bytes"] / 1024) if isinstance(v, dict) and v.get("object_bytes") else v)
                      for n, v in sorted(results.items())],
                     lambda v: "n/a" if v is None else str(v))
     else:
@@ -522,15 +529,28 @@ def cmd_time(args):
         print(f"  {ref}: {ms} ms, peak {mib:.1f} MiB")
 
 
-def baseline_deltas(baseline, results):
-    """Per-workflow baseline/current/relative-delta for every comparable entry."""
+# Every gated number must be bit-deterministic for a pinned compiler. Instantiations are frontend
+# work; constant evaluations are what a constexpr-based implementation trades them for; emitted code
+# is what the optimizer's time tracks, and no frontend metric can see it. Peak memory is deliberately
+# absent: it correlates 0.97 with instantiations, so it would only ever fire when they already had.
+GATED = (("instantiations", lambda e: e["InstantiateClass"] + e["InstantiateFunction"]),
+         ("constant evaluations", lambda e: e.get("EvaluateAsConstantExpr")),
+         ("emitted object code", lambda e: e.get("object_bytes")))
+
+
+def baseline_deltas(baseline, results, extract):
+    """Per-workflow baseline/current/relative-delta for every comparable entry.
+
+    A metric missing from either side is skipped rather than assumed: baselines recorded before a
+    metric existed must not read as a change."""
     details = {}
     for name, base in sorted(baseline.items()):
         cur = results.get(name)
         if not isinstance(cur, dict) or not isinstance(base, dict):
             continue  # n/a, FAIL, or a baseline entry whose workflow is gone
-        b = base["InstantiateClass"] + base["InstantiateFunction"]
-        c = cur["InstantiateClass"] + cur["InstantiateFunction"]
+        b, c = extract(base), extract(cur)
+        if not isinstance(b, (int, float)) or not isinstance(c, (int, float)) or not b:
+            continue
         details[name] = {"baseline": b, "current": c, "rel": (c - b) / b,
                          "umbrella": name.startswith("umbrella/")}
     return details
@@ -546,7 +566,7 @@ def assert_same_config(recorded, tc: Toolchain, where):
                      f"counts are only comparable within one configuration")
 
 
-def gate_summary_table(details, median, args, tc: Toolchain):
+def gate_summary_table(details, median, args, tc: Toolchain, label="instantiations"):
     """Every workflow with its measured value, its limit and the headroom left - so the distance to
     the bands is visible by observation, not inferred from a single pass/fail line."""
     if not details:
@@ -567,10 +587,13 @@ def gate_summary_table(details, median, args, tc: Toolchain):
                      f"{args.slack - delta:+.2f}pp", status])
     # Name the configuration: the same compiler at a different -std produces different counts, so a
     # table without it looks like it contradicts the measurement fleet's numbers.
-    lines = [f"### instantiation counts - `{config_key(tc)}`", ""]
+    lines = [f"### {label} - `{config_key(tc)}`", ""]
     lines += markdown_table(["workflow", "baseline", "current", "delta", "limit", "headroom", ""], rows)
-    lines += ["", f"median across non-umbrella workflows: **{median:+.2%}** against a "
-                  f"{args.median_alarm:g}% alarm ({args.median_alarm - median * 100:+.2f}pp headroom)",
+    lines += ["", (f"median across non-umbrella workflows: **{median:+.2%}** against a "
+                   f"{args.median_alarm:g}% alarm ({args.median_alarm - median * 100:+.2f}pp headroom)"
+                   if median is not None else
+                   f"gated at the same {args.slack:g}% band as instantiations; the median alarm "
+                   f"applies to instantiations only"),
               "", "`headroom` is how much further a workflow could grow before it fails: negative means "
               "it already has. A re-record resets every headroom to the full band, which is why "
               "`bench.py update --workflows <filters>` exists - it moves only what you name.", ""]
@@ -592,12 +615,16 @@ def cmd_check(args):
     baseline = recorded["results"]
     slack, alarm, notice = args.slack / 100, args.median_alarm / 100, args.tighten_notice / 100
     advisory_band = args.advisory_slack / 100 if args.advisory_slack is not None else None
-    details = baseline_deltas(baseline, measure_counts(repo, tc))
-    regressions = {n: d for n, d in details.items() if d["rel"] > slack}
-    improvements = {n: d for n, d in details.items() if d["rel"] < -notice}
+    measured = measure_counts(repo, tc)
+    per_metric = {label: baseline_deltas(baseline, measured, extract) for label, extract in GATED}
+    details = per_metric["instantiations"]
+    regressions = {f"{n} [{label}]": d for label, m in per_metric.items()
+                   for n, d in m.items() if d["rel"] > slack}
+    improvements = {f"{n} [{label}]": d for label, m in per_metric.items()
+                    for n, d in m.items() if d["rel"] < -notice}
     # Growth inside the blocking band but past the advisory one: reported, never fatal. This is how
     # a loose gate can still say "this grew" without stopping the change.
-    advisory = {n: d for n, d in details.items()
+    advisory = {f"{n} [{label}]": d for label, m in per_metric.items() for n, d in m.items()
                 if advisory_band is not None and advisory_band < d["rel"] <= slack}
     deltas = [d["rel"] for d in details.values() if not d["umbrella"]]
     median = statistics.median(deltas) if deltas else 0.0
@@ -611,8 +638,11 @@ def cmd_check(args):
                        "tighten_notice": args.tighten_notice, "advisory_slack": args.advisory_slack},
              "median_non_umbrella": median, "regressions": list(regressions),
              "improvements": list(improvements), "advisory": list(advisory),
-             "workflows": details}, indent=2) + "\n")
-    gate_summary_table(details, median, args, tc)
+             "workflows": details,
+             "metrics": {label: m for label, m in per_metric.items()}}, indent=2) + "\n")
+    for label, m in per_metric.items():
+        if m:
+            gate_summary_table(m, median if label == "instantiations" else None, args, tc, label)
     for name, d in regressions.items():
         gate_summary_line(f"instantiation regression: {name} {d['baseline']} -> {d['current']} "
                           f"({d['rel']:+.1%}, band {args.slack:g}%); if intentional, run bench.py update "
@@ -680,6 +710,8 @@ def cmd_update(args):
 
 
 METRICS = (("instantiations", "template instantiations (InstantiateClass + InstantiateFunction)"),
+           ("const_evals", "compile-time constant evaluations (what constexpr code costs instead)"),
+           ("object_kib", "object code emitted (KiB - what the optimizer's time tracks)"),
            ("time_ms", "wall time (ms, best of K - only trustworthy on a quiet machine)"),
            ("peak_mib", "peak compiler memory (MiB, best of K)"),
            ("mib_on_disk", "BMI size on disk (MiB)"))
@@ -763,6 +795,10 @@ def cmd_report(args):
     for ref in refs:
         for name, entry in sorted(counts[ref].items()):
             metrics["instantiations"].setdefault(name, {})[ref] = "FAIL" if entry == "FAIL" else total(entry)
+            if isinstance(entry, dict):
+                metrics["const_evals"].setdefault(name, {})[ref] = entry.get("EvaluateAsConstantExpr")
+                obj = entry.get("object_bytes")
+                metrics["object_kib"].setdefault(name, {})[ref] = round(obj / 1024, 1) if obj else None
         for name, entry in sorted(timed[ref].items()):
             # None means the workflow does not apply to this ref (version floor); "FAIL" means it
             # applies and did not compile. Collapsing both into n/a hides a real failure.

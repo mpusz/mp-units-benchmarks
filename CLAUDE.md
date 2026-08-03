@@ -87,10 +87,17 @@ bigger one instantiate", which is how a scaling slope gets attributed). Pairs ar
 version, so a delta always reads old -> new. This is the tool that turned "slope +9.8%" into
 `type_list_merge_many_sorted_impl +5.5 per step`; reach for it before guessing at source.
 
-Metrics: counts are GATED (clang only, bit-deterministic, and `-std`-dependent - so the gate must
-keep the standard its baselines were recorded with); peak RSS from the child's `rusage` varies <0.1%
-between runs on both clang and GCC, so it is trustworthy everywhere but not gated; wall time is
-quiet-machine-only. `-ftime-trace` inflates time ~11-15% and memory ~12-17%, so counts come from a
+THREE metrics are gated, all bit-deterministic and all from the same traced compile: template
+instantiations (frontend work), constant evaluations (`EvaluateAsConstantExpr` - what a constexpr
+implementation trades instantiations for), and emitted object code in bytes. The third exists because
+instantiation counts are a FRONTEND metric and cannot see codegen: `text/output_format` emits 430 KiB
+of object code against 1 KiB for a template-heavy workflow and spends ~31% of its time in the
+optimizer, while ranking 6th of 21 on instantiations and 17th on wall time. Peak RSS is measured and
+reported but deliberately NOT gated - it correlates 0.97 with instantiations, so it would only ever
+fire when they already had. Wall time is quiet-machine-only (rank correlation with counts is just
+0.69). Counts are `-std`-dependent, so the gate keeps the standard its baselines were recorded with.
+A metric absent from either side of a comparison is skipped, so baselines predating a metric do not
+read as change. `-ftime-trace` inflates time ~11-15% and memory ~12-17%, so counts come from a
 traced compile and time/memory from an untraced one - NEVER report both from one compile.
 
 `update` without filters is authoritative (drops entries whose workflow is gone) but blesses the
