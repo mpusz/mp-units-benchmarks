@@ -1385,7 +1385,72 @@ One coupling to note before acting: `<chrono>`'s and `<complex>`'s marginal cost
 those first and these two become expensive again - 1832 and 1170 standalone. Order the work accordingly,
 and re-measure after each step rather than summing the table.
 
-## 15. What is gated today
+## 15. The gate blocks its first change - and it is wrong to
+
+Three days after the four-metric gate landed, Mateusz added measurement uncertainty to the library - a
+real feature, deliberately small. Every gate job went red: **52 failures across three standards.**
+
+The numbers behind the red:
+
+- Instantiations moved **+0.08% median** against a 0.5% alarm. The feature was essentially free.
+- All 52 failures were one metric: `symbol metadata (bytes)`, moving **+40 to +48 bytes** per workflow -
+  one or two mangled names, appearing because the library gained a class.
+- On the smallest workflow, 48 bytes read as +5.3% against a 1% band. On `text/output_format` the same 48
+  bytes is +0.02%.
+
+Mateusz' verdict, quoted because it is the design requirement the gate had violated:
+
+> *"Our tests prevent extending the library in a meaningful way. We should guard against things that
+> actually make it slower, not make it a bit larger."*
+
+Two design errors, both from adding byte-valued metrics without checking their absolute scale against a
+percentage band. `symbol_bytes` has a corpus median of **1477 bytes**, so one added symbol name is +3%;
+`code_bytes` has a median of **145 bytes**, so a 1% band resolves to **1.4 bytes** - a single instruction.
+A percentage band on a three-digit number is not a measurement.
+
+The repairs:
+
+1. **`symbol_bytes` is no longer gated.** It is linker input and error-message length, not compile-time
+   cost - the weakest claim to "slower" of the four metrics, with the worst signal-to-noise. Still
+   measured and reported, where the one interesting case (293 KB on `output_format`) is visible.
+2. **`code_bytes` keeps its gate but gains an absolute floor**: 512 bytes of movement required on top of
+   the percentage. Its job is to catch a `constexpr` helper that stops folding away - a step from ~90
+   bytes to thousands - so the floor removes the entire noise regime and costs zero sensitivity. Verified
+   at the boundary: on an 84-byte baseline, +48 bytes (+57%!) passes, +512 fires.
+3. **One annotation instead of 52.** Every error line also read `instantiation regression:` regardless of
+   which metric moved. Now: one `::error::` naming the count, the per-metric spread, and the worst case -
+   the tables above already carry every delta with its headroom.
+
+### Gate the number that means "slower"
+
+The deeper fix is that "guard slower, not larger" names two different measurements, and the gate had only
+one of them. A feature addition lifts every workflow's **total** by a similar small amount. A change that
+makes user code more expensive lifts the **slope** - the marginal cost per step from the `scaling/`
+series - and almost nothing legitimate moves it.
+
+Gating totals alone also *under-reacts* to real regressions, which is the half nobody noticed until now:
+the slope contributes only ~62% of `scaling/broad_256`'s total, so a slope regression arrives at the one
+workflow best placed to see it diluted by a third. Demonstrated with a synthetic baseline: **a +2.04%
+slope regression fails the new 1% slope band while the 2% totals band passes it** - the same movement is
+only +1.17% of the total.
+
+So the bands are now asymmetric, and the asymmetry is the design:
+
+| band | value | meaning |
+|---|---:|---|
+| per-workflow totals (`--slack`) | 2% | loose - totals grow when the library gains features, and that must not block |
+| **marginal cost per step (`--slope-slack`)** | **1%** | tight - nothing legitimate makes one more line of user code more expensive |
+| median across workflows | 0.5% | catches framework-wide drift that stays under the per-workflow band |
+
+The slope gets its own table with headroom, and its own error message that says why it is different: a
+slope regression is paid by every translation unit that introduces units, and unlike a total it cannot be
+explained by the library growing.
+
+The general lesson joins §2's collection: **a gate is a statement about what you refuse to ship, and "it
+got bigger" was never that statement.** It took a false positive on the first real feature to notice the
+gate was enforcing something nobody meant.
+
+## 16. What is gated today
 
 Four bit-deterministic numbers, all from one traced compile, per configuration:
 
