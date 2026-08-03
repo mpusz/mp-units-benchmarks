@@ -94,18 +94,26 @@ bigger one instantiate", which is how a scaling slope gets attributed). Pairs ar
 version, so a delta always reads old -> new. This is the tool that turned "slope +9.8%" into
 `type_list_merge_many_sorted_impl +5.5 per step`; reach for it before guessing at source.
 
-FOUR metrics are gated, all bit-deterministic and all from the same traced compile: template
+THREE metrics are gated, all bit-deterministic and all from the same traced compile: template
 instantiations (frontend work), constant evaluations (`EvaluateAsConstantExpr` - what a constexpr
-implementation trades instantiations for), and the object file split by `object_sizes()` into
-`code_bytes` (every SHF_ALLOC section - what reaches the binary) and `symbol_bytes` (the rest - symbol
-table, string table, relocations). The last two exist because instantiation counts are a FRONTEND
-metric and cannot see codegen: `text/output_format` spends ~31% of its time in the optimizer while
+implementation trades instantiations for), and `code_bytes` (every SHF_ALLOC section of the object file -
+what reaches the binary; `object_sizes()` also computes `symbol_bytes`, the symbol/string/reloc
+remainder, which is reported but NOT gated - see below). Emitted code is gated because instantiation
+counts are a FRONTEND metric and cannot see codegen: `text/output_format` spends ~31% of its time in the optimizer while
 ranking 6th of 21 on instantiations and 17th on wall time. NEVER gate the object file's total size -
 for that workflow it is 440 KB of which only 147 KB is code and 293 KB is mangled names (662 symbols
 averaging 101 characters), and the two shrink by unrelated means: code by instantiating fewer copies
 of a write path, metadata by keeping details out of the symbol table. Every workflow except the
 formatting family emits 27-93 bytes, so `code_bytes` is a TRIPWIRE for a constexpr helper that stops
-folding away - a change that lowers instantiations while raising cost. Peak RSS is measured and
+folding away - a change that lowers instantiations while raising cost.
+
+Each gated metric carries a MINIMUM ABSOLUTE MOVEMENT (third field of `GATED`) that must be exceeded in
+addition to the percentage band, because a percentage on a small number is not a measurement:
+`code_bytes` has a median of 145 across the corpus, so a 1% band resolves to 1.4 bytes. Its floor is 512
+bytes - a helper that stops folding moves it by thousands, so the floor costs no sensitivity. `symbol_bytes`
+is NOT gated at all: it is mangled-name volume (linker input, error-message length), not compile-time cost,
+its median is 1477 bytes so one added symbol name reads as +3%, and it once failed 52 workflows on a change
+that cost +0.08% instantiations. A gate must catch code getting SLOWER, not code getting BIGGER. Peak RSS is measured and
 reported but deliberately NOT gated - it correlates 0.97 with instantiations, so it would only ever
 fire when they already had. Wall time is quiet-machine-only (rank correlation with counts is just
 0.69). Counts are `-std`-dependent, so the gate keeps the standard its baselines were recorded with.

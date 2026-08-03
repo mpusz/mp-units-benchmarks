@@ -26,6 +26,7 @@ injected as -DMP_UNITS_BENCH_VERSION=<major*100+minor> for compat shims.
 from __future__ import annotations  # 3.12 evaluates annotations eagerly, 3.14 does not
 
 import argparse
+import collections
 import hashlib
 import json
 import os
@@ -570,16 +571,24 @@ def cmd_time(args):
         print(f"  {ref}: {ms} ms, peak {mib:.1f} MiB")
 
 
-# Every gated number must be bit-deterministic for a pinned compiler. Instantiations are frontend
-# work; constant evaluations are what a constexpr-based implementation trades them for; emitted code
-# is what the optimizer's time tracks (and what a constexpr helper that stops folding away starts
-# producing); symbol metadata is mangled-name volume, which is linker input and error-message length
-# rather than anything that runs. Peak memory is deliberately absent: it correlates 0.97 with
-# instantiations, so it would only ever fire when they already had.
-GATED = (("instantiations", lambda e: e["InstantiateClass"] + e["InstantiateFunction"]),
-         ("constant evaluations", lambda e: e.get("EvaluateAsConstantExpr")),
-         ("emitted code (bytes)", lambda e: e.get("code_bytes")),
-         ("symbol metadata (bytes)", lambda e: e.get("symbol_bytes")))
+# Every gated number must be bit-deterministic for a pinned compiler AND large enough that a percentage
+# band means something. Instantiations are frontend work; constant evaluations are what a constexpr
+# implementation trades them for; emitted code is what the optimizer's time tracks.
+#
+# The third field is a MINIMUM ABSOLUTE MOVEMENT, required on top of the percentage band. Without it a
+# percentage on a three-digit number is noise: `code_bytes` has a median of 145 across the corpus, so a
+# 1% band resolves to 1.4 bytes and a single instruction trips the gate. A helper that stops folding away
+# - the thing this metric exists to catch - moves it by thousands, so the floor costs no sensitivity.
+#
+# Two metrics are measured and reported but deliberately NOT gated:
+#   - peak memory, which correlates 0.97 with instantiations and would only fire when they already had.
+#   - `symbol_bytes` (mangled names, string table, relocations). It is linker input and error-message
+#     length, not compile-time cost, and its median is 1477 bytes - so adding one symbol name (~40-48
+#     bytes) reads as +3%. It once failed 52 workflows on a change that cost +0.08% instantiations, which
+#     is the definition of a metric that punishes growth rather than slowness.
+GATED = (("instantiations", lambda e: e["InstantiateClass"] + e["InstantiateFunction"], 0),
+         ("constant evaluations", lambda e: e.get("EvaluateAsConstantExpr"), 0),
+         ("emitted code (bytes)", lambda e: e.get("code_bytes"), 512))
 
 
 def baseline_deltas(baseline, results, extract):
@@ -595,7 +604,7 @@ def baseline_deltas(baseline, results, extract):
         b, c = extract(base), extract(cur)
         if not isinstance(b, (int, float)) or not isinstance(c, (int, float)) or not b:
             continue
-        details[name] = {"baseline": b, "current": c, "rel": (c - b) / b,
+        details[name] = {"baseline": b, "current": c, "rel": (c - b) / b, "abs": c - b,
                          "umbrella": name.startswith("umbrella/")}
     return details
 
@@ -660,16 +669,22 @@ def cmd_check(args):
     slack, alarm, notice = args.slack / 100, args.median_alarm / 100, args.tighten_notice / 100
     advisory_band = args.advisory_slack / 100 if args.advisory_slack is not None else None
     measured = measure_counts(repo, tc)
-    per_metric = {label: baseline_deltas(baseline, measured, extract) for label, extract in GATED}
+    per_metric = {label: baseline_deltas(baseline, measured, extract) for label, extract, _ in GATED}
+    floors = {label: floor for label, _, floor in GATED}
     details = per_metric["instantiations"]
-    regressions = {f"{n} [{label}]": d for label, m in per_metric.items()
-                   for n, d in m.items() if d["rel"] > slack}
-    improvements = {f"{n} [{label}]": d for label, m in per_metric.items()
-                    for n, d in m.items() if d["rel"] < -notice}
+
+    def past(d, label, band):
+        """Both the percentage band and the metric's absolute floor have to be exceeded."""
+        return d["rel"] > band and abs(d["abs"]) >= floors[label]
+
+    regressions = {f"{n} [{label}]": {**d, "metric": label} for label, m in per_metric.items()
+                   for n, d in m.items() if past(d, label, slack)}
+    improvements = {f"{n} [{label}]": {**d, "metric": label} for label, m in per_metric.items()
+                    for n, d in m.items() if d["rel"] < -notice and abs(d["abs"]) >= floors[label]}
     # Growth inside the blocking band but past the advisory one: reported, never fatal. This is how
     # a loose gate can still say "this grew" without stopping the change.
-    advisory = {f"{n} [{label}]": d for label, m in per_metric.items() for n, d in m.items()
-                if advisory_band is not None and advisory_band < d["rel"] <= slack}
+    advisory = {f"{n} [{label}]": {**d, "metric": label} for label, m in per_metric.items() for n, d in m.items()
+                if advisory_band is not None and past(d, label, advisory_band) and not past(d, label, slack)}
     deltas = [d["rel"] for d in details.values() if not d["umbrella"]]
     median = statistics.median(deltas) if deltas else 0.0
     if args.report:
@@ -687,22 +702,35 @@ def cmd_check(args):
     for label, m in per_metric.items():
         if m:
             gate_summary_table(m, median if label == "instantiations" else None, args, tc, label)
-    for name, d in regressions.items():
-        gate_summary_line(f"instantiation regression: {name} {d['baseline']} -> {d['current']} "
-                          f"({d['rel']:+.1%}, band {args.slack:g}%); if intentional, run bench.py update "
-                          f"and commit the new baselines in this PR", "error")
+    # One annotation, not one per workflow. Fifty-two identical ::error:: lines bury the finding they are
+    # reporting, and the per-metric table above already carries every delta with its headroom - so the
+    # annotation's job is only to name the worst case and say what to do about it.
+    if regressions:
+        worst = max(regressions.items(), key=lambda kv: kv[1]["rel"])
+        name, d = worst
+        by_metric = collections.Counter(v["metric"] for v in regressions.values())
+        spread = ", ".join(f"{n} {m}" for m, n in by_metric.most_common())
+        gate_summary_line(
+            f"{len(regressions)} regression(s) past the {args.slack:g}% band ({spread}); worst is "
+            f"{name} {d['baseline']} -> {d['current']} ({d['rel']:+.1%}). See the table above for all of "
+            f"them; if intentional, run bench.py update and commit the new baselines in this PR", "error")
     if median > alarm:
         gate_summary_line(f"framework-wide regression: median instantiation growth {median:+.1%} "
                           f"across all workflows - this should almost never be rebaselined away", "error")
-    for name, d in advisory.items():
-        gate_summary_line(f"growth within the blocking band: {name} {d['baseline']} -> {d['current']} "
-                          f"({d['rel']:+.1%}, advisory band {args.advisory_slack:g}%) - not fatal here, but "
-                          f"the benchmarks repo gates tighter and will go red on it", "warning")
-    for name, d in improvements.items():
-        gate_summary_line(f"improvement: {name} {d['baseline']} -> {d['current']} ({d['rel']:+.1%}) - "
-                          f"baselines can be tightened; run bench.py update in a follow-up PR", "warning")
+    if advisory:
+        worst = max(advisory.items(), key=lambda kv: kv[1]["rel"])
+        gate_summary_line(
+            f"{len(advisory)} workflow(s) grew past the {args.advisory_slack:g}% advisory band but within "
+            f"the {args.slack:g}% blocking one; worst is {worst[0]} ({worst[1]['rel']:+.1%}). Not fatal "
+            f"here, but the benchmarks repo gates tighter and will go red on it", "warning")
+    if improvements:
+        best = min(improvements.items(), key=lambda kv: kv[1]["rel"])
+        gate_summary_line(
+            f"{len(improvements)} workflow(s) improved past the {args.tighten_notice:g}% notice band; best "
+            f"is {best[0]} ({best[1]['rel']:+.1%}) - baselines can be tightened, run bench.py update in a "
+            f"follow-up PR", "warning")
     if not regressions and median <= alarm:
-        msg = f"instantiation gate OK (median delta {median:+.1%})"
+        msg = f"compile-cost gate OK (median instantiation delta {median:+.1%})"
         if improvements:
             msg += f"; {len(improvements)} workflow(s) improved - consider tightening baselines"
         gate_summary_line(msg, "notice")

@@ -74,9 +74,10 @@ Three metrics, with very different trust levels:
    standard, machine-independent, and it measures exactly what makes C++ headers slow. This is the
    **gated** metric. It needs clang, and the count depends on `-std`, so the gate always runs with
    the standard the baselines were recorded with.
-2. **Compile-time constant evaluations**, **emitted code** and **symbol metadata**
-   (`bench.py counts`) — also exact, also from the same traced compile, and gated alongside
-   instantiations. They exist because instantiations only measure the *front end*:
+2. **Compile-time constant evaluations** and **emitted code** (`bench.py counts`) — also exact, also
+   from the same traced compile, and gated alongside instantiations. **Symbol metadata** is measured and
+   reported but deliberately not gated: it tracks mangled-name volume, which is linker input rather than
+   compile-time cost, and it is far too small in absolute terms for a percentage band to mean anything. They exist because instantiations only measure the *front end*:
    `text/output_format` spends a third of its time in the optimizer and no frontend metric notices.
    A `constexpr`-based implementation trades instantiations for constant evaluations, so both halves
    are watched. Object files are split rather than measured whole, because for that workflow two
