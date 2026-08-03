@@ -52,6 +52,13 @@ and which metrics are trustworthy - because these summaries get shared with peop
 the library. All the tables live in a collapsed `<details>` beneath. NEVER put a number in a finding
 without saying what follows from it.
 
+Every emitted markdown paragraph is ONE line - in `bench.py`, in the workflow files' `echo` blocks
+into `$GITHUB_STEP_SUMMARY`, and in anything else GitHub renders (issue bodies, PR descriptions,
+comments). GitHub turns a newline inside a paragraph into a line break, so source-wrapped prose
+reaches the reader as a ragged column. Wrap in the SOURCE with Python implicit string concatenation
+(adjacent literals, one per source line) and keep the emitted line unbroken. This file and the other
+checked-in `*.md` stay hard-wrapped; only generated output follows the rule.
+
 `report`/`summary` put every modules measurement in its OWN `## C++20 modules` section - interface
 builds (time, memory, size on disk, instantiations, each with a total row) first, then the consumers
 - because a `bmi/*` row interleaved with workflows is noise to every configuration that has no

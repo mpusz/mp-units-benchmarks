@@ -1046,19 +1046,21 @@ def scaling_section(cells, columns, refs, labels=None):
     return lines
 
 
+# One paragraph is ONE line: GitHub renders a single newline inside a paragraph as a line break, so
+# source-wrapped prose arrives at the reader ragged. Wrap in the source with implicit concatenation.
 PREAMBLE = [
     "<details><summary>How to read this</summary>", "",
-    "A **template instantiation** is one unit of work the compiler does when it stamps out a template",
-    "for a particular set of types. Counting them is exact and machine-independent, which is why this",
-    "is the number the project gates on: the same code and compiler always produce the same count, on",
-    "any machine. **Peak memory** is how much RAM the compiler needed, and varies by less than 0.1%",
-    "between runs, so it is trustworthy too. **Wall-clock time** is what a developer actually waits",
-    "for, but it depends on the machine and its load - times measured on shared CI runners are",
+    "A **template instantiation** is one unit of work the compiler does when it stamps out a template "
+    "for a particular set of types. Counting them is exact and machine-independent, which is why this "
+    "is the number the project gates on: the same code and compiler always produce the same count, on "
+    "any machine. **Peak memory** is how much RAM the compiler needed, and varies by less than 0.1% "
+    "between runs, so it is trustworthy too. **Wall-clock time** is what a developer actually waits "
+    "for, but it depends on the machine and its load - times measured on shared CI runners are "
     "indicative only, and are never compared between columns.",
     "",
-    "Two costs are worth separating. The **constant cost** is what a file pays merely for using the",
-    "library, before it does anything: including the headers, or importing the module. The **marginal",
-    "cost** is what each further operation adds - and it matters more, because it is multiplied by the",
+    "Two costs are worth separating. The **constant cost** is what a file pays merely for using the "
+    "library, before it does anything: including the headers, or importing the module. The **marginal "
+    "cost** is what each further operation adds - and it matters more, because it is multiplied by the "
     "size of real code. A release can improve one and worsen the other, so they are reported apart.",
     "", "</details>", "",
 ]
@@ -1217,16 +1219,16 @@ def render_report(payloads):
                                      *sorted(module_keys, key=lambda k: (version_of(k), k))], refs)
     if series:
         lines += ["## Marginal cost of user code", "",
-                  "From the scaling/ series: `per step` is what one more operation costs, `intercept` is",
-                  "the constant cost of pulling the library in. They move independently - a release can",
-                  "improve the intercept while making the slope worse, and only `broad` (a distinct unit",
+                  "From the scaling/ series: `per step` is what one more operation costs, `intercept` is "
+                  "the constant cost of pulling the library in. They move independently - a release can "
+                  "improve the intercept while making the slope worse, and only `broad` (a distinct unit "
                   "per step) exercises the second. `narrow` reuses five types, as production code does.", ""]
         lines += series
 
     if module_keys:
         lines += ["## C++20 modules", "",
-                  "Building the module interfaces is a cost every consumer of a configuration shares, so it is",
-                  "reported here in full rather than folded into the consumer numbers below it. Total cost of a",
+                  "Building the module interfaces is a cost every consumer of a configuration shares, so it is "
+                  "reported here in full rather than folded into the consumer numbers below it. Total cost of a "
                   "configuration is the interface build (once) plus its consumers.", ""]
         cols = sorted(module_keys, key=lambda k: (version_of(k), k))
         labels, suffix = shorten_labels(cols)
@@ -1271,10 +1273,10 @@ def render_report(payloads):
     lines = [*story, *PREAMBLE, "<details><summary>All measurements</summary>", "", *legend, "",
              *lines, "</details>", ""]
     lines += ["<details><summary>How this was measured</summary>", ""] + notes + [
-        "", "Instantiation counts are bit-deterministic for a pinned compiler and peak memory varies by",
-        "<0.1% between runs, so both are comparable across every column above. Wall time is not: each",
-        "configuration is measured on its own runner, and CI runners differ in CPU and in load, so",
-        "compare time only within a column, never between columns. Presentation-quality timings need a",
+        "", "Instantiation counts are bit-deterministic for a pinned compiler and peak memory varies by "
+        "<0.1% between runs, so both are comparable across every column above. Wall time is not: each "
+        "configuration is measured on its own runner, and CI runners differ in CPU and in load, so "
+        "compare time only within a column, never between columns. Presentation-quality timings need a "
         "quiet machine and `bench.py time`, which interleaves the arms.", "", "</details>"]
     return "\n".join(lines)
 
