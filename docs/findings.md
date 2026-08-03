@@ -975,11 +975,69 @@ this week. Reapplying the same transformation mechanically to current master, 14
 Bit-identical. Numbers that identical demand proof the experiment ran at all - §8's lesson - so an
 `#error` was injected into the patched header and confirmed to fire from the workflow's include path.
 
-**And the reason is in the signatures: every one of those functions is `consteval auto`.** Deducing a
-placeholder return type requires instantiating the body, so `decltype(f())` cannot skip anything. The
-technique only pays when the callee has an *explicit* return type. That is a real, transferable rule,
-and it took a metric that did not exist in 2024 to establish it - the original decision to revert was
-correct, and now it is correct *for a stated reason* rather than a hunch.
+**The reason is that the technique was made redundant by the fix that replaced it.** What
+`decltype(f()){}` avoids is *re-evaluating* a consteval function at every call site. The November 2024
+memoization achieves the same thing by other means: `get_canonical_unit_result<U>::value` is computed
+once per type and read thereafter. With the caches in place there is no repeated evaluation left for
+`decltype` to remove, which is exactly why both metrics are unmoved.
+
+A secondary reason reinforces it: these functions are all `consteval auto`, so `decltype(f())` still
+forces return-type deduction and therefore body instantiation. The technique can only ever avoid
+*evaluation*, never instantiation, and it needs an explicit return type to avoid even that.
+
+Which makes the two approaches **substitutes, not complements** - and the June attempt was reverted
+five months *before* the memoization that superseded it, so it was never a fair fight. The interesting
+question is which of the two is cheaper, because they are not equivalent in cost: a memoizing variable
+template costs one class instantiation per type, while `decltype` on an explicit-return-type function
+costs nothing. That is a real experiment, and it needs the memoization stripped first (see
+`memoization-experiment`) - measuring `decltype` against a memoized tree, as done above, can only ever
+return zero.
+
+### Two custom traits: one win, one expired
+
+mp-units replaces two standard traits with its own, from `perf:` commits in December 2020
+(`3d081d37e`, `a365bca07`). Neither had been measured since. Re-pointing each at the `std` version
+one line at a time, so no call site moves:
+
+| workflow | as shipped | `std::conditional_t` | `std::is_same_v` |
+|---|---:|---:|---:|
+| `si_umbrella` (libc++) | 11206 | 11329 (**+1.10%**) | 11206 (**+0.00%**) |
+| `isq_umbrella` (libc++) | 22199 | 22687 (**+2.20%**) | 22199 (**+0.00%**) |
+| `broad_064` (libc++) | 25776 | 26120 (**+1.33%**) | 25776 (**+0.00%**) |
+| `si_umbrella` (libstdc++) | 14432 | 14555 (+0.85%) | 14432 (+0.00%) |
+| `isq_umbrella` (libstdc++) | 25667 | 26155 (+1.90%) | 25667 (+0.00%) |
+
+**`conditional` is a genuine, validated win: 0.85-2.20% of all instantiations, on both standard
+libraries, from 21 usages.** The idiom is worth naming because it generalises to any trait selecting
+between types - put the alias template *inside* a class template specialized on the `bool`:
+
+```cpp
+template<bool> struct conditional_impl { template<typename T, typename F> using type = F; };
+template<> struct conditional_impl<true> { template<typename T, typename F> using type = T; };
+template<bool B, typename T, typename F> using conditional = detail::conditional_impl<B>::template type<T, F>;
+```
+
+Only ever **two** class instantiations exist, no matter how many type pairs pass through, where
+`std::conditional<B, T, F>` instantiates one per distinct triple. Measured in isolation: exactly one
+instantiation saved per use.
+
+**`is_same_v` is exactly neutral - 0.00%, on both standard libraries, on both metrics, across 66
+usages.** The custom version is a partially-specialized variable template; `std::is_same_v` in both
+libc++ and libstdc++ is the `__is_same` builtin, which costs nothing either. There is no work left to
+avoid.
+
+That is very likely an optimization that *was* real when it was written in 2020 and has since been
+made redundant by the standard libraries adopting builtins. We did not measure a 2020 toolchain, so
+that reading is a hypothesis - but the shipped code is 66 call sites of custom trait with no
+measurable benefit today, which is the same maintenance cost with none of the payoff.
+
+**Optimizations expire.** That is the lesson worth carrying: an unmeasured optimization is not merely
+unverified, it is *undated*. The compiler and standard library it was written against are moving
+targets, and the only way to notice a win evaporating is to keep measuring it. Neither of these was
+re-measured for six years.
+
+(Removing `is_same_v` is not free of risk: MSVC and older standard libraries are untested here, and
+the trait may still pay there. The measured claim is narrow - clang-21 with libc++ and libstdc++.)
 
 ### The 2024 diagnosis was right and is still open
 
