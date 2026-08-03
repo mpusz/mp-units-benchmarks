@@ -162,6 +162,54 @@ with `explicitly_convertible<derived_quantity_spec<...>>` at 11305 ms and `detai
 11301 ms as the top templates, and the worst headers being `systems/si.h` (166546 ms over 19
 inclusions) and `systems/si/unit_symbols.h` (157625 ms over 24).
 
+### The history is longer than the `perf:` prefix suggests
+
+Searching the log for `perf:` undercounts it. A whole round in **June 2024** is prefixed `refactor:`,
+and it predates the ~2x claim entirely:
+
+| date | commit | what |
+|---|---|---|
+| 2024-06-05 | `760d48502` | unit `constexpr` evaluation limited to the one call that determines the return type |
+| 2024-06-06 | `e38c7c446` | magnitudes refactored to improve compile times |
+| 2024-06-12 | `ba0ba44dd` | compile-time optimizations for expression templates |
+| 2024-06-13 | `5760d6e15` | the rest of `quantity_spec.h` |
+| 2024-06-13 | `921aae23d` | `explode` and `get_complexity` |
+| 2024-06-13 | `f63c4eec4` | `get_associated_quantity` and hierarchy traversal |
+| 2024-06-14 | `f49b4c6f5` | **"compile-time optimizations reverted"** - 15 files, 680 deletions, including 852 lines of `quantity_spec.h` |
+
+So the full picture is **five rounds, not three**: June 2024 (`refactor:`), November 2024 (`perf:`,
+the ~2x), December 2024, February 2026, July 2026. And the November round used a different technique
+(memoization) than the June one, which is consistent with June not having stuck.
+
+### Three commits that are the argument for this suite
+
+Read in sequence, the history contains its own justification - written by the author, before any of
+this existed.
+
+**An optimization round reverted with no reason recorded.** `f49b4c6f5` has an empty body. It sits on a
+contributor's long-running branch (PR #571) rather than being a decision on master, and two years of
+restructuring since - `magnitude.h` no longer exists - make it genuinely inconclusive whether that work
+survived. Nobody can now say whether June 2024's optimizations are in the library or not. That is what
+an unmeasured optimization looks like eighteen months later.
+
+**An optimization reverted after nineteen days.** `09488409d` (2024-12-09) replaced `QuantitySpec`
+convertibility concepts with direct function calls - a classic compile-time move. `b685521a1`
+(2024-12-28) reverted it. Twelve lines each way.
+
+**An optimization that made a compiler slower, cause unknown.** `dc47ac32d` (2025-04-21), in the
+author's own words:
+
+> *"For some reason this new implementation of `RepresentationOf` was causing long build times again in
+> the Kalman filter examples. I'm not sure why this is and if we should keep the old implementation only
+> for Xcode 15 or if we should revert this implementation change in general."*
+
+And the sentence that sums up the whole problem, from `d00108bb0` (2025-06-10): *"gcc-15 bug workaround
+and **hopefully** a compile-time improvement."* Hopefully. There was no way to check.
+
+None of those four is carelessness. Each is what happens when the only available feedback is how long a
+build feels. A gate does not make anyone smarter - it makes the difference between "hopefully" and
+"measured -8.2%" available at review time.
+
 Two more rounds followed, and both are directly relevant to findings below:
 
 - **February 2026** - `perf: qualified calls added for lots of framework functions` across 20 files,
