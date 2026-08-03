@@ -51,7 +51,11 @@ env:
   COMPARE_REF: ${{ inputs.compare_ref || '' }}
   GATE_CLANG: 21
   # Tighter than the bands mp-units blocks on: borderline growth must go red here first.
-  SLACK: 1
+  # Asymmetric on purpose. Totals grow when the library gains a feature - which must not fail a build - so
+  # SLACK is loose. SLOPE_SLACK is the tight one, because nothing legitimate moves the marginal cost of one
+  # more line of user code. See "Gate semantics" in CLAUDE.md.
+  SLACK: 2 # per-workflow total growth that blocks
+  SLOPE_SLACK: 1 # marginal cost per step - the band that actually means "slower"
   MEDIAN_ALARM: 0.5
   TIGHTEN_NOTICE: 2
   BRANCH_PREFIX: auto/tighten-baselines
@@ -98,10 +102,11 @@ jobs:
             echo "| mp-units ref | \`${MP_UNITS_REF}\` @ $(git -C mp-units describe --tags --always --dirty) |"
             echo "| library version | $(sed -nE 's/.*VERSION[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' mp-units/src/CMakeLists.txt | head -1) |"
             echo "| compiler | $(clang++-${GATE_CLANG} --version | head -1), \`-std=${{ matrix.std }}\` |"
-            echo "| bands | slack ${SLACK}%, median ${MEDIAN_ALARM}%, tighten ${TIGHTEN_NOTICE}% |"
+            echo "| bands | slack ${SLACK}%, slope ${SLOPE_SLACK}%, median ${MEDIAN_ALARM}%, tighten ${TIGHTEN_NOTICE}% |"
             echo
             # One paragraph per echo: GitHub turns a newline inside a paragraph into a line break.
-            echo "- **slack ${SLACK}%** - one workflow growing more than this fails the build."
+            echo "- **slack ${SLACK}%** - one workflow's total growing more than this fails the build. Loose by design: a total grows when the library gains a feature, and that must not be blocked."
+            echo "- **slope ${SLOPE_SLACK}%** - the marginal cost of one more step in the \`scaling/\` series. This is the band that means *slower* rather than *larger*: a feature lifts every total a little and leaves the slope alone. Tighter than slack for that reason."
             echo "- **median ${MEDIAN_ALARM}%** - the median growth across non-umbrella workflows (umbrella/ is excluded: it grows legitimately when the systems do). A median this size means the whole framework got more expensive, not one workflow, and should almost never be re-recorded away."
             echo "- **tighten ${TIGHTEN_NOTICE}%** - an improvement this large opens a PR re-recording the baselines, because a stale baseline hides a later regression of the same size."
             echo
@@ -151,8 +156,8 @@ jobs:
         run: |
           runner/bench.py --repo mp-units --cxx clang++-${{ env.GATE_CLANG }} --std ${{ matrix.std }} check \
             --report results/report.json \
-            --slack ${{ env.SLACK }} --median-alarm ${{ env.MEDIAN_ALARM }} \
-            --tighten-notice ${{ env.TIGHTEN_NOTICE }}
+            --slack ${{ env.SLACK }} --slope-slack ${{ env.SLOPE_SLACK }} \
+            --median-alarm ${{ env.MEDIAN_ALARM }} --tighten-notice ${{ env.TIGHTEN_NOTICE }}
       - name: Decide whether the baselines can be tightened
         id: decide
         if: steps.guard.outputs.measure == 'true'
@@ -264,7 +269,7 @@ jobs:
       - name: Fail on regression
         if: steps.check.outcome == 'failure'
         run: |
-          echo "counts grew past the ${SLACK}% band (or the ${MEDIAN_ALARM}% median) - see the annotations above"
+          echo "a gated metric moved past its band - see the tables and the single annotation above"
           exit 1
 
   measure:
