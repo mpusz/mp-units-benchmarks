@@ -486,8 +486,15 @@ def gate_summary_line(text, kind="notice"):
 
 
 def total(entry):
-    """class + function instantiations, or None when the workflow is n/a or failed to compile."""
-    return entry["InstantiateClass"] + entry["InstantiateFunction"] if isinstance(entry, dict) else None
+    """class + function instantiations; "FAIL" when it did not compile, None when it is n/a.
+
+    Those two must stay distinguishable all the way to the table. A workflow excluded by its REQUIRES
+    floor is expected; one that applies and fails to build is a finding, and rendering both as `n/a`
+    hides it - the REQUIRES floor is per minor version, so a workflow can pass the floor and still fail
+    against a mid-development ref of that same version."""
+    if isinstance(entry, dict):
+        return entry["InstantiateClass"] + entry["InstantiateFunction"]
+    return "FAIL" if entry == "FAIL" else None
 
 
 def materialize(args, refs):
@@ -524,7 +531,7 @@ def cmd_counts(args):
         for name in names:
             totals = [total(measured[ref].get(name)) for ref in refs]
             delta = None
-            if totals[0] and totals[-1]:
+            if all(isinstance(v, int) for v in (totals[0], totals[-1])) and totals[0]:
                 delta = (totals[-1] - totals[0]) / totals[0]
             rows.append((name, *totals, delta))
         print_table([*refs, f"{refs[-1]} vs {refs[0]}"], rows,

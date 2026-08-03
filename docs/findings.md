@@ -775,7 +775,104 @@ Which is itself the talk's thesis in miniature: **the advice that circulates is 
 easy to state, not the advice with the largest measured effect.** A one-line constraint change worth
 4 instantiations per user expression (§8) never appears on anyone's slide deck.
 
-## 11. What is gated today
+## 11. First results from attributing inclusion cost
+
+Inclusion is 90-99% of a realistic TU (§4), so it is where the attribution went first: group the
+instantiation events of a TU that includes a header and *uses almost nothing*, by entity, arguments
+collapsed.
+
+An objection has to be dealt with before reading the output. You cannot make this work lazy in general,
+because a unit's or quantity's **equation is its template argument** - `newton` is
+`named_unit<"N", kilogram * metre / square(second)>`, and that expression must be instantiated to name
+the type at all. So the question is not "what could be deferred" but **"what appears here that is an
+*analysis of* the equation rather than the equation itself"**, since analyses are already lazy by
+construction: a static data member of a class template is instantiated only when used, which is exactly
+what the 2024 memoization gave for free.
+
+| `umbrella/si_umbrella` - 11206 events, 579 entities | count | share |
+|---|---:|---:|
+| `detail::scaled_unit_impl` + `scaled_unit` + `prefixed_unit` | 2069 | **18.5%** |
+| `std::is_trivially_{destructible,move_constructible,copy_constructible}` | 933 | **8.3%** |
+| `std::basic_string` | 223 | 2.0% |
+| `detail::type_list_merge_many_sorted_impl` | 178 | 1.6% |
+| `detail::operator*` | 166 | 1.5% |
+| `detail::unit_magnitude` + `magnitude_base` + `prime_factorization` | 438 | 3.9% |
+
+| `umbrella/isq_umbrella` - 22199 events, 599 entities | count | share |
+|---|---:|---:|
+| `std::is_trivially_{destructible,move_constructible,copy_constructible}` | 1902 | **8.6%** |
+| `detail::type_list_*` (merge_many_sorted, size, merge_sorted, push_front, map, front, element) | 3301 | 14.9% |
+| `detail::expr_*` (simplify, consolidate, fractions, fractions_result, fractions_impl) | 1887 | 8.5% |
+| `detail::try_extract_common_base` | 540 | 2.4% |
+| `detail::get_optimized_expression` | 315 | 1.4% |
+
+So `si.h` is dominated by a **per-definition tax** - 41 `named_unit`s and 24 prefixes produce 2069
+instantiations of the unit-construction machinery, and that is already *after* July's
+`derive prefixed_unit directly from scaled_unit`. `isq.h` is dominated by **type-list and expression
+machinery**. Almost nothing here is deferrable analysis, which confirms the objection and redirects the
+work to per-definition cost.
+
+### One three-line change worth 8.7%
+
+The `std::is_trivially_*` rows are the exception: they are not equation, not analysis, just a tax. They
+come from one concept in `symbolic_expression.h`, checked for every unit, dimension and quantity spec:
+
+```cpp
+concept SymbolicConstant = SymbolicArg<T> && std::is_empty_v<T> && std::is_trivially_default_constructible_v<T> &&
+                           std::is_trivially_copy_constructible_v<T> && std::is_trivially_move_constructible_v<T> &&
+                           std::is_trivially_destructible_v<T>;
+```
+
+Each named `std` trait costs one class template instantiation *per symbolic constant*. The compiler
+builtins are the same predicates by definition - `is_trivially_copy_constructible_v<T>` is specified as
+`is_trivially_constructible<T, const T&>` - without the instantiation. Replacing them:
+
+| workflow | before | after | delta |
+|---|---:|---:|---:|
+| `umbrella/si_umbrella` | 11206 | 10291 | **-8.2%** |
+| `umbrella/isq_umbrella` | 22199 | 20381 | **-8.2%** |
+| `scaling/narrow_064` | 20502 | 18651 | **-9.0%** |
+| `scaling/broad_064` | 25776 | 23490 | -8.9% |
+| `isq/derived_spec_conversions` | 22331 | 20303 | -9.1% |
+| `affine/temperature_points` | 14882 | 13430 | **-9.8%** |
+| `text/output_format` | 14542 | 13450 | -7.5% |
+| `parity/kinetic_energy` | 12634 | 11587 | -8.3% |
+| `systems/user_defined_units` | 18295 | 16768 | -8.3% |
+
+Uniform 7.5-9.8%, median -8.7%, every workflow still compiling. Constant evaluations drop by the same
+915 on `si_umbrella`, consistent with the traits being the whole of it.
+
+Portability is the only wrinkle, and `__has_builtin` settles it: clang and GCC 16 have
+`__is_trivially_destructible`; GCC 14 and 15 have only `__has_trivial_destructor`, which is equivalent
+for a type already known to be empty. Gated on `__has_builtin`, the portable form measures bit-identical
+to the clang-only one. MSVC is untested here.
+
+Two honest caveats. The corpus has no negative tests, so it shows the concept still *accepts* what it
+should and cannot show it still *rejects* what it should - mp-units' own test suite has to confirm that.
+And the GCC wall-time check was worthless: best-of-3 said +7.7%, best-of-9 said -3.1% on g++-15 and
++7.4% on g++-16, with a 24-41% spread *within* a single arm. A textbook demonstration of §2 - the
+deterministic count is the only number here worth quoting.
+
+### The 2024 diagnosis was right and is still open
+
+The attribution above independently rediscovers what mp-units#643 concluded in November 2024 from
+ClangBuildAnalyzer flame graphs: the cost centres were `_multiply_impl` on magnitudes, `expr_map`
+(which, in the issue's words, *"gets the expression template of one abstraction and maps it to another.
+To get from one type list to a second type list, it uses C++ operators. Maybe it is possible to
+implement it directly on typelists?"*), `are_ingredients_convertible`, `explode`, and some
+`get_canonical_unit` overloads.
+
+Today, on a tree three optimization rounds later: `type_list_*` is 14.9% of `isq.h`, `expr_*` another
+8.5%, and `detail::operator*` shows up in `si.h` - which is literally the "it uses C++ operators" cost
+the issue names. No `perf:` commit has ever targeted `expr_map` or the type-list operations.
+
+And the same machinery is the marginal-cost regression from §8: `type_list_merge_many_sorted_impl` at
++5.5 instantiations per step. **Four independent lines of evidence - a 2024 flame graph, a 2026 entity
+attribution, a scaling-slope regression, and V3's plan to replace template tricks with inheritance and
+aggregation - all point at type-list expression mapping.** That convergence is the strongest signal the
+suite has produced.
+
+## 12. What is gated today
 
 Four bit-deterministic numbers, all from one traced compile, per configuration:
 
@@ -824,7 +921,7 @@ wrong predictions from named people who were reasoning sensibly, and numbers for
 13. **The advice everyone gives, checked** — and why this suite cannot verify it. (§10)
 14. **What we gate now, and what we deliberately don't** — including a metric rejected for being 0.97
     correlated with one we had. (§2, §11)
-15. **Building the instrument with an agent**: what to trust, what to check. (§9)
+16. **Building the instrument with an agent**: what to trust, what to check. (§9)
 
 **Blog-length cut:** §0 down to the 2.5.0-vs-master table as the hook, then §2 (metric choice,
 including the 0.69 and 0.97 correlations) and §6 (the `output_format` chase, ending on the
