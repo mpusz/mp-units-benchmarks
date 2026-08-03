@@ -609,6 +609,41 @@ def baseline_deltas(baseline, results, extract):
     return details
 
 
+def slope_from(entries, extract):
+    """Marginal cost of one more step, per shape, from a flat {workflow: entry} mapping.
+
+    This is the number a gate on totals cannot see properly. Adding a feature to the library lifts every
+    workflow's total by a similar small amount; making the library slower per unit of user code lifts the
+    slope. Gating only totals therefore blocks growth and under-reacts to regression - and the slope is
+    only ~62% of `broad_256`'s total, so even that workflow dilutes a slope move by a third."""
+    out = {}
+    for shape in ("narrow", "broad"):
+        sizes = {}
+        for name, entry in entries.items():
+            m = re.fullmatch(rf"scaling/{shape}_(\d+)", name)
+            if not m or not isinstance(entry, dict):
+                continue
+            value = extract(entry)
+            if isinstance(value, (int, float)):
+                sizes[int(m.group(1))] = value
+        if len(sizes) >= 2:
+            lo, hi = min(sizes), max(sizes)
+            out[shape] = (sizes[hi] - sizes[lo]) / (hi - lo)
+    return out
+
+
+def slope_deltas(baseline, results, extract):
+    """Per-shape baseline/current/relative-delta for the scaling slopes, skipping shapes absent
+    from either side so a baseline predating the series does not read as change."""
+    base, cur = slope_from(baseline, extract), slope_from(results, extract)
+    out = {}
+    for shape in sorted(base):
+        if shape in cur and base[shape]:
+            out[shape] = {"baseline": base[shape], "current": cur[shape],
+                          "rel": (cur[shape] - base[shape]) / base[shape]}
+    return out
+
+
 def assert_same_config(recorded, tc: Toolchain, where):
     """Numbers from another configuration are not a baseline, they are a different measurement."""
     for field, current in (("cxx", tc.cxx), ("std", tc.std), ("stdlib", tc.standard_library),
@@ -617,6 +652,26 @@ def assert_same_config(recorded, tc: Toolchain, where):
         if was is not None and was != current:
             sys.exit(f"{where} was recorded with {field}={was!r}, this run uses {current!r}; "
                      f"counts are only comparable within one configuration")
+
+
+def gate_slope_table(slopes, band, tc: Toolchain):
+    """The marginal-cost table. Separate from the per-workflow one because it answers a different
+    question: not "did this workflow grow" but "did one more line of user code get more expensive"."""
+    rows = [[shape, f"{d['baseline']:.1f}", f"{d['current']:.1f}", f"{d['rel'] * 100:+.2f}%",
+             f"{band * 100:g}%", f"{(band - d['rel']) * 100:+.2f}pp",
+             "FAILS" if d["rel"] > band else "ok"]
+            for shape, d in sorted(slopes.items())]
+    lines = [f"### marginal cost per step - `{config_key(tc)}`", ""]
+    lines += markdown_table(["shape", "baseline", "current", "delta", "limit", "headroom", ""], rows)
+    lines += ["", "Instantiations per step, from the `scaling/` series. This is the number that separates "
+              "*the library grew* from *the library got slower*: adding a feature lifts every workflow's "
+              "total by a similar small amount, while a real regression lifts the slope. `narrow` reuses "
+              "quantity types, `broad` composes a new derived unit per step.", ""]
+    text = "\n".join(lines)
+    print(text)
+    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(summary, "a") as f:
+            f.write(text + "\n")
 
 
 def gate_summary_table(details, median, args, tc: Toolchain, label="instantiations"):
@@ -668,6 +723,7 @@ def cmd_check(args):
     baseline = recorded["results"]
     slack, alarm, notice = args.slack / 100, args.median_alarm / 100, args.tighten_notice / 100
     advisory_band = args.advisory_slack / 100 if args.advisory_slack is not None else None
+    slope_band = (args.slope_slack if args.slope_slack is not None else args.slack) / 100
     measured = measure_counts(repo, tc)
     per_metric = {label: baseline_deltas(baseline, measured, extract) for label, extract, _ in GATED}
     floors = {label: floor for label, _, floor in GATED}
@@ -687,6 +743,9 @@ def cmd_check(args):
                 if advisory_band is not None and past(d, label, advisory_band) and not past(d, label, slack)}
     deltas = [d["rel"] for d in details.values() if not d["umbrella"]]
     median = statistics.median(deltas) if deltas else 0.0
+    inst = GATED[0][1]
+    slopes = slope_deltas(baseline, measured, inst)
+    slope_regressions = {shape: d for shape, d in slopes.items() if d["rel"] > slope_band}
     if args.report:
         report = Path(args.report)
         report.parent.mkdir(parents=True, exist_ok=True)
@@ -694,14 +753,18 @@ def cmd_check(args):
             {"mp_units_version": ".".join(map(str, detect_version(repo))), **git_provenance(repo),
              "cxx": args.cxx, "std": tc.std, "baseline_key": baseline_file.stem.split("instantiations-")[-1],
              "bands": {"slack": args.slack, "median_alarm": args.median_alarm,
-                       "tighten_notice": args.tighten_notice, "advisory_slack": args.advisory_slack},
-             "median_non_umbrella": median, "regressions": list(regressions),
+                       "tighten_notice": args.tighten_notice, "advisory_slack": args.advisory_slack,
+                       "slope_slack": args.slope_slack if args.slope_slack is not None else args.slack},
+             "median_non_umbrella": median, "slopes": slopes,
+             "slope_regressions": list(slope_regressions), "regressions": list(regressions),
              "improvements": list(improvements), "advisory": list(advisory),
              "workflows": details,
              "metrics": {label: m for label, m in per_metric.items()}}, indent=2) + "\n")
     for label, m in per_metric.items():
         if m:
             gate_summary_table(m, median if label == "instantiations" else None, args, tc, label)
+    if slopes:
+        gate_slope_table(slopes, slope_band, tc)
     # One annotation, not one per workflow. Fifty-two identical ::error:: lines bury the finding they are
     # reporting, and the per-metric table above already carries every delta with its headroom - so the
     # annotation's job is only to name the worst case and say what to do about it.
@@ -714,6 +777,12 @@ def cmd_check(args):
             f"{len(regressions)} regression(s) past the {args.slack:g}% band ({spread}); worst is "
             f"{name} {d['baseline']} -> {d['current']} ({d['rel']:+.1%}). See the table above for all of "
             f"them; if intentional, run bench.py update and commit the new baselines in this PR", "error")
+    for shape, d in slope_regressions.items():
+        gate_summary_line(
+            f"marginal cost regression: the {shape} slope went {d['baseline']:.1f} -> {d['current']:.1f} "
+            f"instantiations per step ({d['rel']:+.1%}, band {slope_band:.0%}). Every translation unit that "
+            f"introduces units pays this, and unlike a total it cannot be explained by the library growing",
+            "error")
     if median > alarm:
         gate_summary_line(f"framework-wide regression: median instantiation growth {median:+.1%} "
                           f"across all workflows - this should almost never be rebaselined away", "error")
@@ -729,7 +798,7 @@ def cmd_check(args):
             f"{len(improvements)} workflow(s) improved past the {args.tighten_notice:g}% notice band; best "
             f"is {best[0]} ({best[1]['rel']:+.1%}) - baselines can be tightened, run bench.py update in a "
             f"follow-up PR", "warning")
-    if not regressions and median <= alarm:
+    if not regressions and not slope_regressions and median <= alarm:
         msg = f"compile-cost gate OK (median instantiation delta {median:+.1%})"
         if improvements:
             msg += f"; {len(improvements)} workflow(s) improved - consider tightening baselines"
@@ -1367,6 +1436,10 @@ def main():
     g.add_argument("--advisory-slack", type=float, metavar="PCT",
                    help="report growth beyond this percent as a warning without failing; use with a "
                         "looser --slack to block only on egregious growth while still flagging the rest")
+    g.add_argument("--slope-slack", type=float, metavar="PCT",
+                   help="band for the marginal cost per step from the scaling/ series (default: --slack). "
+                        "Keep this tighter than --slack: a total can grow because the library gained a "
+                        "feature, but the slope only grows when user code got more expensive")
 
     r = sub.add_parser("report", help="all metrics this compiler can produce, as markdown + JSON")
     r.add_argument("refs", nargs="*", help="git refs to measure (default: WORKTREE)")

@@ -190,7 +190,16 @@ extra flags attached (`--extra-flags=-DFOO=1`): argparse reads a detached `-D...
 All bands below are percents and default to 2, overridable per invocation (see CI - strict here,
 loose in mp-units).
 
-- Per-workflow growth > `--slack` -> error with "run update and commit baselines in this PR".
+- Per-workflow growth > `--slack` (AND past the metric's absolute floor) -> error naming the count, the
+  spread across metrics and the worst case. ONE annotation, not one per workflow: a uniform change used to
+  emit 52 identical `::error::` lines that buried the finding, and the per-metric table already carries
+  every delta with its headroom.
+- Marginal cost per step from the `scaling/` series > `--slope-slack` (default `--slack`) -> error. This is
+  the band that distinguishes "the library grew a feature" from "the library got slower": a feature lifts
+  every total a little, only a real regression lifts the slope. Keep it TIGHTER than `--slack`, because
+  totals must stay loose enough for the library to gain features. Gating totals alone also under-reacts:
+  the slope is ~62% of `scaling/broad_256`'s total, so a +2% slope move shows there as +1.2% and a 2%
+  totals band misses it entirely.
 - Median growth across non-umbrella workflows > `--median-alarm` -> framework-wide regression
   error (should almost never be rebaselined away).
 - Growth > `--advisory-slack` but within `--slack` -> `::warning::` only, never fatal. This is how
