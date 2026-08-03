@@ -1186,7 +1186,206 @@ in this space has published - and both halves are gated metrics here, from the s
 That is the single most useful thing this suite can do for V3: not "reflection should be faster", but a
 before-number for both metrics and a harness that will price the trade the day a branch exists.
 
-## 13. What is gated today
+## 13. Bisecting the slope regression
+
+The window is `60d313bda` (Feb 2026, where the `expr_map` rewrite left the slope at its best) to master.
+189 commits touch `src/`. Rather than bisect - which finds one cause when drift may be multi-step - a
+ladder of ten refs across the window shows the *shape* first.
+
+A measurement note: this ladder computes the slope from `broad_016` -> `broad_064`, which gives ~70-76,
+not the ~122-130 of `broad_016` -> `broad_256`. The series is deliberately non-linear (`unit_for` only
+varies the exponent above I=64), so the two are different quantities. Relative movement is what matters
+and is valid; the absolute numbers must not be mixed.
+
+| date | slope | change | window contains |
+|---|---:|---:|---|
+| 2026-02-27 | 70.1 | - | |
+| 2026-03-28 | 71.7 | **+1.60** | `490d18b64` |
+| 2026-04-11 | 72.5 | +0.88 | |
+| 2026-04-27 -> 06-23 | 72.5 -> 73.1 | +0.6 gradual | |
+| 2026-07-03 | 76.2 | **+3.10** | the two-axis character cluster |
+| 2026-07-17 | 76.6 | +0.44 | |
+| 2026-08-03 | 74.4 | **-2.21** | the four July 24 `perf:` commits |
+
+Bisecting the biggest jump through the June character cluster gives a single commit, and it is **neither**
+of the two standing suspects:
+
+| ref | slope | change | |
+|---|---:|---:|---|
+| `1298be79c` | 73.06 | - | |
+| `619b99df5` | 73.06 | +0.00 | split character into orthogonal axes |
+| `703235d1d` | 73.38 | +0.31 | intrinsic order/field traits - *a standing suspect, and it is not this* |
+| **`e061bf0ef`** | **76.17** | **+2.79** | **replace `disable_real`/`NotQuantity` with `disable_representation`** |
+| `e1c2b9562` ... `88d40e7ce` | 76.17 | +0.00 each | |
+
+The mechanism is in that commit's own message: the representation tier now leads with
+`RepresentationBaseline<T> = !disable_representation<T> && ...`, and `disable_representation`'s default is
+`is_quantity_abstraction<value_type_t<T>>`. Overload resolution for symbolic expressions like `mag * unit`
+evaluates it on every candidate - and every `broad` step introduces a **new unit type**, so it is a fresh
+instantiation per step rather than a cached one.
+
+That is also why July's `9b765ee2e` ("bar stateless tag types from the representation concepts upfront")
+recovered -2.21 of it: barring `SymbolicConstant` types short-circuits the chain before it starts.
+Attribution on current master confirms the fix held - `value_type_impl`, `is_quantity_abstraction` and
+`disable_representation` are all absent from the top 20 entities in the slope.
+
+**And the standing lead was wrong.** `490d18b64` sits in a window worth +1.60, not the +4.0 previously
+recorded, and `703235d1d` - also blamed - is worth +0.31. Both were plausible from a coarse bisection over
+a wider range; neither survives a ladder. Recorded because a wrong lead costs more than no lead.
+
+### The fix is already written
+
+The three `std` traits are +102 instantiations each across those 48 steps - **6.4 per step of the current
+74.4.** So the trait patch from §11, which was measured for its effect on *inclusion*, also does this:
+
+| tree | broad_016 | broad_064 | slope |
+|---|---:|---:|---:|
+| master as shipped | 22205 | 25776 | **74.40** |
+| master + the trait patch | 20225 | 23490 | **68.02** |
+| for reference: 2026-02-27, before the regression | | | 70.1 |
+
+**Three lines take the slope below where it was before the regression window began.** Which is a neat
+demonstration of why the two-axis view matters: a change found by attributing *constant* cost turned out
+to fix a *marginal* cost regression, because - per §12 - they are the same mechanism.
+
+## 14. Two thirds of what you parse is the standard library
+
+A different question with a bigger answer: which standard headers does the core drag in, and are they
+paid for by users who never use the feature?
+
+Standalone cost of every standard header mp-units names, worst first:
+
+| header | instantiations | preprocessed lines |
+|---|---:|---:|
+| `<ostream>` | 1849 | 56,818 |
+| `<chrono>` | 1832 | 61,784 |
+| `<format>` | 1376 | 48,506 |
+| `<complex>` | 1170 | 46,151 |
+| `<locale>` | 1140 | 36,400 |
+| `<sstream>` | 1121 | 39,733 |
+| `<string>` | 685 | 22,271 |
+| `<ranges>` | 150 | 30,333 |
+| ... `<type_traits>`, `<concepts>`, `<limits>`, `<compare>`, `<cstdint>` | 0-2 each | |
+
+**Every one of the top seven is in `si.h`'s closure**, which is 1180 headers deep. They overlap heavily,
+so measure the union rather than the sum:
+
+| translation unit | instantiations |
+|---|---:|
+| all seven together | **2138** |
+| minus `<chrono>` | 1956 (chrono's marginal cost: **182**) |
+| minus `<complex>` too | 1933 (complex's marginal cost: **23**) |
+| minus the ostream family | 1376 (ostream/locale/sstream marginal: **557**) |
+| `<format>` + `<string>` only | 1376 |
+| a cheap core - `type_traits`, `concepts`, `limits`, `utility`, `compare`, `cstdint`, `string_view` | **145** |
+
+So **2138 of `umbrella/si_umbrella`'s 11206 instantiations (19%) are standard-library**, and 1993 of that
+is avoidable in principle. On the parse side it is worse:
+
+| | lines |
+|---|---:|
+| `si_umbrella` preprocessed | 98,241 |
+| the seven std headers | **64,936 (66%)** |
+| all of mp-units' own `src/*.h`, for scale | 25,688 |
+
+**Two thirds of what the compiler parses when you include `si.h` is the standard library.** Instantiation
+counts, being a frontend-work metric, understate this - which is a reminder that they are not a proxy for
+everything (§2).
+
+### Moving an include is not removing it
+
+An important constraint on all of this: relocating `<ostream>` out of one header buys **nothing** if
+another header in the same closure still reaches it - the translation unit pays either way. The unit of
+work is therefore "eliminate this header from the project", not "move this include". Which makes the
+useful question: how many places must *all* be fixed?
+
+Excluding `bits/core_gmf.h` (modules-only, and confirmed absent from the headers closure), the answer is
+better than it looks - most expensive headers have exactly **one** core includer:
+
+| std header | core includers | what is actually used |
+|---|---:|---|
+| `<format>` | 1 - `ext/format.h` | a formatter specialization |
+| `<ostream>` | 1 - `ext/fixed_string.h` | `operator<<` for `basic_fixed_string` |
+| `<ranges>` | 1 - `ext/fixed_string.h` | a `ranges::input_range` constructor |
+| `<sstream>` | 1 - `bits/ostream.h` | one `std::basic_ostringstream` |
+| `<locale>` | 1 - `framework/quantity.h` | one `std::locale` object for `vformat_to` |
+| `<complex>` | 1 - `framework/representation_concepts.h` | the `Complex` concept, complex-scalar support |
+| `<chrono>` | 1 - `framework/customization_points.h` | `treat_as_floating_point_v`, `duration_values<Rep>` |
+| `<string>` | 4 - `dimension.h`, `unit.h`, `bits/unsatisfied.h`, `bits/constexpr_format.h` | |
+
+Three of those are single-use and reimplementable rather than merely relocatable:
+
+- **`<sstream>` for one `basic_ostringstream`** (39,733 lines). mp-units already has `fixed_string` and
+  `inplace_vector`; building the text with those retires the header outright.
+- **`<chrono>` for `duration_values<Rep>`** (61,784 lines) - borrowed to supply the *default* for
+  `representation_values`, i.e. three functions (`zero`, `min`, `max`). Defining them locally removes the
+  largest standard header in the closure. `treat_as_floating_point_v` is the other use and is one line.
+- **`<locale>` for a single default-constructed `std::locale`** passed to `vformat_to` (36,400 lines).
+
+And `ext/fixed_string.h` is the hub - naming a unit pulls it, and it drags `<ostream>`, `<ranges>` and
+(via `ext/format.h`) `<format>` and `<string>`. `<iosfwd>` is enough to *declare* a streaming operator,
+with instantiation deferred to the caller's TU where `<ostream>` is already present.
+
+One coupling to respect before summing anything: `<chrono>`'s and `<complex>`'s marginal costs look tiny
+(182 and 23) **only because `<format>` and the ostream family already pay for the shared libc++
+internals.** Remove those first and these two become expensive again - 1832 and 1170 standalone. Re-measure
+after each step; do not add up the table.
+
+### The module BMIs are over-included, and it is measurable
+
+The same question for the modules build, because `bits/core_gmf.h` is the global module fragment shared by
+**every** component - so `mp_units.core`'s BMI carries every standard header *any* component needs.
+Cross-referencing what the GMF declares against what the headers actually include:
+
+- `<expected>` - declared in the GMF, included by **no header anywhere in the project**.
+- `<random>` - declared in the shared GMF, needed only by `utility/`.
+- `<cassert>`, `<memory>`, `<stdexcept>`, `<version>` - included **unguarded** by core headers but *not*
+  declared in the GMF. The module build currently succeeds because they arrive transitively (`<string>`
+  brings `<memory>`, `<sstream>` brings `<stdexcept>`). Working by luck rather than by construction.
+
+Removing just those two, measured on real BMI builds:
+
+| BMI | stock GMF | minus both | change |
+|---|---:|---:|---:|
+| `mp_units.core` | 24,465,552 | 22,151,472 | **-9.5%** |
+| `mp_units.systems` | 85,332,092 | 82,921,884 | **-2.8%** |
+| `mp_units.utility` | 22,986,684 | **FAILS** | needs `<random>` in its own GMF |
+| core, `<expected>` alone (zero-risk) | 24,465,552 | 24,079,120 | **-1.6%** |
+
+The `utility` failure is the mechanism made visible: `utility/random.h` includes `<random>` itself, and in a
+module build that include is a no-op *only because the GMF already pulled it*. Take it out of the shared GMF
+and the include lands inside the module purview. **So the fix is a per-component GMF**, not a deletion - and
+with one, core drops 9.5% and systems 2.8% while `utility` keeps what it needs. Dropping `<expected>`
+requires nothing at all.
+
+Total BMI footprint today, for scale: **126.6 MB** across the three interfaces.
+
+Note also that any header retired from the headers build must be retired from the GMF too, or the modules
+build keeps paying for it - the two lists have to be maintained together, and today they disagree in both
+directions.
+
+### The chains, which is what a decomposition needs
+
+| std header | reached via | why |
+|---|---|---|
+| `<ostream>`, `<ranges>`, and `<format>`/`<string>` | **`ext/fixed_string.h`** - included by `framework/dimension.h`, `framework/unit.h`, `framework/symbol_text.h` | `operator<<` on `basic_fixed_string`; a `ranges::input_range` constructor; a formatter specialization |
+| `<sstream>` | `bits/ostream.h` - included by `dimension.h`, `unit.h`, `quantity.h`, `quantity_point.h` | stream insertion |
+| `<chrono>` | `framework/customization_points.h` | `std::chrono::treat_as_floating_point_v` and `duration_values<Rep>` as the *default* for `representation_values` |
+| `<complex>` | `framework/representation_concepts.h` | the `Complex` concept and complex-scalar support |
+
+`ext/fixed_string.h` is the hub: naming a unit pulls it, and it drags four expensive headers. The ordinary
+remedies apply and none of them removes a feature - a forward declaration of `std::basic_ostream` for a
+declaration with the definition in an opt-in header; an iterator-pair constructor instead of a
+`ranges::input_range` one; the formatter specialization moved to the formatting header. The `<chrono>`
+dependency is the most striking, because it is 61,784 lines borrowed to supply a *default* for three
+values (`zero`, `min`, `max`) that mp-units could define itself.
+
+One coupling to note before acting: `<chrono>`'s and `<complex>`'s marginal costs look tiny (182 and 23)
+**only because `<format>` and the ostream family already pay for the shared libc++ internals.** Remove
+those first and these two become expensive again - 1832 and 1170 standalone. Order the work accordingly,
+and re-measure after each step rather than summing the table.
+
+## 15. What is gated today
 
 Four bit-deterministic numbers, all from one traced compile, per configuration:
 
