@@ -965,6 +965,133 @@ def scaling_section(cells, columns, refs, labels=None):
     return lines
 
 
+PREAMBLE = [
+    "<details><summary>How to read this</summary>", "",
+    "A **template instantiation** is one unit of work the compiler does when it stamps out a template",
+    "for a particular set of types. Counting them is exact and machine-independent, which is why this",
+    "is the number the project gates on: the same code and compiler always produce the same count, on",
+    "any machine. **Peak memory** is how much RAM the compiler needed, and varies by less than 0.1%",
+    "between runs, so it is trustworthy too. **Wall-clock time** is what a developer actually waits",
+    "for, but it depends on the machine and its load - times measured on shared CI runners are",
+    "indicative only, and are never compared between columns.",
+    "",
+    "Two costs are worth separating. The **constant cost** is what a file pays merely for using the",
+    "library, before it does anything: including the headers, or importing the module. The **marginal",
+    "cost** is what each further operation adds - and it matters more, because it is multiplied by the",
+    "size of real code. A release can improve one and worsen the other, so they are reported apart.",
+    "", "</details>", "",
+]
+
+
+def pct(old, new):
+    return None if not isinstance(old, (int, float)) or not isinstance(new, (int, float)) or not old \
+        else (new - old) / old
+
+
+def findings(cells, keys, refs):
+    """The few sentences worth reading, ranked. Everything else is in the tables below them.
+
+    Written for someone who has never used the library: each item names the effect and what follows
+    from it, rather than quoting a metric at them."""
+    out = []
+    inst = cells.get("instantiations", {})
+    time = cells.get("time_ms", {})
+    memory = cells.get("peak_mib", {})
+    plain = sorted([k for k in keys if "-modules" not in k and "-importstd" not in k],
+                   key=lambda k: (version_of(k), k))
+    workflows = sorted(w for w in inst if not w.startswith("bmi/"))
+
+    # 1. anything that did not build at all
+    broken = sorted({f"{w} ({k})" for metric in cells.values() for w, row in metric.items()
+                     for (k, _), v in row.items() if v == "FAIL"})
+    if broken:
+        out.append(f"**{len(broken)} measurement(s) failed to compile**, which is a finding rather than "
+                   f"a gap: {', '.join(broken[:4])}{' and others' if len(broken) > 4 else ''}.")
+
+    if len(refs) == 2 and plain:
+        old, new = refs
+        col = plain[-1]
+        deltas = {w: pct(inst[w].get((col, old)), inst[w].get((col, new))) for w in workflows}
+        moved = {w: d for w, d in deltas.items() if d is not None}
+        if moved:
+            median = statistics.median(moved.values())
+            best = min(moved.items(), key=lambda kv: kv[1])
+            worst = max(moved.items(), key=lambda kv: kv[1])
+            tail = (f"The largest growth is `{worst[0]}` at {worst[1]:+.0%}." if worst[1] > 0.005
+                    else "Nothing in the corpus grew.")
+            out.append(f"Compiling the same code against `{new}` instead of `{old}` needs "
+                       f"**{abs(median):.0%} {'fewer' if median < 0 else 'more'}** template "
+                       f"instantiations for a typical workflow (median across {len(moved)}). The largest "
+                       f"improvement is `{best[0]}` at {best[1]:+.0%}. {tail}")
+
+        # 2. the finding totals cannot show: constant cost and marginal cost moving apart
+        fits = [scaling_fit(inst, col, ref) for ref in (old, new)]
+        if all(f.get("broad") for f in fits):
+            (slope_old, base_old), (slope_new, base_new) = (f["broad"] for f in fits)
+            ds, db = pct(slope_old, slope_new), pct(base_old, base_new)
+            if ds is not None and db is not None and (ds > 0.05 > db or abs(ds - db) > 0.1):
+                out.append(f"Constant and marginal cost moved in opposite directions: using the library "
+                           f"at all became **{abs(db):.0%} {'cheaper' if db < 0 else 'dearer'}**, while "
+                           f"each additional distinct unit type became **{abs(ds):.0%} "
+                           f"{'dearer' if ds > 0 else 'cheaper'}** ({slope_old:.0f} -> {slope_new:.0f} "
+                           f"instantiations per unit). A file using a handful of units therefore gains "
+                           f"from this change, and one using many does not.")
+
+        # 3. is this run's wall clock worth reading at all?
+        control = pct(time.get("bmi/std", {}).get((col, old)), time.get("bmi/std", {}).get((col, new)))
+        if control is not None and abs(control) > 0.1:
+            out.append(f"Treat wall-clock numbers in this run as noise: building the standard library "
+                       f"module is identical work in both columns, yet differs by {control:+.0%}. The "
+                       f"instantiation counts are unaffected - they are exact.")
+
+    # 4. what consuming the library as modules is worth
+    for col in sorted([k for k in keys if "-modules" in k], key=lambda k: (version_of(k), k)):
+        base = counterparts([col], keys).get(col)
+        if not base:
+            continue
+        ref = refs[-1]
+        t = [pct(time[w].get((base, ref)), time[w].get((col, ref))) for w in workflows if w in time]
+        m = [pct(memory[w].get((base, ref)), memory[w].get((col, ref))) for w in workflows if w in memory]
+        t, m = [x for x in t if x is not None], [x for x in m if x is not None]
+        build = combine_totals("time_ms", time, [i for i in BMI_ORDER if i in time], col, ref)
+        disk = combine_totals("mib_on_disk", cells.get("mib_on_disk", {}),
+                              [i for i in BMI_ORDER if i in cells.get("mib_on_disk", {})], col, ref)
+        if t and m:
+            out.append(f"Consuming the library as C++20 modules (`{col}`) compiles each file "
+                       f"**{abs(statistics.median(t)):.0%} {'faster' if statistics.median(t) < 0 else 'slower'}** "
+                       f"and uses **{abs(statistics.median(m)):.0%} "
+                       f"{'more' if statistics.median(m) > 0 else 'less'} memory**"
+                       + (f", after building the module interfaces once: {build / 1000:.0f} s"
+                          f"{f' and {disk:.0f} MiB on disk' if disk else ''}." if build else "."))
+        break  # one such statement is enough; the section below has the rest
+
+    # 5. how much of any improvement is really the compiler
+    clangs = [k for k in plain if family_of(k) == "clang"]
+    if len(clangs) >= 2 and len(refs) == 1:
+        lo, hi = clangs[0], clangs[-1]
+        d = [pct(inst[w].get((lo, refs[0])), inst[w].get((hi, refs[0]))) for w in workflows]
+        d = [x for x in d if x is not None]
+        if d and abs(statistics.median(d)) > 0.02:
+            out.append(f"The compiler matters as much as the library: `{hi}` needs "
+                       f"**{abs(statistics.median(d)):.0%} fewer** instantiations than `{lo}` for "
+                       f"identical code, so part of what users experience as the library improving is "
+                       f"their toolchain improving.")
+
+    # 6. n/a is not failure - but only count real gaps: a configuration that produces no counts at
+    # all (any GCC) is not a workflow being skipped, and bmi/ rows exist only under modules.
+    gaps = 0
+    for metric, per_workflow in cells.items():
+        measured = {(k, ref) for row in per_workflow.values() for (k, ref) in row}
+        for name, row in per_workflow.items():
+            if name.startswith("bmi/"):
+                continue
+            gaps += sum(1 for pair in measured if pair not in row)
+    if gaps:
+        out.append(f"{gaps} cell(s) below are `n/a`: the workflow does not apply to that library "
+                   f"version or language standard (a declared floor), not a failure.")
+    return out
+
+
 def render_report(payloads):
     refs = refs_oldest_first(payloads)
     keys, cells, notes = [], {}, []
@@ -1057,7 +1184,11 @@ def render_report(payloads):
               "- **FAIL** - the workflow applies to that ref but did not compile."]
     if len(refs) == 2:
         legend.insert(0, f"- Cells read `{refs[0]} -> {refs[1]} (change)`, oldest library version first.")
-    lines = [*legend, "", *lines]
+    story = findings(cells, keys, refs)
+    if story:
+        story = ["## What changed", "", *[f"{i}. {s}" for i, s in enumerate(story, 1)], ""]
+    lines = [*story, *PREAMBLE, "<details><summary>All measurements</summary>", "", *legend, "",
+             *lines, "</details>", ""]
     lines += ["<details><summary>How this was measured</summary>", ""] + notes + [
         "", "Instantiation counts are bit-deterministic for a pinned compiler and peak memory varies by",
         "<0.1% between runs, so both are comparable across every column above. Wall time is not: each",
