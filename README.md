@@ -74,12 +74,14 @@ Three metrics, with very different trust levels:
    standard, machine-independent, and it measures exactly what makes C++ headers slow. This is the
    **gated** metric. It needs clang, and the count depends on `-std`, so the gate always runs with
    the standard the baselines were recorded with.
-2. **Compile-time constant evaluations** and **emitted object code** (`bench.py counts`) — also exact,
-   also from the same traced compile, and gated alongside instantiations. They exist because
-   instantiations only measure the *front end*: `text/output_format` emits 430 KiB of object code
-   where a template-heavy workflow emits 1 KiB, spends a third of its time in the optimizer, and no
-   frontend metric notices. A `constexpr`-based implementation trades instantiations for constant
-   evaluations, so both halves are watched.
+2. **Compile-time constant evaluations**, **emitted code** and **symbol metadata**
+   (`bench.py counts`) — also exact, also from the same traced compile, and gated alongside
+   instantiations. They exist because instantiations only measure the *front end*:
+   `text/output_format` spends a third of its time in the optimizer and no frontend metric notices.
+   A `constexpr`-based implementation trades instantiations for constant evaluations, so both halves
+   are watched. Object files are split rather than measured whole, because for that workflow two
+   thirds of the 440 KB is mangled names, not code — and mangled-name volume (linker input, error
+   message length) shrinks by different means than emitted code does.
 3. **Peak compiler memory** (`bench.py time`, `report`) — peak RSS of the compiler process, taken
    from the child's own `rusage`. Measured spread between runs is <0.1% on both clang and GCC, which
    makes it almost as trustworthy as counts, works with **any** compiler, and maps directly onto

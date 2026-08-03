@@ -32,6 +32,7 @@ import os
 import platform
 import re
 import statistics
+import struct
 import subprocess
 import sys
 import tempfile
@@ -369,18 +370,51 @@ def measure_counts(repo: Path, tc: Toolchain, patterns=None):
                 results[name] = "FAIL"
                 continue
             data = json.loads(trace.read_text())
-            # Instantiations are frontend work. Two more deterministic numbers come free from the same
-            # compile and cover what they cannot see: constant evaluation (which a constexpr-based
-            # implementation trades instantiations for) and how much code was emitted (which is what
-            # the optimizer's time tracks - std::format costs 430 KiB of object code against 1 KiB for
-            # a template-heavy workflow, and no frontend metric notices).
+            # Instantiations are frontend work. Three more deterministic numbers come free from the
+            # same compile and cover what they cannot see: constant evaluation (which a constexpr
+            # implementation trades instantiations for), and the object file split into the code that
+            # reaches the binary versus the symbol metadata that does not - see object_sizes().
             counts = {"InstantiateClass": 0, "InstantiateFunction": 0, "EvaluateAsConstantExpr": 0}
             for e in data["traceEvents"]:
                 if e.get("ph") == "X" and e["name"] in counts:
                     counts[e["name"]] += 1
-            counts["object_bytes"] = out.stat().st_size if out.exists() else None
+            counts.update(object_sizes(out))
             results[name] = counts
     return results
+
+
+def object_sizes(obj: Path) -> dict:
+    """Split an object file into the two costs that look identical on disk but have nothing in
+    common.
+
+    `code_bytes` is every SHF_ALLOC section - the machine code, constants and unwind tables that
+    actually reach the binary. `symbol_bytes` is the rest of the file: symbol table, string table and
+    relocations. For text/output_format the split is 142 KiB of code against 289 KiB of metadata -
+    two thirds of the file is mangled names, 662 symbols averaging 101 characters. They deserve
+    separate rows because they have separate remedies: code shrinks by instantiating fewer copies of
+    the write path, metadata shrinks by keeping details out of the object's symbol table.
+
+    ELF is parsed here rather than shelled out to llvm-size, which is not installed on every runner
+    that has clang. A non-ELF or truncated file reports None rather than a wrong number.
+    """
+    blank = {"object_bytes": None, "code_bytes": None, "symbol_bytes": None}
+    try:
+        raw = obj.read_bytes()
+    except OSError:
+        return blank
+    total = len(raw)
+    if raw[:4] != b"\x7fELF" or raw[4] != 2:  # 2 = ELFCLASS64
+        return {**blank, "object_bytes": total}
+    (shoff,) = struct.unpack_from("<Q", raw, 0x28)
+    shentsize, shnum = struct.unpack_from("<HH", raw, 0x3A)
+    if not shoff or shoff + shentsize * shnum > total:
+        return {**blank, "object_bytes": total}
+    code = 0
+    for i in range(shnum):
+        sh_type, sh_flags, _addr, _off, sh_size = struct.unpack_from("<4xIQQQQ", raw, shoff + i * shentsize)
+        if sh_flags & 0x2 and sh_type != 8:  # SHF_ALLOC, and not SHT_NOBITS (occupies no file space)
+            code += sh_size
+    return {"object_bytes": total, "code_bytes": code, "symbol_bytes": total - code}
 
 
 def compile_once(cmd, cwd=None):
@@ -476,10 +510,10 @@ def cmd_counts(args):
     measured = {ref: measure_counts(r, tc, args.workflows) for ref, r in repos.items()}
     if len(refs) == 1:
         results = measured[refs[0]]
-        print_table(["inst_class", "inst_func", "const_eval", "obj_KiB"],
+        print_table(["inst_class", "inst_func", "const_eval", "code_B", "syms_B"],
                     [(n, *[v[k] if isinstance(v, dict) else v
-                           for k in ("InstantiateClass", "InstantiateFunction", "EvaluateAsConstantExpr")],
-                      round(v["object_bytes"] / 1024) if isinstance(v, dict) and v.get("object_bytes") else v)
+                           for k in ("InstantiateClass", "InstantiateFunction", "EvaluateAsConstantExpr",
+                                     "code_bytes", "symbol_bytes")])
                      for n, v in sorted(results.items())],
                     lambda v: "n/a" if v is None else str(v))
     else:
@@ -531,11 +565,14 @@ def cmd_time(args):
 
 # Every gated number must be bit-deterministic for a pinned compiler. Instantiations are frontend
 # work; constant evaluations are what a constexpr-based implementation trades them for; emitted code
-# is what the optimizer's time tracks, and no frontend metric can see it. Peak memory is deliberately
-# absent: it correlates 0.97 with instantiations, so it would only ever fire when they already had.
+# is what the optimizer's time tracks (and what a constexpr helper that stops folding away starts
+# producing); symbol metadata is mangled-name volume, which is linker input and error-message length
+# rather than anything that runs. Peak memory is deliberately absent: it correlates 0.97 with
+# instantiations, so it would only ever fire when they already had.
 GATED = (("instantiations", lambda e: e["InstantiateClass"] + e["InstantiateFunction"]),
          ("constant evaluations", lambda e: e.get("EvaluateAsConstantExpr")),
-         ("emitted object code", lambda e: e.get("object_bytes")))
+         ("emitted code (bytes)", lambda e: e.get("code_bytes")),
+         ("symbol metadata (bytes)", lambda e: e.get("symbol_bytes")))
 
 
 def baseline_deltas(baseline, results, extract):
@@ -711,7 +748,8 @@ def cmd_update(args):
 
 METRICS = (("instantiations", "template instantiations (InstantiateClass + InstantiateFunction)"),
            ("const_evals", "compile-time constant evaluations (what constexpr code costs instead)"),
-           ("object_kib", "object code emitted (KiB - what the optimizer's time tracks)"),
+           ("code_bytes", "emitted code (bytes reaching the binary - what the optimizer's time tracks)"),
+           ("symbol_bytes", "symbol metadata (bytes of mangled names and relocations - linker input)"),
            ("time_ms", "wall time (ms, best of K - only trustworthy on a quiet machine)"),
            ("peak_mib", "peak compiler memory (MiB, best of K)"),
            ("mib_on_disk", "BMI size on disk (MiB)"))
@@ -797,8 +835,8 @@ def cmd_report(args):
             metrics["instantiations"].setdefault(name, {})[ref] = "FAIL" if entry == "FAIL" else total(entry)
             if isinstance(entry, dict):
                 metrics["const_evals"].setdefault(name, {})[ref] = entry.get("EvaluateAsConstantExpr")
-                obj = entry.get("object_bytes")
-                metrics["object_kib"].setdefault(name, {})[ref] = round(obj / 1024, 1) if obj else None
+                for key in ("code_bytes", "symbol_bytes"):
+                    metrics[key].setdefault(name, {})[ref] = entry.get(key)
         for name, entry in sorted(timed[ref].items()):
             # None means the workflow does not apply to this ref (version floor); "FAIL" means it
             # applies and did not compile. Collapsing both into n/a hides a real failure.
