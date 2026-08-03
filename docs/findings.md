@@ -890,7 +890,56 @@ builtins are the same predicates by definition - `is_trivially_copy_constructibl
 Uniform 7.5-9.8%, median -8.7%, every workflow still compiling. Constant evaluations drop by the same
 915 on `si_umbrella`, consistent with the traits being the whole of it.
 
-Portability is the only wrinkle, and `__has_builtin` settles it: clang and GCC 16 have
+**It is libc++-only, and that is the more interesting result.** Repeating the measurement against
+libstdc++:
+
+| workflow | stdlib | before | after | delta |
+|---|---|---:|---:|---:|
+| `umbrella/si_umbrella` | libc++ | 11521 | 10606 | **-7.9%** |
+| `umbrella/isq_umbrella` | libc++ | 23365 | 21547 | **-7.8%** |
+| `umbrella/si_umbrella` | libstdc++ | 14432 | 14432 | **+0.0%** |
+| `umbrella/isq_umbrella` | libstdc++ | 25667 | 25667 | **+0.0%** |
+
+Exactly neutral on libstdc++, because libstdc++ already defines all of these `_v` helpers as direct
+builtins. So this is not "mp-units was using traits wrong" - it is **libc++ leaving ~8% on the table for
+any heavily-templated library**, because three of its traits are class templates where libstdc++ uses a
+builtin. Worth an upstream report as well as a local fix; the local fix is still worth making, since it
+helps libc++ users and costs libstdc++ users nothing.
+
+### What the trait spellings actually cost
+
+Since "use `::value` instead of the `_v` helper, it instantiates less" is common advice, it is worth
+measuring rather than reasoning about. 200 distinct types per row, baseline row is header overhead, and
+`T<I>` itself costs one instantiation whenever a complete type is required:
+
+| spelling | libc++ | libstdc++ | net of `T<I>`, on libc++ |
+|---|---:|---:|---:|
+| baseline, no trait | 35 | 95 | - |
+| `is_same_v<T,U>` | 35 | 95 | **0** - builtin; does not even require complete types |
+| `is_same<T,U>::value` | 235 | 295 | **+1** |
+| `is_empty_v<T>` | 235 | 295 | **0** - builtin |
+| `is_empty<T>::value` | 435 | - | **+1** |
+| `is_trivially_destructible_v<T>` | 435 | 295 | +1 on libc++, 0 on libstdc++ |
+| `is_trivially_destructible<T>::value` | 435 | - | +1 - *identical to `_v`; the helper is just an alias* |
+| `__is_trivially_destructible(T)` | 235 | 295 | **0** |
+| `is_trivially_copy_constructible_v<T>` | 435 | 295 | +1 on libc++, 0 on libstdc++ |
+| `__is_trivially_constructible(T, const T&)` | 235 | 295 | **0** |
+
+**The `_v` -> `::value` advice is backwards.** Where `_v` is a direct builtin, spelling it `::value`
+*adds* one class instantiation per type. Where `_v` is an alias to a class template, the two are
+byte-identical. On libc++ it is never a win: neutral at best, a pessimization at worst. libc++'s own
+source says so in a comment - it maintains an internal `_IsSame` alias precisely because
+"`is_same<A,B>` and `is_same<C,D>` are guaranteed to be different types", i.e. one instantiation each.
+
+The lever is the third column: the builtin, at exactly **one instantiation saved per type per trait**.
+Three such traits across ~311 symbolic constants is the 933 events this section opened with.
+
+A limitation of the gated metric falls out of this too, and it belongs on the record: clang emits
+`InstantiateClass` and `InstantiateFunction` and **nothing for variable-template instantiation**. So the
+cost of a `_v` helper that is not builtin-backed is only visible through the class it aliases. A change
+that moved work purely between variable templates would be invisible to the gate.
+
+Portability of the builtins is the last wrinkle, and `__has_builtin` settles it: clang and GCC 16 have
 `__is_trivially_destructible`; GCC 14 and 15 have only `__has_trivial_destructor`, which is equivalent
 for a type already known to be empty. Gated on `__has_builtin`, the portable form measures bit-identical
 to the clang-only one. MSVC is untested here.
@@ -900,6 +949,37 @@ should and cannot show it still *rejects* what it should - mp-units' own test su
 And the GCC wall-time check was worthless: best-of-3 said +7.7%, best-of-9 said -3.1% on g++-15 and
 +7.4% on g++-16, with a 24-41% spread *within* a single arm. A textbook demonstration of §2 - the
 deterministic count is the only number here worth quoting.
+
+### Reapplying a reverted optimization, seventeen months later
+
+`ba0ba44dd` (June 2024, "compile-time performance optimizations for expression templates") used one
+technique uniformly: replace `return f<...>()` with `return decltype(f<...>()){}`. These are all
+stateless tag types, so the value is meaningless and only the type matters; `decltype` is an unevaluated
+operand, so - the reasoning goes - the consteval body never gets constant-evaluated.
+
+It is gone from master: zero occurrences of `return decltype(`, and every site the commit touched is
+back to the plain form, line for line. The author's recollection is that it was re-measured and gave
+"nothing besides the code complications".
+
+The suite can now check that, because the benefit such a technique would produce lives almost entirely
+in **constant evaluations** - a metric nobody could count in 2024 and that this suite started gating
+this week. Reapplying the same transformation mechanically to current master, 14 sites:
+
+| workflow | instantiations | constant evaluations |
+|---|---:|---:|
+| `umbrella/si_umbrella` | 11206 -> 11206 (**+0.0%**) | 40045 -> 40045 (**+0.0%**) |
+| `umbrella/isq_umbrella` | 22199 -> 22199 (+0.0%) | 79959 -> 79959 (+0.0%) |
+| `scaling/broad_064` | 25776 -> 25776 (+0.0%) | 100187 -> 100187 (+0.0%) |
+| `isq/derived_spec_conversions` | 22331 -> 22331 (+0.0%) | 81939 -> 81939 (+0.0%) |
+
+Bit-identical. Numbers that identical demand proof the experiment ran at all - §8's lesson - so an
+`#error` was injected into the patched header and confirmed to fire from the workflow's include path.
+
+**And the reason is in the signatures: every one of those functions is `consteval auto`.** Deducing a
+placeholder return type requires instantiating the body, so `decltype(f())` cannot skip anything. The
+technique only pays when the callee has an *explicit* return type. That is a real, transferable rule,
+and it took a metric that did not exist in 2024 to establish it - the original decision to revert was
+correct, and now it is correct *for a stated reason* rather than a hunch.
 
 ### The 2024 diagnosis was right and is still open
 
