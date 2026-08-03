@@ -1039,7 +1039,7 @@ re-measured for six years.
 (Removing `is_same_v` is not free of risk: MSVC and older standard libraries are untested here, and
 the trait may still pay there. The measured claim is narrow - clang-21 with libc++ and libstdc++.)
 
-### The 2024 diagnosis was right and is still open
+### The 2024 diagnosis was right, was acted on, and worked
 
 The attribution above independently rediscovers what mp-units#643 concluded in November 2024 from
 ClangBuildAnalyzer flame graphs: the cost centres were `_multiply_impl` on magnitudes, `expr_map`
@@ -1048,15 +1048,37 @@ To get from one type list to a second type list, it uses C++ operators. Maybe it
 implement it directly on typelists?"*), `are_ingredients_convertible`, `explode`, and some
 `get_canonical_unit` overloads.
 
-Today, on a tree three optimization rounds later: `type_list_*` is 14.9% of `isq.h`, `expr_*` another
-8.5%, and `detail::operator*` shows up in `si.h` - which is literally the "it uses C++ operators" cost
-the issue names. No `perf:` commit has ever targeted `expr_map` or the type-list operations.
+The issue's own suggested answer - implement the mapping directly on type lists instead of routing it
+through C++ operators - **was implemented**, in `60d313bda` (27 February 2026, *"refactor: `expr_map_impl`
+refactored to not switch between domains all the time"*). Prefixed `refactor:`, so a `perf:` search
+misses it; this is the sixth round.
 
-And the same machinery is the marginal-cost regression from §8: `type_list_merge_many_sorted_impl` at
-+5.5 instantiations per step. **Four independent lines of evidence - a 2024 flame graph, a 2026 entity
-attribution, a scaling-slope regression, and V3's plan to replace template tricks with inheritance and
-aggregation - all point at type-list expression mapping.** That convergence is the strongest signal the
-suite has produced.
+Measured against its own parent, it worked:
+
+| workflow | before | after | delta |
+|---|---:|---:|---:|
+| `scaling/broad_016` | 23977 | 23640 | -1.4% |
+| `scaling/broad_064` | 27342 | 27003 | -1.2% |
+| `scaling/broad_256` | 53730 | 52943 | -1.5% |
+| `scaling/narrow_*` | - | - | -1.2% uniformly |
+| `umbrella/si_umbrella` | 13560 | 13324 | **-1.7%** |
+| `umbrella/isq_umbrella` | 21399 | 21400 | +0.0% |
+
+And on the axis that matters for user code, the broad **slope improved from 124.0 to 122.1 per step**.
+Modest, but real and in the right direction.
+
+That reframes an inference I had drawn wrongly. `type_list_merge_many_sorted_impl` being the single
+largest entity in `isq.h` today is **not** evidence the rewrite failed - it is the *consolidated* form
+of work that used to be spread across `operator*` and `expr_multiply`. The cost was concentrated into
+one named entity, which is precisely what makes it attributable now. Concentration is not creation.
+
+The slope regression is therefore a **separate and later** problem: 122.1 per step in February, 130.3
+today, **+6.7% after the rewrite**, from `490d18b64` and the mid-2026 drift (§8) - none of it expression
+mapping. Two distinct issues that the top-entity list makes look like one.
+
+The lesson is about attribution, not about type lists: **the biggest entity in a profile is not
+necessarily the regressed one.** Only a diff against a specific ref tells you which - which is why
+`attribute` takes two measurements and never one.
 
 ## 12. What is gated today
 
