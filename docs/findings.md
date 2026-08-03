@@ -1135,6 +1135,57 @@ in a library whose diagnostics are already hard to read (§7: 450-character mang
 so the decision can be made with the number in hand rather than by feel; a macro would let
 compile-time-sensitive users opt out without degrading everyone's errors.
 
+### The cost is diffuse, which decides the strategy
+
+The obvious next move was to attack the biggest contributor inside that 114. Measuring the distribution
+first says not to bother:
+
+| | |
+|---|---|
+| total | 114.2 instantiations across **48 entities** |
+| largest single entity | 7.8 (6.8%) - and it is one of the three traits the pending patch removes |
+| median entity | **2.0** |
+| top 13 entities | 50% of the cost |
+| top 26 entities | 80% |
+| top 36 entities | 90% |
+| after the trait patch | 90.8 across 45 entities, largest remaining 4.0 |
+
+**There is no hot spot.** Once the traits are gone the biggest single template in the most expensive
+operation in the library is worth 4.4% of it, and the median is 2.0. `expr_fractions` - the helper that
+looked worth attacking, three entities per use for one logical operation - is worth about 1%.
+
+That is a strategy result, not a disappointment:
+
+- **Entity-level optimization is a treadwheel here.** 45 entities at ~2 each; every fix is worth 1-4%,
+  each needs its own correctness argument, and there are dozens.
+- **The trait patch is the only concentrated win available**, and it is concentrated precisely because it
+  deletes the top three entities in one three-line change. That is why it is worth 20.5% while a
+  targeted helper rewrite is worth 1%.
+- **Going meaningfully below 90 per composition requires removing *layers*, not entities.** The 48
+  entities are roughly a pipeline depth of 12-16 templates multiplied by the 2-4 composition operations
+  in `ba * pow<e>(bb)`. Each layer costs about one instantiation per operation, so the lever is pipeline
+  depth.
+
+### A measurable target for the reflection rewrite
+
+Which is exactly the argument for replacing the expression pipeline rather than tuning it - and it now
+has numbers to hit. Per derived-unit composition, today:
+
+| metric | per composition |
+|---|---:|
+| template instantiations | **114.2** |
+| constant evaluations | **335.1** |
+| ratio | 2.93 constant evaluations per instantiation |
+
+A reflection-based implementation does the consolidate / simplify / merge / make-spec work inside one
+`consteval` function over a sequence of `std::meta::info` instead of one template layer per step. The
+prediction is therefore specific and falsifiable: **instantiations should collapse toward zero while
+constant evaluations rise.** Whether that is a win depends entirely on the exchange rate, which nobody
+in this space has published - and both halves are gated metrics here, from the same traced compile.
+
+That is the single most useful thing this suite can do for V3: not "reflection should be faster", but a
+before-number for both metrics and a harness that will price the trade the day a branch exists.
+
 ## 13. What is gated today
 
 Four bit-deterministic numbers, all from one traced compile, per configuration:
