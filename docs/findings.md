@@ -1080,7 +1080,62 @@ The lesson is about attribution, not about type lists: **the biggest entity in a
 necessarily the regressed one.** Only a diff against a specific ref tells you which - which is why
 `attribute` takes two measurements and never one.
 
-## 12. What is gated today
+## 12. What a unit definition actually costs
+
+The attribution in §11 said `si.h` was dominated by a per-definition tax and I divided 2069
+instantiations by 65 definitions to get "~32 each". That was wrong - it averaged three different
+operations with wildly different costs. The right instrument is the one `scaling/` already uses, applied
+to *definitions* instead of expressions: TUs that define K things and nothing else, at K = 1, 8, 32.
+
+| what is defined | K=1 | K=8 | K=32 | per definition | framework floor |
+|---|---:|---:|---:|---:|---:|
+| base unit - `named_unit<"b", kind_of<isq::length>>` | 5794 | 5801 | 5825 | **1.0** | 5793 |
+| prefixed unit - `prefixed_unit<"p", mag_power<10,-n>, U>` | 5839 | 5909 | 6231 | **12.6** | 5826 |
+| derived unit - `ba * pow<e>(bb)` | 5849 | 6605 | 9389 | **114.2** | 5735 |
+
+**Declaring units is free. Composing them is what costs.** A base named unit is one instantiation; a
+prefixed unit twelve; a derived unit built from an equation a hundred and fourteen.
+
+### The constant cost and the marginal cost are the same mechanism
+
+This is the result that reorganises the whole picture. 114 per derived-unit composition is the same
+order as the 130.3 per step the `broad` scaling series measures for *user* code. They are not analogous,
+they are **the same operation**: `si.h` defining `newton` as `kilogram * metre / square(second)` does
+exactly what a user writes when they say `m / s`.
+
+So the suite's two headline numbers - the constant cost of inclusion and the marginal cost of user code -
+have one root cause, and **one fix pays twice**. That is a far better place to be than the earlier
+reading, where inclusion and user cost looked like separate problems needing separate work.
+
+### Where the 114 goes
+
+| group | per definition | share |
+|---|---:|---:|
+| `std::is_trivially_{destructible,move_constructible,copy_constructible}` | 23.4 | **20.5%** |
+| `expr_*` - `fractions`/`fractions_impl`/`fractions_result`, `consolidate_impl`, `map`, `type_map`, `map_contributions`, `make_spec_impl` | ~27.6 | ~24% |
+| `type_list_*` - `merge_many_sorted`, `merge_sorted`, `size`, `front`, `map` | ~17.8 | ~15.6% |
+| `identity_fn::operator()` | 3.0 | 2.6% |
+
+48 distinct entities grow with each definition.
+
+**The trait change from §11 is therefore worth 20% of the most expensive operation in the library**, not
+merely 8% of a translation unit. Same three-line patch, much better framing.
+
+Two smaller observations from the same table:
+
+`expr_fractions`, `expr_fractions_impl` and `expr_fractions_result` each cost ~3.9 per definition - three
+entities for one logical operation. An impl/result split that exists for readability is being paid for
+per composition.
+
+`identity_fn` costs 3.0 per composition and exists purely for diagnostics: the source comment says it
+"helps to resolve an using alias identifier to the actual type identifier in the clang compile-time
+errors". Removing all three call sites measures -1.5% on derived compositions and -0.6%/-1.1% on the
+umbrellas. **That is a priced tradeoff, not a win** - 1% of instantiations against error-message quality
+in a library whose diagnostics are already hard to read (§7: 450-character mangled names). Recorded here
+so the decision can be made with the number in hand rather than by feel; a macro would let
+compile-time-sensitive users opt out without degrading everyone's errors.
+
+## 13. What is gated today
 
 Four bit-deterministic numbers, all from one traced compile, per configuration:
 
@@ -1127,9 +1182,12 @@ wrong predictions from named people who were reasoning sensibly, and numbers for
    names. Settles "object size doesn't matter" with numbers. (§7)
 12. **A one-line constraint change worth 4 instantiations per user expression.** (§8)
 13. **The advice everyone gives, checked** — and why this suite cannot verify it. (§10)
-14. **What we gate now, and what we deliberately don't** — including a metric rejected for being 0.97
+14. **What a unit definition costs** — 1, 12.6, and 114.2 instantiations for base, prefixed and derived.
+    Declaring is free, composing is everything — and inclusion cost and user cost turn out to be one
+    mechanism, so one fix pays twice. (§12)
+15. **What we gate now, and what we deliberately don't** — including a metric rejected for being 0.97
     correlated with one we had. (§2, §11)
-16. **Building the instrument with an agent**: what to trust, what to check. (§9)
+17. **Building the instrument with an agent**: what to trust, what to check. (§9)
 
 **Blog-length cut:** §0 down to the 2.5.0-vs-master table as the hook, then §2 (metric choice,
 including the 0.69 and 0.97 correlations) and §6 (the `output_format` chase, ending on the
