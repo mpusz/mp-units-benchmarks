@@ -727,7 +727,9 @@ def cmd_attribute(args):
         for ref, name, source in pairs:
             ctx = build_modules(repos[ref], tc, Path(tmp) / f"bmi-{ref.replace('/', '_')}")
             tallies.append(trace_entities(repos[ref], tc, source, ctx, Path(tmp)))
-            labels.append(name if len(refs) == 1 else f"{name} @ {ref}")
+            # A 40-character sha as a column header makes the table unreadable.
+            shown = ref[:9] if len(ref) >= 20 and all(c in "0123456789abcdef" for c in ref) else ref
+            labels.append(name if len(refs) == 1 else f"{name} @ {shown}")
 
     left, right = tallies
     rows, total = [], sum(right.values()) - sum(left.values())
@@ -738,6 +740,10 @@ def cmd_attribute(args):
     print(f"### what accounts for the difference: {labels[0]} vs {labels[1]}", "")
     print(f"\nTotal instantiations {sum(left.values())} -> {sum(right.values())} ({total:+d}). Entities "
           f"below are templates with their arguments collapsed, ranked by how much they moved.\n")
+    if not rows:
+        print(f"No entity moved by at least {args.min_delta} instantiation(s): the two measurements "
+              f"instantiate the same templates the same number of times.")
+        return
     print("\n".join(markdown_table(["entity", labels[0], labels[1], "delta"], rows[:args.top])))
     if len(rows) > args.top:
         print(f"\n{len(rows) - args.top} further entities moved by at least {args.min_delta}.")
