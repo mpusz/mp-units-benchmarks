@@ -36,6 +36,8 @@ runner/bench.py $R update                                   # re-record every en
 runner/bench.py $R update --workflows isq/ affine           # re-record only these
 runner/bench.py $R report WORKTREE v2.5.0 --output r.json   # counts+time+memory, markdown + JSON
 runner/bench.py summary r1.json r2.json                     # merge reports (also -> STEP_SUMMARY)
+runner/bench.py $R attribute v2.5.0 master --workflows isq/kind_safe_interfaces   # why it moved
+runner/bench.py $R attribute --workflows scaling/broad_016 scaling/broad_256      # slope, by entity
 runner/bench.py --std c++26 --cxx g++-16 $R report          # any compiler/standard
 runner/bench.py $R --std c++26 --import-std counts          # `import std;` instead of std headers
 runner/bench.py $R --std c++26 --modules --import-std report   # consume mp-units as C++20 modules
@@ -68,6 +70,13 @@ the BMI, so omitting those rows would make modules look free. The std module is 
 flag set - no `-O2`, no `MP_UNITS_*` macros - because it is not part of mp-units and because GCC 16
 ICEs in consumers otherwise. GCC finds BMIs via `gcm.cache` relative to the working directory, so
 those compiles run with `cwd` set to the BMI directory.
+
+`attribute` answers WHICH, where `counts` answers how many: it groups instantiation events by the
+entity instantiated (template arguments collapsed) and diffs exactly two measurements - two refs of
+one workflow ("what did this library change cost"), or two workflows of one ref ("what does the
+bigger one instantiate", which is how a scaling slope gets attributed). Pairs are ordered by library
+version, so a delta always reads old -> new. This is the tool that turned "slope +9.8%" into
+`type_list_merge_many_sorted_impl +5.5 per step`; reach for it before guessing at source.
 
 Metrics: counts are GATED (clang only, bit-deterministic, and `-std`-dependent - so the gate must
 keep the standard its baselines were recorded with); peak RSS from the child's `rusage` varies <0.1%

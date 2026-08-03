@@ -685,6 +685,64 @@ METRICS = (("instantiations", "template instantiations (InstantiateClass + Insta
            ("mib_on_disk", "BMI size on disk (MiB)"))
 
 
+def trace_entities(repo: Path, tc: Toolchain, source: Path, ctx: BuildContext, workdir: Path):
+    """Instantiation events grouped by the entity that was instantiated, from one traced compile.
+
+    `counts` answers how many; this answers WHICH, which is what turns "3% slower" into a name.
+    Template arguments are collapsed - `quantity<metre, double>` and `quantity<second, int>` are one
+    entity - because the interesting unit is the template, not each specialization of it."""
+    out = workdir / "attr.o"
+    run(compile_cmd(tc, repo, out, source, trace=True, ctx=ctx), cwd=ctx.cwd)
+    events = json.loads((workdir / "attr.json").read_text())["traceEvents"]
+    tally = {}
+    for e in events:
+        if e.get("ph") == "X" and e["name"] in ("InstantiateClass", "InstantiateFunction"):
+            entity = re.sub(r"<.*", "<>", e.get("args", {}).get("detail", "(unnamed)"))
+            tally[entity] = tally.get(entity, 0) + 1
+    return tally
+
+
+def cmd_attribute(args):
+    """Diff two measurements by entity, to answer why one costs more than the other.
+
+    Two shapes, because there are two questions. One workflow across two refs: what did a library
+    change make more expensive. One ref across two workflows: what does the bigger one instantiate
+    that the smaller does not - which is how a scaling series' slope gets attributed."""
+    refs = args.refs or ["WORKTREE"]
+    repos = materialize(args, refs)
+    tc = toolchain(args)
+    if not tc.is_clang:
+        sys.exit("attribution reads clang's -ftime-trace; another compiler cannot produce it")
+    selections = {ref: select_workflows(detect_version(repos[ref]), args.workflows, tc.std) for ref in refs}
+    # Oldest library version first, so the delta reads as "what changed on the way to the newer one"
+    # rather than depending on the order the refs happened to be typed in.
+    ordered = sorted(refs, key=lambda r: tuple(detect_version(repos[r])))
+    pairs = [(ref, name, src) for ref in ordered for name, src in sorted(selections[ref].items()) if src]
+    if len(pairs) != 2:
+        sys.exit(f"attribution compares exactly two measurements, got {len(pairs)}: give either two "
+                 f"refs and one workflow, or one ref and two workflows")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tallies, labels = [], []
+        for ref, name, source in pairs:
+            ctx = build_modules(repos[ref], tc, Path(tmp) / f"bmi-{ref.replace('/', '_')}")
+            tallies.append(trace_entities(repos[ref], tc, source, ctx, Path(tmp)))
+            labels.append(name if len(refs) == 1 else f"{name} @ {ref}")
+
+    left, right = tallies
+    rows, total = [], sum(right.values()) - sum(left.values())
+    for entity in sorted(set(left) | set(right), key=lambda k: -(right.get(k, 0) - left.get(k, 0))):
+        a, b = left.get(entity, 0), right.get(entity, 0)
+        if abs(b - a) >= args.min_delta:
+            rows.append([entity, str(a), str(b), f"{b - a:+d}"])
+    print(f"### what accounts for the difference: {labels[0]} vs {labels[1]}", "")
+    print(f"\nTotal instantiations {sum(left.values())} -> {sum(right.values())} ({total:+d}). Entities "
+          f"below are templates with their arguments collapsed, ranked by how much they moved.\n")
+    print("\n".join(markdown_table(["entity", labels[0], labels[1], "delta"], rows[:args.top])))
+    if len(rows) > args.top:
+        print(f"\n{len(rows) - args.top} further entities moved by at least {args.min_delta}.")
+
+
 def cmd_report(args):
     """Measure every metric this toolchain can produce and emit a markdown report plus JSON.
     Counts come from a traced compile, time and memory from an untraced one - tracing inflates
@@ -1071,6 +1129,13 @@ def main():
 
     sub.add_parser("key", help="print the baseline file this configuration resolves to")
 
+    a = sub.add_parser("attribute", help="diff two measurements by entity, to explain a difference")
+    a.add_argument("refs", nargs="*", help="one or two git refs (default: WORKTREE)")
+    a.add_argument("--workflows", nargs="*", help="one or two workflows (substring filters)")
+    a.add_argument("--top", type=int, default=20, help="entities to show (default 20)")
+    a.add_argument("--min-delta", type=int, default=1, help="ignore entities moving less than this")
+    a.add_argument("--worktree-cache", default=str(ROOT / ".worktrees"))
+
     s = sub.add_parser("summary", help="merge report JSONs into one markdown report (+ job summary)")
     s.add_argument("reports", nargs="+", help="JSON files written by `report --output`")
 
@@ -1094,6 +1159,8 @@ def main():
         cmd_report(args)
     elif args.cmd == "summary":
         cmd_summary(args)
+    elif args.cmd == "attribute":
+        cmd_attribute(args)
     elif args.cmd == "key":
         print(baseline_path(args, toolchain(args)))
 
