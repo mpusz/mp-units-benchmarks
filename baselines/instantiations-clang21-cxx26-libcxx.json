@@ -1,7 +1,7 @@
 {
   "mp_units_version": "2.6",
-  "mp_units_sha": "065a5eb000140e21526b9115658ed72c4cea5178",
-  "mp_units_describe": "v2.5.0-672-g065a5eb00",
+  "mp_units_sha": "bb2785aee0389186c2db2582b7fd460e2f223cd6",
+  "mp_units_describe": "bb2785a",
   "cxx": "clang++-21",
   "std": "c++26",
   "stdlib": "libc++",
@@ -9,244 +9,244 @@
   "extra_flags": "",
   "results": {
     "affine/custom_origins": {
-      "InstantiateClass": 8707,
-      "InstantiateFunction": 4077,
-      "EvaluateAsConstantExpr": 46070,
-      "object_bytes": 1248,
+      "InstantiateClass": 7482,
+      "InstantiateFunction": 3976,
+      "EvaluateAsConstantExpr": 43973,
+      "object_bytes": 1296,
       "code_bytes": 84,
-      "symbol_bytes": 1164
+      "symbol_bytes": 1212
     },
     "affine/temperature_points": {
-      "InstantiateClass": 9512,
-      "InstantiateFunction": 5384,
-      "EvaluateAsConstantExpr": 57153,
-      "object_bytes": 1624,
+      "InstantiateClass": 7951,
+      "InstantiateFunction": 5290,
+      "EvaluateAsConstantExpr": 54744,
+      "object_bytes": 1672,
       "code_bytes": 150,
-      "symbol_bytes": 1474
+      "symbol_bytes": 1522
     },
     "generic/custom_representation": {
-      "InstantiateClass": 12302,
-      "InstantiateFunction": 6414,
-      "EvaluateAsConstantExpr": 67720,
-      "object_bytes": 1624,
+      "InstantiateClass": 10543,
+      "InstantiateFunction": 6312,
+      "EvaluateAsConstantExpr": 65055,
+      "object_bytes": 1672,
       "code_bytes": 145,
-      "symbol_bytes": 1479
+      "symbol_bytes": 1527
     },
     "generic/dimensionless_and_angles": {
-      "InstantiateClass": 9341,
-      "InstantiateFunction": 4631,
-      "EvaluateAsConstantExpr": 50621,
-      "object_bytes": 1936,
+      "InstantiateClass": 7888,
+      "InstantiateFunction": 4530,
+      "EvaluateAsConstantExpr": 48304,
+      "object_bytes": 1976,
       "code_bytes": 220,
-      "symbol_bytes": 1716
+      "symbol_bytes": 1756
     },
     "generic/generic_interfaces": {
-      "InstantiateClass": 10634,
-      "InstantiateFunction": 5293,
-      "EvaluateAsConstantExpr": 57986,
-      "object_bytes": 1552,
+      "InstantiateClass": 9109,
+      "InstantiateFunction": 5191,
+      "EvaluateAsConstantExpr": 55584,
+      "object_bytes": 1592,
       "code_bytes": 125,
-      "symbol_bytes": 1427
+      "symbol_bytes": 1467
     },
     "isq/complex_quantities": {
-      "InstantiateClass": 17640,
-      "InstantiateFunction": 9421,
-      "EvaluateAsConstantExpr": 99307,
-      "object_bytes": 2080,
+      "InstantiateClass": 15302,
+      "InstantiateFunction": 9320,
+      "EvaluateAsConstantExpr": 96042,
+      "object_bytes": 2120,
       "code_bytes": 361,
-      "symbol_bytes": 1719
+      "symbol_bytes": 1759
     },
     "isq/custom_hierarchy": {
-      "InstantiateClass": 12754,
-      "InstantiateFunction": 6851,
-      "EvaluateAsConstantExpr": 71082,
-      "object_bytes": 1464,
+      "InstantiateClass": 10926,
+      "InstantiateFunction": 6749,
+      "EvaluateAsConstantExpr": 68350,
+      "object_bytes": 1512,
       "code_bytes": 106,
-      "symbol_bytes": 1358
+      "symbol_bytes": 1406
     },
     "isq/derived_spec_conversions": {
-      "InstantiateClass": 14261,
-      "InstantiateFunction": 8087,
-      "EvaluateAsConstantExpr": 82045,
-      "object_bytes": 1784,
+      "InstantiateClass": 12124,
+      "InstantiateFunction": 7985,
+      "EvaluateAsConstantExpr": 78999,
+      "object_bytes": 1832,
       "code_bytes": 188,
-      "symbol_bytes": 1596
+      "symbol_bytes": 1644
     },
     "isq/fractional_exponents": {
-      "InstantiateClass": 16749,
-      "InstantiateFunction": 9011,
-      "EvaluateAsConstantExpr": 94340,
-      "object_bytes": 1616,
+      "InstantiateClass": 14591,
+      "InstantiateFunction": 8909,
+      "EvaluateAsConstantExpr": 91255,
+      "object_bytes": 1664,
       "code_bytes": 139,
-      "symbol_bytes": 1477
+      "symbol_bytes": 1525
     },
     "isq/hierarchy_conversions": {
-      "InstantiateClass": 12672,
-      "InstantiateFunction": 6907,
-      "EvaluateAsConstantExpr": 71283,
-      "object_bytes": 1552,
+      "InstantiateClass": 10823,
+      "InstantiateFunction": 6807,
+      "EvaluateAsConstantExpr": 68537,
+      "object_bytes": 1600,
       "code_bytes": 133,
-      "symbol_bytes": 1419
+      "symbol_bytes": 1467
     },
     "isq/kind_conversions": {
-      "InstantiateClass": 12291,
-      "InstantiateFunction": 6537,
-      "EvaluateAsConstantExpr": 68526,
-      "object_bytes": 1776,
+      "InstantiateClass": 10520,
+      "InstantiateFunction": 6435,
+      "EvaluateAsConstantExpr": 65852,
+      "object_bytes": 1824,
       "code_bytes": 182,
-      "symbol_bytes": 1594
+      "symbol_bytes": 1642
     },
     "isq/kind_safe_interfaces": {
-      "InstantiateClass": 13379,
-      "InstantiateFunction": 7245,
-      "EvaluateAsConstantExpr": 74931,
-      "object_bytes": 1400,
+      "InstantiateClass": 11470,
+      "InstantiateFunction": 7143,
+      "EvaluateAsConstantExpr": 72126,
+      "object_bytes": 1448,
       "code_bytes": 87,
-      "symbol_bytes": 1313
+      "symbol_bytes": 1361
     },
     "isq/vector_quantities": {
-      "InstantiateClass": 12234,
-      "InstantiateFunction": 6455,
-      "EvaluateAsConstantExpr": 68138,
-      "object_bytes": 2104,
+      "InstantiateClass": 10523,
+      "InstantiateFunction": 6354,
+      "EvaluateAsConstantExpr": 65524,
+      "object_bytes": 2144,
       "code_bytes": 314,
-      "symbol_bytes": 1790
+      "symbol_bytes": 1830
     },
     "parity/kinetic_energy": {
-      "InstantiateClass": 8646,
-      "InstantiateFunction": 4002,
-      "EvaluateAsConstantExpr": 45550,
-      "object_bytes": 1392,
+      "InstantiateClass": 7490,
+      "InstantiateFunction": 3900,
+      "EvaluateAsConstantExpr": 43521,
+      "object_bytes": 1440,
       "code_bytes": 89,
-      "symbol_bytes": 1303
+      "symbol_bytes": 1351
     },
     "parity/unit_conversions": {
-      "InstantiateClass": 9264,
-      "InstantiateFunction": 4909,
-      "EvaluateAsConstantExpr": 53131,
-      "object_bytes": 1936,
+      "InstantiateClass": 7727,
+      "InstantiateFunction": 4809,
+      "EvaluateAsConstantExpr": 50728,
+      "object_bytes": 1984,
       "code_bytes": 228,
-      "symbol_bytes": 1708
+      "symbol_bytes": 1756
     },
     "parity/value_conversions": {
-      "InstantiateClass": 9279,
-      "InstantiateFunction": 4660,
-      "EvaluateAsConstantExpr": 52820,
-      "object_bytes": 1656,
+      "InstantiateClass": 7739,
+      "InstantiateFunction": 4558,
+      "EvaluateAsConstantExpr": 50411,
+      "object_bytes": 1704,
       "code_bytes": 179,
-      "symbol_bytes": 1477
+      "symbol_bytes": 1525
     },
     "scaling/broad_016": {
-      "InstantiateClass": 14163,
-      "InstantiateFunction": 8056,
-      "EvaluateAsConstantExpr": 83340,
-      "object_bytes": 1384,
+      "InstantiateClass": 12074,
+      "InstantiateFunction": 7969,
+      "EvaluateAsConstantExpr": 80393,
+      "object_bytes": 1432,
       "code_bytes": 87,
-      "symbol_bytes": 1297
+      "symbol_bytes": 1345
     },
     "scaling/broad_064": {
-      "InstantiateClass": 15894,
-      "InstantiateFunction": 9896,
-      "EvaluateAsConstantExpr": 100222,
-      "object_bytes": 1384,
+      "InstantiateClass": 13499,
+      "InstantiateFunction": 9830,
+      "EvaluateAsConstantExpr": 97031,
+      "object_bytes": 1432,
       "code_bytes": 87,
-      "symbol_bytes": 1297
+      "symbol_bytes": 1345
     },
     "scaling/broad_256": {
-      "InstantiateClass": 29242,
-      "InstantiateFunction": 24242,
-      "EvaluateAsConstantExpr": 220832,
-      "object_bytes": 1384,
+      "InstantiateClass": 24390,
+      "InstantiateFunction": 24368,
+      "EvaluateAsConstantExpr": 215757,
+      "object_bytes": 1432,
       "code_bytes": 87,
-      "symbol_bytes": 1297
+      "symbol_bytes": 1345
     },
     "scaling/narrow_016": {
-      "InstantiateClass": 13334,
-      "InstantiateFunction": 7038,
-      "EvaluateAsConstantExpr": 73933,
-      "object_bytes": 1392,
+      "InstantiateClass": 11374,
+      "InstantiateFunction": 6936,
+      "EvaluateAsConstantExpr": 71070,
+      "object_bytes": 1440,
       "code_bytes": 87,
-      "symbol_bytes": 1305
+      "symbol_bytes": 1353
     },
     "scaling/narrow_064": {
-      "InstantiateClass": 13382,
-      "InstantiateFunction": 7134,
-      "EvaluateAsConstantExpr": 74653,
-      "object_bytes": 1392,
+      "InstantiateClass": 11422,
+      "InstantiateFunction": 7032,
+      "EvaluateAsConstantExpr": 71790,
+      "object_bytes": 1440,
       "code_bytes": 87,
-      "symbol_bytes": 1305
+      "symbol_bytes": 1353
     },
     "scaling/narrow_256": {
-      "InstantiateClass": 13574,
-      "InstantiateFunction": 7518,
-      "EvaluateAsConstantExpr": 77533,
-      "object_bytes": 1392,
+      "InstantiateClass": 11614,
+      "InstantiateFunction": 7416,
+      "EvaluateAsConstantExpr": 74670,
+      "object_bytes": 1440,
       "code_bytes": 87,
-      "symbol_bytes": 1305
+      "symbol_bytes": 1353
     },
     "systems/user_defined_units": {
-      "InstantiateClass": 11862,
-      "InstantiateFunction": 6447,
-      "EvaluateAsConstantExpr": 66912,
-      "object_bytes": 1696,
+      "InstantiateClass": 10226,
+      "InstantiateFunction": 6345,
+      "EvaluateAsConstantExpr": 64373,
+      "object_bytes": 1744,
       "code_bytes": 163,
-      "symbol_bytes": 1533
+      "symbol_bytes": 1581
     },
     "text/output_format": {
-      "InstantiateClass": 9426,
-      "InstantiateFunction": 5133,
-      "EvaluateAsConstantExpr": 53451,
-      "object_bytes": 439912,
+      "InstantiateClass": 8292,
+      "InstantiateFunction": 5099,
+      "EvaluateAsConstantExpr": 52149,
+      "object_bytes": 440008,
       "code_bytes": 146711,
-      "symbol_bytes": 293201
+      "symbol_bytes": 293297
     },
     "text/output_format_advanced": {
-      "InstantiateClass": 9528,
-      "InstantiateFunction": 5360,
-      "EvaluateAsConstantExpr": 55021,
-      "object_bytes": 495704,
+      "InstantiateClass": 8433,
+      "InstantiateFunction": 5361,
+      "EvaluateAsConstantExpr": 53917,
+      "object_bytes": 495808,
       "code_bytes": 163120,
-      "symbol_bytes": 332584
+      "symbol_bytes": 332688
     },
     "text/output_ostream": {
-      "InstantiateClass": 8741,
+      "InstantiateClass": 7679,
       "InstantiateFunction": 4084,
-      "EvaluateAsConstantExpr": 46947,
-      "object_bytes": 43320,
+      "EvaluateAsConstantExpr": 45884,
+      "object_bytes": 43368,
       "code_bytes": 11645,
-      "symbol_bytes": 31675
+      "symbol_bytes": 31723
     },
     "text/output_printf": {
-      "InstantiateClass": 8684,
-      "InstantiateFunction": 4010,
-      "EvaluateAsConstantExpr": 46213,
-      "object_bytes": 1928,
+      "InstantiateClass": 7513,
+      "InstantiateFunction": 3908,
+      "EvaluateAsConstantExpr": 44169,
+      "object_bytes": 1968,
       "code_bytes": 206,
-      "symbol_bytes": 1722
+      "symbol_bytes": 1762
     },
     "text/output_println": {
-      "InstantiateClass": 9424,
+      "InstantiateClass": 8332,
       "InstantiateFunction": 5140,
-      "EvaluateAsConstantExpr": 53444,
-      "object_bytes": 440504,
+      "EvaluateAsConstantExpr": 52340,
+      "object_bytes": 440600,
       "code_bytes": 146541,
-      "symbol_bytes": 293963
+      "symbol_bytes": 294059
     },
     "umbrella/isq_umbrella": {
-      "InstantiateClass": 13696,
-      "InstantiateFunction": 8520,
-      "EvaluateAsConstantExpr": 80055,
-      "object_bytes": 960,
+      "InstantiateClass": 11769,
+      "InstantiateFunction": 8418,
+      "EvaluateAsConstantExpr": 77175,
+      "object_bytes": 1008,
       "code_bytes": 51,
-      "symbol_bytes": 909
+      "symbol_bytes": 957
     },
     "umbrella/si_umbrella": {
-      "InstantiateClass": 7865,
-      "InstantiateFunction": 3358,
-      "EvaluateAsConstantExpr": 40151,
-      "object_bytes": 960,
+      "InstantiateClass": 6841,
+      "InstantiateFunction": 3256,
+      "EvaluateAsConstantExpr": 38252,
+      "object_bytes": 1008,
       "code_bytes": 51,
-      "symbol_bytes": 909
+      "symbol_bytes": 957
     }
   }
 }
