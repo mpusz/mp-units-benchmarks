@@ -215,30 +215,22 @@ jobs:
           print("\n".join(lines))
           decide("true")
           PY
-      - name: Open or refresh the tightening pull request
-        # Never from a pull_request event: a PR that opens a PR is noise, and the token is read-only.
+      - name: Re-record and hand the baselines to the consolidator
+        # The PR itself is opened by the `tighten` job below, ONCE for every standard that improved -
+        # a re-record is one logical event, and three per-standard PRs were three reviews of it.
         if: steps.decide.outputs.tighten == 'true' && github.event_name != 'pull_request'
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          BRANCH="${BRANCH_PREFIX}-${{ matrix.id }}"  # one branch per standard: the gates run in parallel
-          git switch -c "$BRANCH"
           runner/bench.py --repo mp-units --cxx "clang++-${GATE_CLANG}" --std ${{ matrix.std }} update
-          git add baselines
-          git commit -m "chore: tighten instantiation baselines
-
-          Re-recorded against mp-units ${MP_UNITS_REF} for ${{ matrix.std }} (see the PR body for deltas)."
-          git push -f origin "$BRANCH"
-          if gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -qx OPEN; then
-            gh pr edit "$BRANCH" --body-file pr-body.md
-            echo "refreshed the open PR"
-          else
-            gh pr create --base "${{ github.event.repository.default_branch }}" --head "$BRANCH" \
-              --title "chore: tighten instantiation baselines (${{ matrix.std }})" --body-file pr-body.md
-          fi
+          mkdir -p tighten
+          cp "$(runner/bench.py --cxx clang++-${GATE_CLANG} --std ${{ matrix.std }} key)" tighten/
+          mv pr-body.md "tighten/pr-body-${{ matrix.id }}.md"
+      - uses: actions/upload-artifact@v4
+        if: steps.decide.outputs.tighten == 'true' && github.event_name != 'pull_request'
+        with:
+          name: tighten-${{ matrix.id }}
+          path: tighten/
+          retention-days: 3
       - name: Explain the regression
         # A failure should arrive with its cause attached. The baselines record the sha they were
         # measured from, so the offending workflows can be attributed against that exact tree
@@ -271,6 +263,63 @@ jobs:
         run: |
           echo "a gated metric moved past its band - see the tables and the single annotation above"
           exit 1
+
+  tighten:
+    # One PR for the whole re-record, however many standards improved. Runs only when every gate arm is
+    # green: a regression anywhere means a human is already looking at this tree, and an auto-PR that
+    # blesses the other standards' numbers underneath them is exactly the kind of helpful that is not.
+    needs: gate
+    if: needs.gate.result == 'success' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tighten-*
+          path: tighten
+          merge-multiple: true
+      - name: Open or refresh the single tightening pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(tighten/instantiations-*.json)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no gate arm asked for a re-record - nothing to do"
+            echo "No baselines to tighten this run." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH_PREFIX"
+          cp tighten/instantiations-*.json baselines/
+          {
+            echo "One re-record, one review: every standard whose gate arm found the baselines stale is"
+            echo "updated together, because they describe the same library tree."
+            echo
+            for body in tighten/pr-body-*.md; do
+              std=$(basename "$body" .md); std=${std#pr-body-}
+              echo "<details><summary>${std}</summary>"
+              echo
+              cat "$body"
+              echo
+              echo "</details>"
+              echo
+            done
+          } > pr-body.md
+          git add baselines
+          git commit -m "chore: tighten instantiation baselines
+
+          Re-recorded against mp-units ${MP_UNITS_REF} for: $(basename -a "${files[@]}" | sed 's/instantiations-//;s/\.json//' | paste -sd', ')."
+          git push -f origin "$BRANCH_PREFIX"
+          if gh pr view "$BRANCH_PREFIX" --json state --jq .state 2>/dev/null | grep -qx OPEN; then
+            gh pr edit "$BRANCH_PREFIX" --body-file pr-body.md
+            echo "refreshed the open PR"
+          else
+            gh pr create --base "${{ github.event.repository.default_branch }}" --head "$BRANCH_PREFIX" \
+              --title "chore: tighten instantiation baselines" --body-file pr-body.md
+          fi
 
   measure:
     # One runner per compiler: arms cannot interfere, and a compiler that cannot build the corpus only
@@ -360,6 +409,21 @@ jobs:
           pattern: measurements-*
           path: results
           merge-multiple: true
+      - name: Fetch the previous run's measurements
+        # So the summary can SAY what the last changes bought instead of describing one point in time.
+        # Best effort on purpose: the first run, an expired artifact, or an API hiccup just means the
+        # comparison section is absent, never a red job.
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          prev_run=$(gh api "repos/${{ github.repository }}/actions/workflows/ci-compile-cost.yml/runs?status=success&per_page=10" \
+            --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }})][0].id" 2>/dev/null) || exit 0
+          [ -n "$prev_run" ] && [ "$prev_run" != "null" ] || exit 0
+          echo "previous successful run: $prev_run"
+          gh run download "$prev_run" --name compile-cost-report --dir previous 2>/dev/null || exit 0
+          ls previous/report-*.json 2>/dev/null | head -20
       - name: Post the combined table
         id: post
         shell: bash
@@ -371,11 +435,14 @@ jobs:
             echo "produced=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          previous=(previous/report-*.json)
+          prev_args=()
+          [ ${#previous[@]} -gt 0 ] && prev_args=(--previous "${previous[@]}")
           # The same markdown that lands in the job summary, kept as a file: a summary cannot be
           # downloaded, diffed against last week's, or pasted into a talk.
           name="compile-cost-$(echo "${MP_UNITS_REF}" | tr '/' '-')"
           [ -n "$COMPARE_REF" ] && name="$name-vs-$(echo "${COMPARE_REF}" | tr '/' '-')"
-          runner/bench.py summary "${reports[@]}" > "results/$name.md"
+          runner/bench.py summary "${reports[@]}" "${prev_args[@]}" > "results/$name.md"
           echo "produced=true" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         if: steps.post.outputs.produced == 'true'

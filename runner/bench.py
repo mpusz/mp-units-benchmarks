@@ -1272,7 +1272,90 @@ def findings(cells, keys, refs):
     return out
 
 
-def render_report(payloads):
+def run_over_run(payloads, previous):
+    """What moved since the last CI run, per configuration - the concrete answer to "how much did we
+    gain by the last changes", computed instead of asserted.
+
+    Arms are matched by configuration key; each arm's newest measured ref is compared against the
+    previous run's newest, because that pair is "the tree CI watched then" vs "the tree it watches
+    now". Refs are named in the output so an unchanged tree reads as what it is - a control."""
+    prev_by_key = {p.get("config_key") or p["cxx"]: p for p in previous}
+    lines, movers = [], []
+    for p in payloads:
+        key = p.get("config_key") or p["cxx"]
+        q = prev_by_key.get(key)
+        if q is None:
+            continue
+        def newest(payload):
+            refs = refs_oldest_first([payload])
+            return refs[-1] if refs else None
+        rn, ro = newest(p), newest(q)
+        if rn is None or ro is None:
+            continue
+        def corpus(payload, ref, metric):
+            per = payload["metrics"].get(metric, {})
+            vals = [by_ref.get(ref) for name, by_ref in per.items() if not name.startswith("bmi/")]
+            vals = [v for v in vals if isinstance(v, (int, float))]
+            return sum(vals) if vals else None
+        def slope(payload, ref):
+            per = payload["metrics"].get("instantiations") or payload["metrics"].get("time_ms", {})
+            sizes = {}
+            for name, by_ref in per.items():
+                m = re.fullmatch(r"scaling/broad_(\d+)", name)
+                v = by_ref.get(ref) if m else None
+                if isinstance(v, (int, float)):
+                    sizes[int(m.group(1))] = v
+            if len(sizes) < 2:
+                return None
+            lo, hi = min(sizes), max(sizes)
+            return (sizes[hi] - sizes[lo]) / (hi - lo)
+        row = {"key": key,
+               "then": q["refs"][ro].get("mp_units_describe", ro), "now": p["refs"][rn].get("mp_units_describe", rn)}
+        for metric, name in (("instantiations", "inst"), ("time_ms", "time"), ("peak_mib", None)):
+            a, b = corpus(q, ro, metric), corpus(p, rn, metric)
+            if name and a and b:
+                row[name] = (a, b, (b - a) / a)
+        sa, sb = slope(q, ro), slope(p, rn)
+        if sa and sb:
+            row["slope"] = (sa, sb, (sb - sa) / sa)
+        if "inst" in row or "time" in row:
+            lines.append(row)
+            if "inst" in row:
+                movers.append((abs(row["inst"][2]), row))
+    if not lines:
+        return None, []
+    md = ["## Since the previous run", ""]
+    md += markdown_table(
+        ["configuration", "measured then -> now", "instantiations", "broad slope", "wall time"],
+        [[r["key"], f"`{r['then']}` -> `{r['now']}`",
+          f"{r['inst'][0]} -> {r['inst'][1]} ({r['inst'][2]:+.1%})" if "inst" in r else "n/a",
+          f"{r['slope'][0]:.1f} -> {r['slope'][1]:.1f} ({r['slope'][2]:+.1%})" if "slope" in r else "n/a",
+          f"{r['time'][0]} -> {r['time'][1]} ms ({r['time'][2]:+.1%})" if "time" in r else "n/a"]
+         for r in lines])
+    md += ["", "Corpus totals over the workflows both runs measured (`bmi/*` excluded). Wall time compares "
+           "different runner sessions, so treat its column as direction only - the deterministic columns "
+           "are the finding.", ""]
+    finding = None
+    if movers:
+        _, r = max(movers)
+        a, b, rel = r["inst"]
+        if abs(rel) < 0.001:
+            finding = ("Nothing moved since the previous run: every configuration's corpus total is "
+                       "within 0.1% of last time, so the tables below describe the same library state.")
+        else:
+            direction = "cheaper" if rel < 0 else "more expensive"
+            finding = (f"Since the previous run (`{r['then']}` -> `{r['now']}`), the corpus got "
+                       f"**{abs(rel):.1%} {direction}** on `{r['key']}`"
+                       + (f" and the marginal cost of a unit-composing line went "
+                          f"{r['slope'][0]:.1f} -> {r['slope'][1]:.1f} per step ({r['slope'][2]:+.1%})"
+                          if "slope" in r else "") + ".")
+    return "\n".join(md), [finding] if finding else []
+
+
+def render_report(payloads, previous=None):
+    comparison_md, comparison_findings = (None, [])
+    if previous:
+        comparison_md, comparison_findings = run_over_run(payloads, previous)
     refs = refs_oldest_first(payloads)
     keys, cells, notes = [], {}, []
     for p in payloads:
@@ -1364,10 +1447,11 @@ def render_report(payloads):
               "- **FAIL** - the workflow applies to that ref but did not compile."]
     if len(refs) == 2:
         legend.insert(0, f"- Cells read `{refs[0]} -> {refs[1]} (change)`, oldest library version first.")
-    story = findings(cells, keys, refs)
+    story = comparison_findings + findings(cells, keys, refs)
     if story:
         story = ["## What changed", "", *[f"{i}. {s}" for i, s in enumerate(story, 1)], ""]
-    lines = [*story, *PREAMBLE, "<details><summary>All measurements</summary>", "", *legend, "",
+    comparison = [comparison_md, ""] if comparison_md else []
+    lines = [*story, *comparison, *PREAMBLE, "<details><summary>All measurements</summary>", "", *legend, "",
              *lines, "</details>", ""]
     lines += ["<details><summary>How this was measured</summary>", ""] + notes + [
         "", "Instantiation counts are bit-deterministic for a pinned compiler and peak memory varies by "
@@ -1381,7 +1465,8 @@ def render_report(payloads):
 def cmd_summary(args):
     """Render one combined report from several `report --output` files (e.g. one per compiler)."""
     payloads = [json.loads(Path(f).read_text()) for f in args.reports]
-    text = render_report(payloads)
+    previous = [json.loads(Path(f).read_text()) for f in (args.previous or [])]
+    text = render_report(payloads, previous or None)
     print(text)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
@@ -1459,6 +1544,10 @@ def main():
 
     s = sub.add_parser("summary", help="merge report JSONs into one markdown report (+ job summary)")
     s.add_argument("reports", nargs="+", help="JSON files written by `report --output`")
+    s.add_argument("--previous", nargs="*", metavar="JSON",
+                   help="the previous run's report JSONs: adds a 'Since the previous run' section "
+                        "comparing corpus totals and the scaling slope per configuration, so the "
+                        "summary says what the last changes bought instead of describing one point")
 
     u = sub.add_parser("update", help="re-record baselines")
     u.add_argument("--baseline-key", help="baseline file to write (default: derived from the "
