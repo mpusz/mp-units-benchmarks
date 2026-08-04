@@ -977,6 +977,21 @@ def version_of(key):
     return int(m.group(1)) if m else 0
 
 
+def config_shape(key):
+    """The configuration with the compiler VERSION removed. Two keys of the same shape differ ONLY in
+    the toolchain, which is the only pair whose difference the compiler explains - across shapes a
+    stdlib or formatting-backend swap would be attributed to the compiler."""
+    return re.sub(r"^([a-z]+)\d+", r"\1", key)
+
+
+def config_order(key):
+    """The order every table in the report uses: header builds before module consumers, then family,
+    then compiler version - never the order the measurement artifacts happened to arrive in."""
+    family = family_of(key)
+    return ("-modules" in key, FAMILIES.index(family) if family in FAMILIES else len(FAMILIES),
+            version_of(key), key)
+
+
 def refs_oldest_first(payloads):
     """Order refs by the library version they measured, so a comparison reads old -> new."""
     versions = {}
@@ -1138,7 +1153,13 @@ def scaling_section(cells, columns, refs, labels=None):
                 if any(c != "n/a" for c in cols):
                     rows.append([f"{shape} - {what}", *cols])
         if rows:
-            present = [labels[c] for c in columns]
+            # A configuration that cannot produce this metric AT ALL (no GCC gives counts) is not a
+            # workflow held back by a REQUIRES floor, which is what the legend says `n/a` means: drop
+            # the column rather than print a stripe of n/a that the legend misexplains - and that
+            # costs a third of the table's width in every count metric.
+            keep = [i for i, c in enumerate(columns) if any(r[i + 1] != "n/a" for r in rows)]
+            rows = [[r[0], *(r[i + 1] for i in keep)] for r in rows]
+            present = [labels[columns[i]] for i in keep]
             lines += [f"### {title}", "", *markdown_table(["scaling", *present], rows), ""]
     return lines
 
@@ -1224,8 +1245,10 @@ def findings(cells, keys, refs):
                        f"module is identical work in both columns, yet differs by {control:+.0%}. The "
                        f"instantiation counts are unaffected - they are exact.")
 
-    # 4. what consuming the library as modules is worth
-    for col in sorted([k for k in keys if "-modules" in k], key=lambda k: (version_of(k), k)):
+    # 4. what consuming the library as modules is worth - from the NEWEST toolchain that measured it,
+    # since one statement is all this section gets and the oldest compiler is the least useful one to
+    # spend it on.
+    for col in sorted([k for k in keys if "-modules" in k], key=lambda k: (version_of(k), k), reverse=True):
         base = counterparts([col], keys).get(col)
         if not base:
             continue
@@ -1245,17 +1268,26 @@ def findings(cells, keys, refs):
                           f"{f' and {disk:.0f} MiB on disk' if disk else ''}." if build else "."))
         break  # one such statement is enough; the section below has the rest
 
-    # 5. how much of any improvement is really the compiler
-    clangs = [k for k in plain if family_of(k) == "clang"]
-    if len(clangs) >= 2 and len(refs) == 1:
-        lo, hi = clangs[0], clangs[-1]
+    # 5. how much of any improvement is really the compiler - only across keys of the same SHAPE, so a
+    # stdlib or formatting-backend swap in the pair is never attributed to the toolchain.
+    shapes = {}
+    for k in plain:
+        if family_of(k) == "clang":
+            shapes.setdefault(config_shape(k), []).append(k)
+    group = max(shapes.values(), key=len, default=[])
+    if len(group) >= 2 and len(refs) == 1:
+        lo, hi = group[0], group[-1]  # plain is version-sorted, so this is oldest vs newest
         d = [pct(inst[w].get((lo, refs[0])), inst[w].get((hi, refs[0]))) for w in workflows]
         d = [x for x in d if x is not None]
-        if d and abs(statistics.median(d)) > 0.02:
+        median = statistics.median(d) if d else 0
+        if d and abs(median) > 0.02:
             out.append(f"The compiler matters as much as the library: `{hi}` needs "
-                       f"**{abs(statistics.median(d)):.0%} fewer** instantiations than `{lo}` for "
-                       f"identical code, so part of what users experience as the library improving is "
-                       f"their toolchain improving.")
+                       f"**{abs(median):.0%} {'fewer' if median < 0 else 'more'}** instantiations than "
+                       f"`{lo}` for identical code, so "
+                       + ("part of what users experience as the library improving is their toolchain "
+                          "improving." if median < 0 else
+                          "a newer toolchain is not automatically a cheaper one, and any comparison of "
+                          "library versions has to pin the compiler."))
 
     # 6. n/a is not failure - but only count real gaps: a configuration that produces no counts at
     # all (any GCC) is not a workflow being skipped, and bmi/ rows exist only under modules.
@@ -1280,27 +1312,37 @@ def run_over_run(payloads, previous):
     previous run's newest, because that pair is "the tree CI watched then" vs "the tree it watches
     now". Refs are named in the output so an unchanged tree reads as what it is - a control."""
     prev_by_key = {p.get("config_key") or p["cxx"]: p for p in previous}
-    lines, movers = [], []
-    for p in payloads:
+    lines, movers, unmatched, skipped = [], [], 0, set()
+    for p in sorted(payloads, key=lambda payload: config_order(payload.get("config_key") or payload["cxx"])):
         key = p.get("config_key") or p["cxx"]
         q = prev_by_key.get(key)
         if q is None:
+            skipped.add(key)
             continue
         def newest(payload):
             refs = refs_oldest_first([payload])
             return refs[-1] if refs else None
         rn, ro = newest(p), newest(q)
         if rn is None or ro is None:
+            skipped.add(key)
             continue
-        def corpus(payload, ref, metric):
-            per = payload["metrics"].get(metric, {})
-            vals = [by_ref.get(ref) for name, by_ref in per.items() if not name.startswith("bmi/")]
-            vals = [v for v in vals if isinstance(v, (int, float))]
-            return sum(vals) if vals else None
+        def corpus(metric):
+            """Totals over the workflows BOTH runs measured, so adding or removing one cannot read as
+            the library moving. Returns the pair and how many entries only one run had."""
+            then_per, now_per = q["metrics"].get(metric, {}), p["metrics"].get(metric, {})
+            names = {n for n in set(then_per) | set(now_per) if not n.startswith("bmi/")}
+            pairs = {n: (then_per.get(n, {}).get(ro), now_per.get(n, {}).get(rn)) for n in names}
+            both = [(a, b) for a, b in pairs.values()
+                    if isinstance(a, (int, float)) and isinstance(b, (int, float))]
+            if not both:
+                return None
+            return sum(a for a, _ in both), sum(b for _, b in both), len(names) - len(both)
         def slope(payload, ref):
-            per = payload["metrics"].get("instantiations") or payload["metrics"].get("time_ms", {})
+            """Instantiations per step, and nothing else. This column sits beside the deterministic
+            ones: a wall-time slope here would read as the same kind of number while carrying runner
+            noise - which is how a GCC arm with no counts came to report a 13% "slope" move."""
             sizes = {}
-            for name, by_ref in per.items():
+            for name, by_ref in payload["metrics"].get("instantiations", {}).items():
                 m = re.fullmatch(r"scaling/broad_(\d+)", name)
                 v = by_ref.get(ref) if m else None
                 if isinstance(v, (int, float)):
@@ -1311,17 +1353,19 @@ def run_over_run(payloads, previous):
             return (sizes[hi] - sizes[lo]) / (hi - lo)
         row = {"key": key,
                "then": q["refs"][ro].get("mp_units_describe", ro), "now": p["refs"][rn].get("mp_units_describe", rn)}
-        for metric, name in (("instantiations", "inst"), ("time_ms", "time"), ("peak_mib", None)):
-            a, b = corpus(q, ro, metric), corpus(p, rn, metric)
-            if name and a and b:
+        for metric, name in (("instantiations", "inst"), ("time_ms", "time")):
+            got = corpus(metric)
+            if got and got[0]:
+                a, b, gaps = got
                 row[name] = (a, b, (b - a) / a)
+                unmatched = max(unmatched, gaps)
         sa, sb = slope(q, ro), slope(p, rn)
-        if sa and sb:
+        if isinstance(sa, float) and isinstance(sb, float) and sa:
             row["slope"] = (sa, sb, (sb - sa) / sa)
         if "inst" in row or "time" in row:
             lines.append(row)
             if "inst" in row:
-                movers.append((abs(row["inst"][2]), row))
+                movers.append(row)
     if not lines:
         return None, []
     md = ["## Since the previous run", ""]
@@ -1332,23 +1376,49 @@ def run_over_run(payloads, previous):
           f"{r['slope'][0]:.1f} -> {r['slope'][1]:.1f} ({r['slope'][2]:+.1%})" if "slope" in r else "n/a",
           f"{r['time'][0]} -> {r['time'][1]} ms ({r['time'][2]:+.1%})" if "time" in r else "n/a"]
          for r in lines])
-    md += ["", "Corpus totals over the workflows both runs measured (`bmi/*` excluded). Wall time compares "
-           "different runner sessions, so treat its column as direction only - the deterministic columns "
-           "are the finding.", ""]
+    # `n/a` here is not a REQUIRES floor: it is a configuration that cannot produce the metric at all,
+    # and saying so is the difference between "GCC gives no counts" and "something failed".
+    md += ["", "Corpus totals and slopes over the workflows both runs measured (`bmi/*` excluded); "
+           "`n/a` in a deterministic column means the configuration produces no counts (any GCC), not "
+           "that a measurement is missing. Both count columns are instantiations - the slope is "
+           "instantiations per step. Wall time compares different runner sessions, so treat its column "
+           "as direction only - the deterministic columns are the finding."
+           + (f" {unmatched} workflow(s) were measured by only one of the two runs and are excluded from "
+              f"every column." if unmatched else "")
+           + (f" {len(skipped)} configuration(s) have nothing to compare against - "
+              f"{', '.join(f'`{k}`' for k in sorted(skipped, key=config_order))} "
+              f"{'was' if len(skipped) == 1 else 'were'} not measured by the previous run." if skipped else ""),
+           ""]
     finding = None
     if movers:
-        _, r = max(movers)
-        a, b, rel = r["inst"]
-        if abs(rel) < 0.001:
-            finding = ("Nothing moved since the previous run: every configuration's corpus total is "
-                       "within 0.1% of last time, so the tables below describe the same library state.")
+        # By key, never on the tuple: two arms that tie on the delta - which is what an unchanged tree
+        # measured twice produces - would have max() fall through to comparing the row dicts and raise.
+        r = max(movers, key=lambda row: abs(row["inst"][2]))
+        rel = r["inst"][2]
+        counted, quiet = len(movers), len(lines) - len(movers)
+        no_counts = (f" (the {quiet} configuration(s) without counts are compared on wall time only, which "
+                     f"this section does not treat as a finding)" if quiet else "")
+        moved = max((x for x in lines if "slope" in x), key=lambda x: abs(x["slope"][2]), default=None)
+        worst = moved["slope"] if moved else None
+        if abs(rel) < 0.001 and (worst is None or abs(worst[2]) < 0.001):
+            finding = (f"Nothing moved since the previous run: on all {counted} configuration(s) that produce "
+                       f"deterministic counts, both the corpus total and the marginal cost per step are within "
+                       f"0.1% of last time, so the tables below describe the same library state{no_counts}.")
+        elif abs(rel) < 0.001:
+            # Totals flat while the slope moves is the case the totals CANNOT show: the slope is a
+            # fraction of any one file's cost, and it is the part that multiplies with real code.
+            finding = (f"Every corpus total is within 0.1% of the previous run, but the marginal cost of a "
+                       f"unit-composing line moved: {worst[0]:.1f} -> {worst[1]:.1f} instantiations per step "
+                       f"({worst[2]:+.1%}) on `{moved['key']}`. Totals hide a slope move because the slope is "
+                       f"only a part of any one file's cost - it is the part that grows with the size of "
+                       f"real code.")
         else:
             direction = "cheaper" if rel < 0 else "more expensive"
             finding = (f"Since the previous run (`{r['then']}` -> `{r['now']}`), the corpus got "
                        f"**{abs(rel):.1%} {direction}** on `{r['key']}`"
                        + (f" and the marginal cost of a unit-composing line went "
-                          f"{r['slope'][0]:.1f} -> {r['slope'][1]:.1f} per step ({r['slope'][2]:+.1%})"
-                          if "slope" in r else "") + ".")
+                          f"{r['slope'][0]:.1f} -> {r['slope'][1]:.1f} instantiations per step "
+                          f"({r['slope'][2]:+.1%})" if "slope" in r else "") + ".")
     return "\n".join(md), [finding] if finding else []
 
 
@@ -1395,8 +1465,9 @@ def render_report(payloads, previous=None):
             if table:
                 lines += [f"### {title} - {family}" if family != "other" else f"### {title}", "", *table, ""]
 
-    series = scaling_section(cells, [*sorted(header_keys, key=lambda k: (version_of(k), k)),
-                                     *sorted(module_keys, key=lambda k: (version_of(k), k))], refs)
+    # By family first, not by version number alone: sorting on the version interleaves the families the
+    # moment two of them share one (a clang 16 column would land between gcc 15 and gcc 16).
+    series = scaling_section(cells, sorted([*header_keys, *module_keys], key=config_order), refs)
     if series:
         lines += ["## Marginal cost of user code", "",
                   "From the scaling/ series: `per step` is what one more operation costs, `intercept` is "
