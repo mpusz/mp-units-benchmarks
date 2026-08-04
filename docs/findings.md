@@ -1753,10 +1753,52 @@ cache costs one evaluation per type and saves none. Instantiations do not move a
 informative: clang emits no event for a *variable* template instantiation (section 14), so a cache of this
 shape is invisible to the metric the project gates on. It could neither be credited nor blamed by the gate.
 
-**And B equals C exactly**, which demolishes the explanation I gave for the `decltype` experiment in
-section 7. I had written that the technique measured neutral *because* the memoization already collapsed
-evaluation to once per type. If that were true, removing the memoization would give it something to save.
-It saves nothing - to the digit.
+**And B equals C exactly on both counts**, which demolishes the explanation I gave for the `decltype`
+experiment in section 7. I had written that the technique measured neutral *because* the memoization
+already collapsed evaluation to once per type. If that were true, removing the memoization would give it
+something to save. On counts, it does not.
+
+### But counts cannot see the size of an evaluation
+
+Mateusz pushed back on that conclusion, correctly: `EvaluateAsConstantExpr` counts **evaluations, not the
+work inside them**. If knowing a result from the return type lets the compiler skip *descending into* an
+evaluation it still counts once, both gated metrics stay flat while compile time falls. The conclusion
+above was over-claimed.
+
+Chasing it produced a lesson in its own right. Summing the trace's per-phase *durations*, best-of-5 and
+interleaved on an idle machine, appeared to vindicate him: frontend time 2422 ms -> 2346 ms, **-3.1% for
+arm C with counts bit-identical**. Re-running at eleven reps destroyed it:
+
+| arm | best | median | worst | within-arm spread |
+|---|---:|---:|---:|---:|
+| A shipped | 2214.8 | 2517.7 | 3209.0 | **44.9%** |
+| B no-memo | 2350.3 | 2648.6 | 3116.7 | 32.6% |
+| C no-memo+decltype | 2275.1 | 2524.1 | 3261.8 | 43.4% |
+
+The ordering flipped - B moved from -0.16%% to +6.12%% against A - so the -3.1%% was an artifact of five
+reps. **A 3%% effect is not resolvable on a machine whose within-arm noise is 45%%**, which is section 2's
+thesis arriving unbidden, and a reminder that best-of-K with small K is not a substitute for a quiet host.
+
+### A deterministic probe for constexpr work
+
+The blind spot Mateusz identified is real, so it is worth having a *deterministic* handle on it. Clang's
+`-fconstexpr-steps=N` fails the build when an evaluation exceeds N steps, so bisecting the smallest N a
+translation unit accepts measures constexpr work without a clock:
+
+| arm | minimum `-fconstexpr-steps` |
+|---|---:|
+| A shipped | 208984 |
+| B no-memo | 208984 |
+| C no-memo+decltype | 208984 |
+
+Identical, and reproducible to the same figure on a re-bisect. **Caveat that keeps it honest:** the limit
+applies per evaluation, so this measures the *largest single* constant evaluation, not the aggregate. It
+says none of the three arms changes the shape of the deepest evaluation - consistent with these techniques
+altering how often evaluation happens rather than how deep it goes.
+
+So on every deterministic measure available - instantiations, evaluation count, and peak evaluation depth -
+the three arms are equivalent to within 0.25%%. Whether arm C buys frontend *time* remains open, and needs a
+quiet pinned host to settle. It is recorded as open rather than answered.
 
 ### Why: clang memoizes consteval results itself
 
