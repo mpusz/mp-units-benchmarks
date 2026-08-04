@@ -1730,6 +1730,60 @@ flag becomes noise and should be removed.
 
 ---
 
+## 18. The compiler caught up: hand-rolled memoization is now a net cost
+
+The ~2x win of November 2024 (section 0) came from memoizing `consteval` metafunctions in variable
+templates: `get_canonical_unit_result<U>`, `get_kind_tree_root_result<Q>`,
+`get_associated_quantity_result<U>`, `get_complexity_result<Q>`. It was the one previously-claimed win
+never re-measured, and the only unverified belief left in the library. Three arms, all four caches:
+
+| arm | instantiations | constant evaluations |
+|---|---:|---:|
+| A - as shipped, memoized | 10097 | 38253 |
+| B - memoization stripped | 10097 | **38156** |
+| C - stripped **plus** the 2024 `decltype` technique | 10097 | 38156 |
+
+(`umbrella/si_umbrella`; the same shape holds on `broad_064`, `derived_spec_conversions`,
+`isq_umbrella`, `broad_016` and `parity/unit_conversions`, all between -0.2% and -0.3%.)
+
+Two results, and the second explains the first.
+
+**Removing the caches makes things very slightly better** - about 0.25% fewer constant evaluations. The
+cache costs one evaluation per type and saves none. Instantiations do not move at all, which is itself
+informative: clang emits no event for a *variable* template instantiation (section 14), so a cache of this
+shape is invisible to the metric the project gates on. It could neither be credited nor blamed by the gate.
+
+**And B equals C exactly**, which demolishes the explanation I gave for the `decltype` experiment in
+section 7. I had written that the technique measured neutral *because* the memoization already collapsed
+evaluation to once per type. If that were true, removing the memoization would give it something to save.
+It saves nothing - to the digit.
+
+### Why: clang memoizes consteval results itself
+
+A direct probe, counting `EvaluateAsConstantExpr` events for a `consteval` function called from many sites:
+
+| calls | constant evaluations |
+|---|---:|
+| 1 call | 1 |
+| **50 calls, all with the same argument** | **1** |
+| 50 calls, 50 distinct arguments | 50 |
+
+**The compiler caches a consteval call's result per unique argument list.** That is precisely what the 2024
+variable templates were hand-rolling, and precisely what the `decltype` trick was avoiding. Both techniques
+target a cost the implementation no longer has.
+
+So the November 2024 measurement was almost certainly honest *at the time*, and the June 2024 revert of the
+`decltype` approach was right *at the time*. What changed is the compiler. This is the cleanest instance in
+the document of the lesson from section 7: **an unmeasured optimization is not just unverified, it is
+undated.** Two techniques, both once justified, both now inert - and one of them a small net cost carried
+for two years.
+
+The practical recommendation is the same shape as `mp_units::is_same_v`: remove the four caches as
+simplification, not as a performance change. 0.25% does not justify touching working code on its own; four
+fewer indirections in the hot metafunctions, ahead of V3, does. Verified on the stripped tree: the whole
+30-TU corpus builds and `unit_test`, `quantity_spec_test`, `quantity_test`, `dimension_test` and
+`chrono_test` all pass.
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That
@@ -1761,12 +1815,12 @@ wrong predictions from named people who were reasoning sensibly, and numbers for
    names. Settles "object size doesn't matter" with numbers. (§7)
 12. **A one-line constraint change worth 4 instantiations per user expression.** (§8)
 13. **The advice everyone gives, checked** — and why this suite cannot verify it. (§10)
-14. **What a unit definition costs** — 1, 12.6, and 114.2 instantiations for base, prefixed and derived.
+15. **What a unit definition costs** — 1, 12.6, and 114.2 instantiations for base, prefixed and derived.
     Declaring is free, composing is everything — and inclusion cost and user cost turn out to be one
     mechanism, so one fix pays twice. (§12)
-15. **What we gate now, and what we deliberately don't** — including a metric rejected for being 0.97
+16. **What we gate now, and what we deliberately don't** — including a metric rejected for being 0.97
     correlated with one we had. (§2, §11)
-17. **Building the instrument with an agent**: what to trust, what to check. (§9)
+18. **Building the instrument with an agent**: what to trust, what to check. (§9)
 
 **Blog-length cut:** §0 down to the 2.5.0-vs-master table as the hook, then §2 (metric choice,
 including the 0.69 and 0.97 correlations) and §6 (the `output_format` chase, ending on the
