@@ -1248,7 +1248,7 @@ The three `std` traits are +102 instantiations each across those 48 steps - **6.
 demonstration of why the two-axis view matters: a change found by attributing *constant* cost turned out
 to fix a *marginal* cost regression, because - per §12 - they are the same mechanism.
 
-## 14. Two thirds of what you parse is the standard library
+## 14. Two thirds of what you parse is the standard library - and almost none of it can go
 
 A different question with a bigger answer: which standard headers does the core drag in, and are they
 paid for by users who never use the feature?
@@ -1330,6 +1330,62 @@ One coupling to respect before summing anything: `<chrono>`'s and `<complex>`'s 
 (182 and 23) **only because `<format>` and the ostream family already pay for the shared libc++
 internals.** Remove those first and these two become expensive again - 1832 and 1170 standalone. Re-measure
 after each step; do not add up the table.
+
+### The obvious lever, measured - and it is not there
+
+I then ignored my own warning and priced the work from the standalone column, telling Mateusz the
+`<ostream>` fix was worth 1849 instantiations and was "the best value on the list". Measuring the unions
+in the order the work would actually happen says otherwise:
+
+| core closure contains | instantiations | lines | marginal gain |
+|---|---:|---:|---:|
+| status quo, all seven | 2138 | 65,527 | - |
+| after deferring the streaming header | 1915 | 65,188 | **223 inst, 339 lines** |
+| formatter moved out as well | 1855 | 63,504 | **60 inst, 1,684 lines** |
+| a cheap core only (theoretical floor) | 145 | 16,997 | |
+
+**The entire standard-header opportunity is 283 instantiations - about 2.5% of a translation unit**, not
+the 19% the total suggests. The reason is that the two headers which cannot leave are the expensive ones,
+and they already pay for everything else's shared internals:
+
+| | instantiations above a cheap core |
+|---|---:|
+| `<chrono>` alone | **1687** |
+| `<complex>` alone | 1025 |
+| both together | **1710** - `<complex>` is nearly free once `<chrono>` is there |
+
+So `<chrono>` *is* the standard-library cost, 1687 of the 1993. And it cannot go, for a reason that is a
+feature rather than an oversight: `representation_values` derives from `std::chrono::duration_values<Rep>`
+**so that a user who has already specialized the chrono trait for their representation gets it honoured
+instead of being asked to write it again.** Naming that trait requires the header. My "accidental
+inheritance, three one-line functions" reading was simply wrong about what the code was for.
+
+`<format>` is the same shape from the other end: 60 instantiations, and collecting them means
+un-deprecating `mp-units/format.h`, a header retired in 2.5.0 with the message *"does not have to be
+included anymore"*. Trading a deliberate ergonomics decision for 60 instantiations is not a trade.
+
+### What did survive: `<iosfwd>`
+
+One piece of it is real, and it is real for the reason `<iosfwd>` was standardised. `basic_fixed_string`'s
+`operator<<` only **names** `std::basic_ostream`; the body is instantiated at the call site, where the
+caller cannot be streaming without the complete type already. `fixed_string.h` is in the closure of
+anything that names a unit, so every user parsed 56,818 lines to obtain a declaration.
+
+| workflow | before | after | |
+|---|---:|---:|---|
+| `umbrella/si_umbrella` | 10308 | 10097 | **-2.05%** |
+| `text/output_ostream` | 11763 | 11763 | +0.00% - *pays it where it uses it* |
+
+That second row is the whole point: the cost did not disappear, it moved to the code that actually
+streams. `bits/ostream.h` deliberately keeps `<sstream>`, because its `to_stream` *constructs* an
+`ostringstream` for the `std::setw` path and an incomplete type cannot be instantiated - checked, not
+assumed.
+
+**The transferable lesson is about the shape of the mistake, not about headers.** A dependency's
+*standalone* cost is not its *marginal* cost, and in a large closure the two differ by an order of
+magnitude, because expensive headers subsidise cheap ones. I wrote that warning into this document and
+then priced a work item from the wrong column anyway - which is a good argument for the discipline the
+suite exists to enforce: state the number you are claiming, then have the tool produce it.
 
 ### The module BMIs are over-included, and it is measurable
 
