@@ -1527,8 +1527,10 @@ Measured and reported but **not** gated: peak memory (0.97 correlated with insta
 Pack indexing (P2662) was already used in three places in mp-units: `type_list_element`, where it
 replaces an `indexed_type_list` multiple-inheritance trick, `type_list_split`, where it avoids building
 that indexed list and then re-traversing it, and two spots in `vector_components.h`. The question was
-what else could use it. All numbers below are instantiation counts from clang-21 at `-std=c++26 -O2`,
-so the C++26 branch is live and the counts are bit-deterministic.
+what else could use it. Instantiation counts below come from clang at `-std=c++26 -O2`, so the C++26
+branch is live and the counts are bit-deterministic. Read the clang-21 figures as "a compiler taking
+the new path": the guard discussed at the end of this section later moved clang-21 onto the fallback,
+and the matched clang-22 pair reproduces the same numbers.
 
 ### The win: `type_list_extract`
 
@@ -1559,6 +1561,59 @@ using rest = List<Args...[Pre]..., Args...[sizeof...(Pre) + 1 + Post]...>;
 The single textual call site understates it. The caller is `are_ingredients_convertible`, the explosion
 algorithm that dominates every profile in this document, so the count scales with the explosion and each
 step was leaving four dead specializations behind.
+
+**A clang bug then took the clang half of that win away, and finding it is the more useful story.** The
+change passed every header-mode configuration and both standard paths, then broke the one configuration
+in the sweep that builds C++20 modules: clang-21 at C++26 reported `convertible_result<...> must be
+initialized by a constant expression` in the conversion machinery, with no leaf cause attached. Master's
+`type_list.h` in the same build directory passed, so it was genuinely attributable.
+
+The chain that isolated it, each step about two minutes against a hand-built module chain rather than a
+full Conan build:
+
+| experiment | result | what it ruled out |
+|---|---|---|
+| the failing example TU in header mode | passes | semantics, and the new formulation |
+| a minimal standalone module using the same construct | passes | the syntax in isolation |
+| explicit `N` instead of `sizeof...(Pre)` | fails | scalar-index arithmetic |
+| `type_list_element` instead of raw pack indexing | fails | pack indexing *in extract* |
+| one expansion per type plus `join` | fails | two expansions in one argument list |
+| master's extract, only the vacuous `(N >= 0)` dropped | passes | trivial perturbation |
+| **master's extract untouched, `type_list_front` -> `Ts...[0]`** | **fails** | anything specific to `extract` |
+| raised `-fconstexpr-steps`, `-fconstexpr-depth`, `-ftemplate-depth` | fails | evaluation budgets |
+| clang-22, same change, same module chain | **0 errors** | clang-21 being current behavior |
+
+The decisive experiment is `type_list_front`: a one-line, obviously equivalent change in an unrelated
+algorithm reproduces the failure. **Clang before 22 mis-evaluates constant expressions that reach a
+pack-indexed type through a module interface.** The pre-existing `type_list_element` and
+`type_list_split` uses escape it only because they sit off the conversion path. Bypassing the memoized
+`convertible_result` dropped the error count from 6 to 1, so that cache amplifies the bug without
+causing it.
+
+Two lessons for this suite. **A dual-path equivalence test does not catch this class of bug** - mine
+passed on clang-21 at both standards while the modules build was broken, because the failure needs the
+real conversion chain behind a BMI. Only a modules build of a conversion-heavy TU finds it, which is an
+argument for keeping a modules arm in the matrix rather than treating it as a nice-to-have. And **when
+two worktrees are compared, their build directories have to be equally fresh**: a warm-cache re-run
+reproduced 16 errors and looked like branch correlation when the real variable was a build directory
+configured in an earlier session.
+
+So the landed gate excludes clang before 22, and the win now applies where the path is actually live:
+
+| compiler | `__cpp_pack_indexing` at C++26 | path taken |
+|---|---|---|
+| g++-12, g++-13 | no C++26 | fallback |
+| g++-14 | not defined | fallback |
+| **g++-15, g++-16** | 202311 | **pack indexing** |
+| clang-20, clang-21 | 202311 | fallback (guarded out) |
+| clang-22+ | 202311 | pack indexing, unverifiable today |
+
+The branch is therefore live and CI-covered on gcc-15, not dead code, and the matched clang-22 pair
+confirms the same **25022 -> 24872** where it runs. What cannot be tested today is the `>= 22` boundary
+itself, because clang-22 cannot build the library for unrelated reasons: it rejects
+`isq::radius(0.35 * m)` identically on master. That is acceptable only because this failure mode is a
+hard compile error rather than silent misbehavior, so the clang modules arm reports it the day clang
+becomes usable.
 
 ### The measured loss: `type_list_unique`
 
