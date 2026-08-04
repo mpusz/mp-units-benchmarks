@@ -1466,6 +1466,159 @@ Measured and reported but **not** gated: peak memory (0.97 correlated with insta
 
 ---
 
+## 17. C++26 pack indexing: one win, one measured loss, and an idea the data talked us out of
+
+Pack indexing (P2662) was already used in three places in mp-units: `type_list_element`, where it
+replaces an `indexed_type_list` multiple-inheritance trick, `type_list_split`, where it avoids building
+that indexed list and then re-traversing it, and two spots in `vector_components.h`. The question was
+what else could use it. All numbers below are instantiation counts from clang-21 at `-std=c++26 -O2`,
+so the C++26 branch is live and the counts are bit-deterministic.
+
+### The win: `type_list_extract`
+
+The old formulation went through `type_list_split<List, N>` and then pattern-matched the two halves,
+which **materializes both sublists as real types only to discard them and rejoin them**:
+
+```cpp
+struct type_list_extract :
+    type_list_extract_impl<typename type_list_split<List, N>::first_list,
+                           typename type_list_split<List, N>::second_list> {};
+```
+
+With pack indexing the element and the remainder are indexed straight out of the pack, so the
+intermediates never come into existence:
+
+```cpp
+using element = Args...[sizeof...(Pre)];
+using rest = List<Args...[Pre]..., Args...[sizeof...(Pre) + 1 + Post]...>;
+```
+
+| TU | before | after | delta |
+|---|---:|---:|---:|
+| `umbrella/isq_umbrella` | 25022 | 24872 | **-150** |
+| `isq/derived_spec_conversions` | 25032 | 24958 | **-74** |
+| `isq/hierarchy_conversions` | 22388 | 22326 | -62 |
+| `isq/kind_conversions` | 21754 | 21692 | -62 |
+
+The single textual call site understates it. The caller is `are_ingredients_convertible`, the explosion
+algorithm that dominates every profile in this document, so the count scales with the explosion and each
+step was leaving four dead specializations behind.
+
+### The measured loss: `type_list_unique`
+
+The same treatment looked obvious for `type_list_unique`, which is recursive and costs one
+specialization per element plus a `push_front` per survivor. Pack indexing can materialize the
+deduplicated list in one expansion, but only after a duplicate mask exists, and building that mask
+needs two `static consteval` member function templates.
+
+Measured on a TU with 57 genuine `get_common_unit` computations, which is the only path that reaches
+`type_list_unique` at all (via `collapse_common_unit`):
+
+| version | class | func | total |
+|---|---:|---:|---:|
+| recursive (baseline) | 10759 | 6556 | 17315 |
+| pack indexing | 10756 | 6573 | **17329** |
+
+**Three fewer class instantiations, seventeen more function instantiations, so 14 worse overall.** The
+rewrite also had *zero* effect on `isq_umbrella` and `derived_spec_conversions`, because that path is
+barely reached there. Reverted.
+
+The reason is the one worth carrying forward. `common_unit` lists hold two or three elements, and at
+that size the recursion being replaced is only two or three instantiations deep, while the consteval
+scaffolding needed to replace it costs about the same. There was no headroom to win.
+
+One worry that did not materialize: the mask uses `std::is_same_v`, not name equality, so
+adjacent-only collapse is preserved exactly. `L<A, B, A>` stays intact under both implementations. An
+equivalence test asserting that on both the C++20 and C++26 paths is the cheapest way to keep a dual
+implementation honest, and it is what caught the boundary cases in `extract`.
+
+### The idea the data talked us out of: permutation-based merge
+
+The attractive observation is that **the ordering is entirely value-derived**. `type_name_less` compares
+`type_name<T>()`, a constexpr `std::string_view`, and `expr_less` adds only a `ratio` exponent plus the
+rule that a bare `T` sorts before `power<T, ...>`. Nothing in the comparison is an irreducible relation
+between types.
+
+So in principle a merge could be: one pack expansion building an array of keys, one consteval function
+computing the permutation, one pack expansion materializing `List<Args...[perm[Is]]...>`. That converts
+O(N log N) intermediate list types into roughly one, and the C++20 fallback `type_list_element` means it
+does not even strictly require C++26.
+
+Before building it, attributing every instantiation in `isq_umbrella` to its template gave the headroom:
+
+| template | count |
+|---|---:|
+| `std::pair` | 943 |
+| `type_list_merge_many_sorted_impl` | 606 |
+| `type_list_size_impl` | 594 |
+| `type_list_merge_sorted_impl` | 566 |
+| `try_extract_common_base` | 540 |
+| `remove_reference` | 517 |
+| `expr_simplify` | 472 |
+| `type_list_push_front_impl` | 431 |
+| `type_list_map_impl` | 386 |
+| `expr_consolidate_impl` | 349 |
+| `expr_fractions` + `_impl` + `_result` | ~966 |
+| `type_list_front_impl` | 312 |
+| `type_list_element_impl` | 301 |
+
+The merge ladders are 1172 instantiations, **4.7% of the TU**. But every one of those 566
+`merge_sorted_impl` entries is a distinct specialization, so merging two 2-element lists costs two or
+three of them, and the permutation replacement costs about the same one class plus one or two consteval
+function templates. That is precisely the arithmetic that just cost us 14 instantiations in
+`type_list_unique`. **For the pairwise merge, expect a wash.**
+
+The one variant that could still pay is collapsing an entire `merge_many` in a single pass rather than
+accumulating pairwise, which targets the combined 1172 with a realistic ceiling near 700 instantiations,
+about **2.8%**. It needs a value-key extractor reproducing `expr_less` semantics exactly for both
+`type_list_name_less` and `type_list_of_quantity_spec_less`. Left undone deliberately, with the ceiling
+recorded so the decision is informed rather than hopeful.
+
+### The transferable lesson
+
+**A value-domain rewrite has a per-call constant cost, so it only pays when N is large, and in mp-units
+N is 2 to 5.** Expression factor lists, `common_unit` members and ingredient lists are all short. This
+is a real caveat on the whole "move it into the constant evaluator" family of ideas, reflection
+included: the reflection work wins by removing intermediate types *across* the explosion, where the
+count is large, not by making any single short-list operation cheaper. Anywhere the argument is "O(N log
+N) becomes O(1)", ask what N actually is first.
+
+### Compiler availability, measured 2026-08-04
+
+Pack indexing matters partly because it is the only compile-time-relevant C++26 feature Clang already
+ships, so unlike reflection it can be exercised outside GCC.
+
+| feature | clang-21 | clang-22 | gcc-16 |
+|---|---|---|---|
+| pack indexing (P2662) | 202311 | 202311 | 202311 |
+| structured bindings (P2497) | 202411 | 202411 | 202411 |
+| reflection (P2996) | - | - | 202506 |
+| expansion statements (P1306) | - | - | 202506 |
+| contracts (P2900) | - | - | 202502 |
+| constexpr exceptions (P3068) | - | - | 202411 |
+| trivial relocatability (P2786) | - | 202502 | - |
+| annotations (P3394) | - | - | - |
+
+No upstream Clang has any P2996 support. `-freflection` is a hard `error: unknown argument` on
+clang-20, 21 and 22, and no reflection option exists anywhere in the driver or `-cc1` flag tables.
+
+**A trap worth recording: `__has_include(<meta>)` is a false positive on Clang.** Clang uses the system
+libstdc++, so with GCC 16 installed it finds GCC's `<meta>` and even compiles it, while
+`std::meta::info` does not exist. A gate must AND the header check with
+`__cpp_impl_reflection >= 202506L`. Annotations are not implemented anywhere yet, so the
+symbol-as-metadata idea cannot be prototyped at all.
+
+### When a feature gets a named flag
+
+Two different kinds of macro, and the distinction is worth keeping. An inline feature test is right when
+the feature is unconditionally better, which is why the four pack-indexing sites simply spell
+`defined(__cpp_pack_indexing) && __cplusplus > 202302`. A named flag earns its place only while the
+answer is still "we do not know", which is the case for reflection, where the flag also allows forcing
+the implementation either way for A/B measurement. Once a feature is proven a clear win everywhere, the
+flag becomes noise and should be removed.
+
+---
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That
@@ -1522,3 +1675,11 @@ is not the number that costs you* — which needs no mp-units background at all.
   one that would let a level-2 user see what levels 4-6 are charging them.
 - Whether the "lean header" advice still earns its ergonomic cost after the July perf work, which
   moved lean close enough to `si.h` to raise the question.
+- Single-pass `merge_many` in the value domain (§17): ceiling measured at ~700 instantiations, about
+  2.8%, needing a value-key extractor that reproduces `expr_less` semantics. Deliberately not built,
+  because the pairwise form is predicted a wash and the `type_list_unique` result is direct evidence for
+  that prediction.
+- The fatter targets the same attribution exposes (§17): the `expr_fractions`/`expr_simplify`/
+  `expr_consolidate` cluster at ~1800 instantiations, and `std::pair` plus `try_extract_common_base` at
+  ~1500 in the ingredient matcher. Both are what the reflection work aims at, and both are large enough
+  that a value-domain rewrite has headroom the short-list operations lack.
