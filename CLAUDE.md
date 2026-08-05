@@ -50,7 +50,20 @@ buy, then how much of an improvement is really the compiler, then how many `n/a`
 why), followed by a `How to read this` block that defines instantiations, constant vs marginal cost,
 and which metrics are trustworthy - because these summaries get shared with people who do not know
 the library. All the tables live in a collapsed `<details>` beneath. NEVER put a number in a finding
-without saying what follows from it.
+without saying what follows from it. A finding that names a tradeoff must compute where it flips: an
+intercept that improved while the slope worsened is reported as the CROSSOVER (how many distinct unit
+types a file needs before the change stops paying, against the largest workflow measured), because
+"a file using many units loses" was false when the crossover was ~4500 and the corpus tops out at 256.
+
+Under `What changed` comes ONE per-configuration summary table, and which one depends on what the run
+measured, never on what was passed: a run measuring two refs gets the RANGE (`v2.5.0 -> master` inside
+each arm, both sides from one interleaved session, so even wall time is a real A/B), and a run
+measuring one ref gets the previous CI run as a control (`--previous`, matched by configuration key).
+A range run must never be summarized against the previous run - that compares master with master,
+prints "nothing moved", and contradicts every cell of the report below it. Corpus totals in either
+table are summed over the entries BOTH sides measured; summing each side's own set turned a -19.0%
+range into -6.7% by counting workflows that do not exist on the older ref. Module-interface totals are
+deliberately NOT intersected: a module unit the newer ref has is a real cost of building it.
 
 Every emitted markdown paragraph is ONE line - in `bench.py`, in the workflow files' `echo` blocks
 into `$GITHUB_STEP_SUMMARY`, and in anything else GitHub renders (issue bodies, PR descriptions,

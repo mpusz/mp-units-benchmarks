@@ -1008,10 +1008,18 @@ def fmt_value(v):
 
 
 def fmt_change(old, new):
-    """One cell telling the whole story: where it was, where it is, and by how much it moved."""
+    """One cell telling the whole story: where it was, where it is, and by how much it moved.
+
+    The percentage is dropped - not the cell - when there is no base worth dividing by: zero, a
+    negative per-step slope (which is measurement noise, not a cost), or a base that rounds away at
+    the printed precision. Those produced cells like `-0.1 -> 0.0 (-106.1%)`, and dropping the pair
+    instead of the ratio lost the fact that a metric grew from nothing at all."""
     if not isinstance(old, (int, float)) or not isinstance(new, (int, float)):
         return f"{fmt_value(old)} -> {fmt_value(new)}"
-    return f"{fmt_value(old)} -> {fmt_value(new)} ({(new - old) / old:+.1%})" if old else fmt_value(new)
+    cell = f"{fmt_value(old)} -> {fmt_value(new)}"
+    if old <= 0 or fmt_value(float(old)) in ("0.0", "-0.0"):
+        return cell
+    return f"{cell} ({(new - old) / old:+.1%})"
 
 
 def counterparts(columns, candidates):
@@ -1142,22 +1150,28 @@ def scaling_section(cells, columns, refs, labels=None):
     for metric, title in METRICS:
         by_workflow = cells.get(metric, {})
         rows = []
+        measured = [False] * len(columns)
         for shape in ("narrow", "broad"):
             for what, index in (("per step", 0), ("intercept", 1)):
-                cols = []
-                for column in columns:
+                cols, anything = [], False
+                for i, column in enumerate(columns):
                     values = [scaling_fit(by_workflow, column, ref).get(shape) for ref in refs]
                     values = [v[index] if v else None for v in values]
+                    # Emptiness is decided on the VALUES, never on the rendered cell: a two-ref cell
+                    # renders as `n/a -> n/a`, which no `!= "n/a"` test recognises, and that is how a
+                    # BMI-only metric came to print a whole table of nothing but n/a.
+                    if any(v is not None for v in values):
+                        measured[i] = anything = True
                     cols.append(fmt_change(values[0], values[1]) if len(refs) == 2 else fmt_value(
                         None if values[0] is None else round(values[0], 1)))
-                if any(c != "n/a" for c in cols):
+                if anything:
                     rows.append([f"{shape} - {what}", *cols])
-        if rows:
-            # A configuration that cannot produce this metric AT ALL (no GCC gives counts) is not a
-            # workflow held back by a REQUIRES floor, which is what the legend says `n/a` means: drop
-            # the column rather than print a stripe of n/a that the legend misexplains - and that
-            # costs a third of the table's width in every count metric.
-            keep = [i for i, c in enumerate(columns) if any(r[i + 1] != "n/a" for r in rows)]
+        # A configuration that cannot produce this metric AT ALL (no GCC gives counts) is not a
+        # workflow held back by a REQUIRES floor, which is what the legend says `n/a` means: drop the
+        # column rather than print a stripe of n/a that the legend misexplains - and that costs a
+        # third of the table's width in every count metric.
+        keep = [i for i, ok in enumerate(measured) if ok]
+        if rows and keep:
             rows = [[r[0], *(r[i + 1] for i in keep)] for r in rows]
             present = [labels[columns[i]] for i in keep]
             lines += [f"### {title}", "", *markdown_table(["scaling", *present], rows), ""]
@@ -1231,12 +1245,31 @@ def findings(cells, keys, refs):
             (slope_old, base_old), (slope_new, base_new) = (f["broad"] for f in fits)
             ds, db = pct(slope_old, slope_new), pct(base_old, base_new)
             if ds is not None and db is not None and (ds > 0.05 > db or abs(ds - db) > 0.1):
+                # Which way a file comes out is the CROSSOVER, not a dichotomy: total cost is
+                # intercept + slope * units, so the intercept saving buys a file that many units
+                # before the steeper slope eats it. Asserting "a file using many units does not gain"
+                # was false at +0.8% per unit - the crossover was ~4500 unit types, and the largest
+                # workflow in this corpus uses 256.
+                biggest = max((int(m.group(1)) for w in workflows
+                               for m in [re.fullmatch(r"scaling/broad_(\d+)", w)] if m), default=0)
+                saved, extra = base_old - base_new, slope_new - slope_old  # per file, and per unit type
+                scale = (f" The largest workflow measured here uses {biggest} distinct unit types."
+                         if biggest else "")
+                if saved > 0 and extra > 0:  # cheaper to start, dearer per unit: small files win
+                    verdict = (f"A file gains until it uses about {saved / extra:,.0f} distinct unit types "
+                               f"and pays beyond that.{scale}")
+                elif saved < 0 and extra < 0:  # dearer to start, cheaper per unit: large files win
+                    verdict = (f"A file pays until it uses about {saved / extra:,.0f} distinct unit types "
+                               f"and gains beyond that.{scale}")
+                elif extra <= 0:
+                    verdict = "Both parts got cheaper, so every file gains whatever its size."
+                else:
+                    verdict = "Both parts got dearer, so every file pays whatever its size."
                 out.append(f"Constant and marginal cost moved in opposite directions: using the library "
                            f"at all became **{abs(db):.0%} {'cheaper' if db < 0 else 'dearer'}**, while "
                            f"each additional distinct unit type became **{abs(ds):.0%} "
                            f"{'dearer' if ds > 0 else 'cheaper'}** ({slope_old:.0f} -> {slope_new:.0f} "
-                           f"instantiations per unit). A file using a handful of units therefore gains "
-                           f"from this change, and one using many does not.")
+                           f"instantiations per unit). {verdict}")
 
         # 3. is this run's wall clock worth reading at all?
         control = pct(time.get("bmi/std", {}).get((col, old)), time.get("bmi/std", {}).get((col, new)))
@@ -1289,32 +1322,157 @@ def findings(cells, keys, refs):
                           "a newer toolchain is not automatically a cheaper one, and any comparison of "
                           "library versions has to pin the compiler."))
 
-    # 6. n/a is not failure - but only count real gaps: a configuration that produces no counts at
-    # all (any GCC) is not a workflow being skipped, and bmi/ rows exist only under modules.
-    gaps = 0
+    # 6. n/a is not failure - counted in WORKFLOWS per ref, not in cells: the same absent workflow
+    # shows up once per metric per configuration, so a cell count read as "224 cells" when the fact
+    # was "4 workflows do not exist at v2.5.0". A configuration that produces no counts at all (any
+    # GCC) is not a workflow being skipped, and bmi/ rows exist only under modules.
+    absent = {}
     for metric, per_workflow in cells.items():
         measured = {(k, ref) for row in per_workflow.values() for (k, ref) in row}
         for name, row in per_workflow.items():
             if name.startswith("bmi/"):
                 continue
-            gaps += sum(1 for pair in measured if pair not in row)
-    if gaps:
-        out.append(f"{gaps} cell(s) below are `n/a`: the workflow does not apply to that library "
-                   f"version or language standard (a declared floor), not a failure.")
+            for key, ref in measured:
+                if (key, ref) not in row:
+                    absent.setdefault(ref, set()).add(name)
+    if absent:
+        per_ref = ", ".join(f"{len(names)} at `{ref}`" for ref, names in
+                            sorted(absent.items(), key=lambda kv: refs.index(kv[0]) if kv[0] in refs else 0))
+        out.append(f"Some workflows do not exist on every ref measured ({per_ref}): their `// REQUIRES:` "
+                   f"floor - a library version or a language standard - is newer than that ref, so those "
+                   f"cells read `n/a`. Every corpus total excludes them on BOTH sides, so an added "
+                   f"workflow cannot read as the library growing. The module-interface totals are the "
+                   f"exception and are meant to be: a module unit the newer ref has and the older one "
+                   f"does not is a real cost of building that ref's interfaces, not a gap in the corpus.")
     return out
 
 
+def corpus_pair(then_payload, then_ref, now_payload, now_ref, metric):
+    """A metric's corpus total on each side, over the entries BOTH sides measured (`bmi/*` excluded).
+
+    The intersection is the whole point: a workflow that exists on only one side - a `REQUIRES` floor
+    the older ref does not meet, or a workflow added since the previous run - would otherwise land in
+    one total and read as the library moving. On this run the difference was not cosmetic: summing each
+    side's own set said -6.7% where the intersection says -19.0%. Returns (then, now, entries dropped)."""
+    then_per, now_per = then_payload["metrics"].get(metric, {}), now_payload["metrics"].get(metric, {})
+    names = {n for n in set(then_per) | set(now_per) if not n.startswith("bmi/")}
+    pairs = [(then_per.get(n, {}).get(then_ref), now_per.get(n, {}).get(now_ref)) for n in names]
+    both = [(a, b) for a, b in pairs if isinstance(a, (int, float)) and isinstance(b, (int, float))]
+    if not both:
+        return None
+    return sum(a for a, _ in both), sum(b for _, b in both), len(names) - len(both)
+
+
+def broad_slope(payload, ref):
+    """Instantiations per step from the scaling/broad series, and nothing else. This number is printed
+    beside the deterministic columns: a wall-time slope there would read as the same kind of number
+    while carrying runner noise - which is how a GCC arm with no counts reported a 13% "slope" move."""
+    sizes = {}
+    for name, by_ref in payload["metrics"].get("instantiations", {}).items():
+        m = re.fullmatch(r"scaling/broad_(\d+)", name)
+        v = by_ref.get(ref) if m else None
+        if isinstance(v, (int, float)):
+            sizes[int(m.group(1))] = v
+    if len(sizes) < 2:
+        return None
+    lo, hi = min(sizes), max(sizes)
+    return (sizes[hi] - sizes[lo]) / (hi - lo)
+
+
+def comparison_rows(cell_pairs):
+    """The three change columns every per-configuration summary carries, from rows that already hold
+    (then, now, relative) triples."""
+    return [[f"{r['inst'][0]} -> {r['inst'][1]} ({r['inst'][2]:+.1%})" if "inst" in r else "n/a",
+             f"{r['slope'][0]:.1f} -> {r['slope'][1]:.1f} ({r['slope'][2]:+.1%})" if "slope" in r else "n/a",
+             f"{r['time'][0]} -> {r['time'][1]} ms ({r['time'][2]:+.1%})" if "time" in r else "n/a"]
+            for r in cell_pairs]
+
+
+def payload_rows(payloads):
+    """Payloads in the report's own column order, keyed."""
+    return [(p.get("config_key") or p["cxx"], p) for p in
+            sorted(payloads, key=lambda q: config_order(q.get("config_key") or q["cxx"]))]
+
+
+def range_summary(payloads, refs):
+    """What the RANGE this run measured costs, per configuration - the answer to "what did these
+    library changes buy", when the run measured two refs itself.
+
+    This is the section a dispatch with `compare_ref` needs and the reason run_over_run must not speak
+    for such a run: comparing this run's newest ref against the previous run's newest compares master
+    with master, reports "nothing moved", and contradicts the range the run exists to measure. Both
+    sides of every row here come from ONE runner session, measured interleaved rep-major, so even the
+    wall-time column is a real A/B rather than two sessions subtracted."""
+    old, new = refs[0], refs[-1]
+    lines, unmatched, partial = [], 0, set()
+    for key, p in payload_rows(payloads):
+        if old not in p.get("refs", {}) or new not in p.get("refs", {}):
+            partial.add(key)  # named below: an arm that measured one end of the range must not vanish
+            continue
+        row = {"key": key}
+        for metric, name in (("instantiations", "inst"), ("time_ms", "time")):
+            got = corpus_pair(p, old, p, new, metric)
+            if got and got[0]:
+                a, b, gaps = got
+                row[name] = (a, b, (b - a) / a)
+                unmatched = max(unmatched, gaps)
+        sa, sb = broad_slope(p, old), broad_slope(p, new)
+        if isinstance(sa, float) and isinstance(sb, float) and sa:
+            row["slope"] = (sa, sb, (sb - sa) / sa)
+        if "inst" in row or "time" in row:
+            lines.append(row)
+    if not lines:
+        return None, []
+    md = [f"## What `{old}` -> `{new}` costs, per configuration", ""]
+    md += markdown_table(["configuration", "instantiations", "broad slope", "wall time"],
+                         [[r["key"], *cols] for r, cols in zip(lines, comparison_rows(lines))])
+    md += ["", f"Corpus totals over the workflows BOTH refs compile (`bmi/*` excluded"
+           + (f"; {unmatched} workflow(s) exist on only one of the two refs and are left out of both "
+              f"sides, so an added workflow cannot read as growth" if unmatched else "") + "). Every row "
+           "measured its two refs in one session, interleaved, so the wall-time column is an A/B on one "
+           "machine - still machine-dependent, so compare down a column and never across; the count "
+           "columns are exact. `n/a` means the configuration produces no counts at all (any GCC)."
+           + (f" {len(partial)} configuration(s) measured only one end of the range and have no row: "
+              f"{', '.join(f'`{k}`' for k in sorted(partial, key=config_order))}." if partial else ""), ""]
+    counted = [r for r in lines if "inst" in r]
+    findings_out = []
+    if counted:
+        best = min(counted, key=lambda r: r["inst"][2])
+        worst = max(counted, key=lambda r: r["inst"][2])
+        slopes = [r for r in lines if "slope" in r]
+        tail = ""
+        if slopes:
+            sb_, sw = min(slopes, key=lambda r: r["slope"][2]), max(slopes, key=lambda r: r["slope"][2])
+            tail = (f" The marginal cost per step went the other way on every configuration that "
+                    f"produces counts, from {sb_['slope'][2]:+.1%} to {sw['slope'][2]:+.1%} (worst on "
+                    f"`{sw['key']}`)." if sb_["slope"][2] > 0 else
+                    f" The marginal cost per step ranges from {sb_['slope'][2]:+.1%} on `{sb_['key']}` to "
+                    f"{sw['slope'][2]:+.1%} on `{sw['key']}`.")
+        if worst["inst"][2] < 0:
+            findings_out.append(
+                f"Every one of the {len(counted)} configuration(s) that produce counts needs fewer "
+                f"instantiations for `{new}` than for `{old}`, from {worst['inst'][2]:+.1%} on "
+                f"`{worst['key']}` to {best['inst'][2]:+.1%} on `{best['key']}`, so this is the library "
+                f"changing and not one toolchain's quirk.{tail}")
+        else:
+            findings_out.append(
+                f"The corpus total did not move the same way everywhere: {best['inst'][2]:+.1%} on "
+                f"`{best['key']}` but {worst['inst'][2]:+.1%} on `{worst['key']}`, so a single number for "
+                f"`{old}` -> `{new}` would be wrong for someone - read the row for your configuration."
+                f"{tail}")
+    return "\n".join(md), findings_out
+
+
 def run_over_run(payloads, previous):
-    """What moved since the last CI run, per configuration - the concrete answer to "how much did we
-    gain by the last changes", computed instead of asserted.
+    """What moved since the last CI run, per configuration - the control for a run that measured ONE
+    ref, and only for such a run: when the run measured a range, `range_summary` speaks instead.
 
     Arms are matched by configuration key; each arm's newest measured ref is compared against the
     previous run's newest, because that pair is "the tree CI watched then" vs "the tree it watches
     now". Refs are named in the output so an unchanged tree reads as what it is - a control."""
     prev_by_key = {p.get("config_key") or p["cxx"]: p for p in previous}
     lines, movers, unmatched, skipped = [], [], 0, set()
-    for p in sorted(payloads, key=lambda payload: config_order(payload.get("config_key") or payload["cxx"])):
-        key = p.get("config_key") or p["cxx"]
+    for key, p in payload_rows(payloads):
         q = prev_by_key.get(key)
         if q is None:
             skipped.add(key)
@@ -1326,40 +1484,15 @@ def run_over_run(payloads, previous):
         if rn is None or ro is None:
             skipped.add(key)
             continue
-        def corpus(metric):
-            """Totals over the workflows BOTH runs measured, so adding or removing one cannot read as
-            the library moving. Returns the pair and how many entries only one run had."""
-            then_per, now_per = q["metrics"].get(metric, {}), p["metrics"].get(metric, {})
-            names = {n for n in set(then_per) | set(now_per) if not n.startswith("bmi/")}
-            pairs = {n: (then_per.get(n, {}).get(ro), now_per.get(n, {}).get(rn)) for n in names}
-            both = [(a, b) for a, b in pairs.values()
-                    if isinstance(a, (int, float)) and isinstance(b, (int, float))]
-            if not both:
-                return None
-            return sum(a for a, _ in both), sum(b for _, b in both), len(names) - len(both)
-        def slope(payload, ref):
-            """Instantiations per step, and nothing else. This column sits beside the deterministic
-            ones: a wall-time slope here would read as the same kind of number while carrying runner
-            noise - which is how a GCC arm with no counts came to report a 13% "slope" move."""
-            sizes = {}
-            for name, by_ref in payload["metrics"].get("instantiations", {}).items():
-                m = re.fullmatch(r"scaling/broad_(\d+)", name)
-                v = by_ref.get(ref) if m else None
-                if isinstance(v, (int, float)):
-                    sizes[int(m.group(1))] = v
-            if len(sizes) < 2:
-                return None
-            lo, hi = min(sizes), max(sizes)
-            return (sizes[hi] - sizes[lo]) / (hi - lo)
         row = {"key": key,
                "then": q["refs"][ro].get("mp_units_describe", ro), "now": p["refs"][rn].get("mp_units_describe", rn)}
         for metric, name in (("instantiations", "inst"), ("time_ms", "time")):
-            got = corpus(metric)
+            got = corpus_pair(q, ro, p, rn, metric)
             if got and got[0]:
                 a, b, gaps = got
                 row[name] = (a, b, (b - a) / a)
                 unmatched = max(unmatched, gaps)
-        sa, sb = slope(q, ro), slope(p, rn)
+        sa, sb = broad_slope(q, ro), broad_slope(p, rn)
         if isinstance(sa, float) and isinstance(sb, float) and sa:
             row["slope"] = (sa, sb, (sb - sa) / sa)
         if "inst" in row or "time" in row:
@@ -1371,11 +1504,8 @@ def run_over_run(payloads, previous):
     md = ["## Since the previous run", ""]
     md += markdown_table(
         ["configuration", "measured then -> now", "instantiations", "broad slope", "wall time"],
-        [[r["key"], f"`{r['then']}` -> `{r['now']}`",
-          f"{r['inst'][0]} -> {r['inst'][1]} ({r['inst'][2]:+.1%})" if "inst" in r else "n/a",
-          f"{r['slope'][0]:.1f} -> {r['slope'][1]:.1f} ({r['slope'][2]:+.1%})" if "slope" in r else "n/a",
-          f"{r['time'][0]} -> {r['time'][1]} ms ({r['time'][2]:+.1%})" if "time" in r else "n/a"]
-         for r in lines])
+        [[r["key"], f"`{r['then']}` -> `{r['now']}`", *cols]
+         for r, cols in zip(lines, comparison_rows(lines))])
     # `n/a` here is not a REQUIRES floor: it is a configuration that cannot produce the metric at all,
     # and saying so is the difference between "GCC gives no counts" and "something failed".
     md += ["", "Corpus totals and slopes over the workflows both runs measured (`bmi/*` excluded); "
@@ -1423,10 +1553,15 @@ def run_over_run(payloads, previous):
 
 
 def render_report(payloads, previous=None):
-    comparison_md, comparison_findings = (None, [])
-    if previous:
-        comparison_md, comparison_findings = run_over_run(payloads, previous)
     refs = refs_oldest_first(payloads)
+    # A run that measured a range answers for that range. Comparing its newest ref against the previous
+    # run's newest would compare master with master, report "nothing moved", and lead a report whose
+    # every cell reads `v2.5.0 -> master` - the previous run is the control for a SINGLE-ref run only.
+    comparison_md, comparison_findings = (None, [])
+    if len(refs) >= 2:
+        comparison_md, comparison_findings = range_summary(payloads, refs)
+    elif previous:
+        comparison_md, comparison_findings = run_over_run(payloads, previous)
     keys, cells, notes = [], {}, []
     for p in payloads:
         key = p.get("config_key") or p["cxx"]
