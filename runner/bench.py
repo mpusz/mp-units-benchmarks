@@ -418,9 +418,15 @@ def object_sizes(obj: Path) -> dict:
     return {"object_bytes": total, "code_bytes": code, "symbol_bytes": total - code}
 
 
-def compile_once(cmd, cwd=None):
+def compile_once(cmd, cwd=None, pin=None):
     """Wall time and peak RSS of one compile. os.wait4 gives this child's own rusage, so no
-    /usr/bin/time dependency and no interference between measurements."""
+    /usr/bin/time dependency and no interference between measurements.
+
+    `pin` binds the compiler to one CPU via taskset. On a machine with any jitter this is the single
+    most effective control available: measured on WSL2 it halved the within-arm spread, from 23-31%
+    down to 8-12%. It does not make a noisy host trustworthy - see the spread report in `cmd_time`."""
+    if pin is not None:
+        cmd = ["taskset", "-c", str(pin), *cmd]
     started = time.perf_counter_ns()
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=cwd)
     _, status, usage = os.wait4(proc.pid, 0)
@@ -430,8 +436,12 @@ def compile_once(cmd, cwd=None):
     return {"ms": ms, "peak_mib": round(usage.ru_maxrss / 1024, 1)}  # ru_maxrss is KiB on Linux
 
 
-def measure_time(repos, tc: Toolchain, reps, patterns=None):
-    """Interleaved best-of-K wall-clock and peak RSS across checkouts (rep-major, arm-minor)."""
+def measure_time(repos, tc: Toolchain, reps, patterns=None, pin=None, samples=None):
+    """Interleaved best-of-K wall-clock and peak RSS across checkouts (rep-major, arm-minor).
+
+    `samples`, if given a dict, collects every individual timing so the caller can report the spread.
+    A best-of-K number without its spread is unreadable: a 2% difference between arms means nothing
+    on a host whose own repeats vary by 20%, and only the raw samples can say which case you are in."""
     versions = {ref: detect_version(repo) for ref, repo in repos.items()}
     selections = {ref: select_workflows(versions[ref], patterns, tc.std) for ref in repos}
     names = sorted({n for sel in selections.values() for n in sel})  # BMI rows are added below
@@ -461,7 +471,9 @@ def measure_time(repos, tc: Toolchain, reps, patterns=None):
                     if src is None or best[ref].get(name) == "FAIL":
                         continue
                     got = compile_once(compile_cmd(tc, repo, out, src, ctx=contexts[ref]),
-                                       cwd=contexts[ref].cwd)
+                                       cwd=contexts[ref].cwd, pin=pin)
+                    if samples is not None:
+                        samples.setdefault(ref, {}).setdefault(name, []).append(got["ms"])
                     cur = best[ref].get(name)
                     # Best-of-K per metric: the minimum of each is the least contaminated estimate,
                     # and peak RSS barely moves between reps anyway (measured spread <0.1%).
@@ -554,7 +566,8 @@ def metric_cell(entry, key, fmt="{}"):
 
 def cmd_time(args):
     repos = materialize(args, args.refs)
-    best = measure_time(repos, toolchain(args), args.reps, args.workflows)
+    samples = {}
+    best = measure_time(repos, toolchain(args), args.reps, args.workflows, pin=args.pin, samples=samples)
     names = sorted({n for r in best.values() for n in r})
     for title, key, fmt in (("wall time (ms, best of K)", "ms", "{}"),
                             ("peak memory (MiB)", "peak_mib", "{:.1f}")):
@@ -569,6 +582,45 @@ def cmd_time(args):
         ms = sum(best[ref][n]["ms"] for n in comparable)
         mib = max((best[ref][n]["peak_mib"] for n in comparable), default=0)
         print(f"  {ref}: {ms} ms, peak {mib:.1f} MiB")
+    time_spread_report(samples, comparable, args)
+
+
+def time_spread_report(samples, comparable, args):
+    """What the wall-clock numbers above are worth on THIS host.
+
+    Prints each arm's own repeat-to-repeat spread next to the differences between arms, and says
+    outright when the latter is smaller than the former. Without this, `time` invites exactly the
+    mistake the project keeps making: reading a single-digit delta off a host that cannot resolve one."""
+    if not samples or args.reps < 2:
+        return
+    per_arm = {}
+    for ref, by_wf in samples.items():
+        tot = [sum(by_wf[n][i] for n in comparable if len(by_wf.get(n, [])) > i)
+               for i in range(args.reps)]
+        tot = [v for v in tot if v > 0]
+        if len(tot) >= 2:
+            per_arm[ref] = sorted(tot)
+    if len(per_arm) < 1:
+        return
+    print(f"\nHow trustworthy is that? (corpus total per rep, {args.reps} reps"
+          + (f", pinned to CPU {args.pin}" if args.pin is not None else ", unpinned") + ")")
+    rows = [[ref, f"{v[0]:.0f}", f"{statistics.median(v):.0f}", f"{v[-1]:.0f}",
+             f"{100 * (v[-1] - v[0]) / v[0]:.1f}%"] for ref, v in per_arm.items()]
+    for line in markdown_table(["arm", "best", "median", "worst", "own spread"], rows):
+        print(line)
+    noise = max(100 * (v[-1] - v[0]) / v[0] for v in per_arm.values())
+    if len(per_arm) > 1:
+        firsts = list(per_arm)
+        base = per_arm[firsts[0]]
+        gap = max(abs(100 * (per_arm[r][0] - base[0]) / base[0]) for r in firsts[1:])
+        verdict = ("BELOW the noise floor - this host cannot resolve it, and the difference must not be "
+                   "reported as a result" if gap < noise else
+                   "above the noise floor, so it is worth reading")
+        print(f"\nLargest between-arm difference {gap:.1f}% against a {noise:.1f}% noise floor: {verdict}.")
+    else:
+        print(f"\nNoise floor on this host: {noise:.1f}%. A difference smaller than that is not a result.")
+    print("Wall time is never gated for this reason (see CLAUDE.md); counts are. To lower the floor: "
+          "an idle machine, `--pin`, and a native kernel - a VM's scheduler jitter dominates everything else.")
 
 
 # Every gated number must be bit-deterministic for a pinned compiler AND large enough that a percentage
@@ -1704,6 +1756,10 @@ def main():
     t = sub.add_parser("time", help="interleaved wall-clock A/B across refs")
     t.add_argument("refs", nargs="+", help="git refs to compare; WORKTREE = the checkout as-is")
     t.add_argument("--reps", type=int, default=3)
+    t.add_argument("--pin", type=int, metavar="CPU",
+                   help="bind each compile to this CPU via taskset. Halves the within-arm spread on a "
+                        "jittery host (23-31%% -> 8-12%% measured on WSL2) and costs nothing on a quiet "
+                        "one; pair it with a high --reps")
     t.add_argument("--workflows", nargs="*", help="substring filters")
     t.add_argument("--worktree-cache", default=str(ROOT / ".worktrees"))
 

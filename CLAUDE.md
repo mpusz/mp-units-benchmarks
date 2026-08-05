@@ -129,7 +129,11 @@ its median is 1477 bytes so one added symbol name reads as +3%, and it once fail
 that cost +0.08% instantiations. A gate must catch code getting SLOWER, not code getting BIGGER. Peak RSS is measured and
 reported but deliberately NOT gated - it correlates 0.97 with instantiations, so it would only ever
 fire when they already had. Wall time is quiet-machine-only (rank correlation with counts is just
-0.69). Counts are `-std`-dependent, so the gate keeps the standard its baselines were recorded with.
+0.69) - and `time` now prints each arm's own repeat-to-repeat spread beside the between-arm delta,
+plus a verdict when the delta is smaller than the spread, because a 2% difference is meaningless on a
+host whose repeats vary by 20%. `--pin CPU` binds each compile with taskset, which halved the spread
+on WSL2 (23-31% -> 8-12%); the floor there is still 20-27% for a corpus total, so no single-digit
+effect is measurable under a VM at all. Counts are `-std`-dependent, so the gate keeps the standard its baselines were recorded with.
 A metric absent from either side of a comparison is skipped, so baselines predating a metric do not
 read as change. `-ftime-trace` inflates time ~11-15% and memory ~12-17%, so counts come from a
 traced compile and time/memory from an untraced one - NEVER report both from one compile.
