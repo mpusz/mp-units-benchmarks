@@ -1775,8 +1775,8 @@ arm C with counts bit-identical**. Re-running at eleven reps destroyed it:
 | B no-memo | 2350.3 | 2648.6 | 3116.7 | 32.6% |
 | C no-memo+decltype | 2275.1 | 2524.1 | 3261.8 | 43.4% |
 
-The ordering flipped - B moved from -0.16%% to +6.12%% against A - so the -3.1%% was an artifact of five
-reps. **A 3%% effect is not resolvable on a machine whose within-arm noise is 45%%**, which is section 2's
+The ordering flipped - B moved from -0.16% to +6.12% against A - so the -3.1% was an artifact of five
+reps. **A 3% effect is not resolvable on a machine whose within-arm noise is 45%**, which is section 2's
 thesis arriving unbidden, and a reminder that best-of-K with small K is not a substitute for a quiet host.
 
 ### A deterministic probe for constexpr work
@@ -1796,9 +1796,36 @@ applies per evaluation, so this measures the *largest single* constant evaluatio
 says none of the three arms changes the shape of the deepest evaluation - consistent with these techniques
 altering how often evaluation happens rather than how deep it goes.
 
-So on every deterministic measure available - instantiations, evaluation count, and peak evaluation depth -
-the three arms are equivalent to within 0.25%%. Whether arm C buys frontend *time* remains open, and needs a
-quiet pinned host to settle. It is recorded as open rather than answered.
+### Settled as far as this hardware allows: not measurable
+
+The open question got the best conditions available - a freshly rebooted, otherwise idle machine, untraced
+compiles (so no `-ftime-trace` inflation), warm page cache, rep-major interleaving, and a fourth arm to
+separate the two changes: **D = keep the cache, add `decltype`**. Pinning the compiler to one core with
+`taskset` halved the jitter, from 23-31% down to 8-12% on a two-arm probe.
+
+Fifteen interleaved reps, pinned, `umbrella/si_umbrella`:
+
+| arm | best | p25 | median | within-arm spread |
+|---|---:|---:|---:|---:|
+| A shipped | 2065.1 | 2098.7 | 2169.0 | 26.5% |
+| B no-memo | 2013.3 | 2046.0 | 2119.9 | 20.3% |
+| C no-memo+decltype | 2032.6 | 2157.1 | 2198.9 | 24.0% |
+| D cache+decltype | 2026.8 | 2075.7 | 2098.1 | 25.9% |
+
+Every arm-to-arm difference is 1-3%; the noise floor is **20-27%**. The estimators do not even agree on
+sign: arm C is -1.57% on best-of-15 and +2.78% on p25. **A single-digit effect is not measurable on this
+host** - not idle, not pinned, not interleaved, not at fifteen reps.
+
+One weak signal survives: **arm B is faster than A on all three estimators** (-2.51%, -2.51%, -2.27%), the
+only arm where they agree, and it points the same way as its deterministic 0.25% advantage in evaluation
+count. That is suggestive and it is not a finding.
+
+So the honest close: on every deterministic measure the arms are equivalent to within 0.25%, and the time
+question is **not open pending more effort - it is beyond this hardware.** Settling it needs a dedicated
+benchmark host, which is a real thing to own if compile-time work continues, and exactly why the project
+gates on counts and merely reports time (section 2). The doctrine now has a number attached: on this
+machine the wall-clock noise floor is 20-27% even under ideal conditions, so a gate on time would have to
+tolerate a 20% regression before it fired.
 
 ### Why: clang memoizes consteval results itself
 
