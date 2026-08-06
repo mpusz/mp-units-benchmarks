@@ -1853,6 +1853,318 @@ fewer indirections in the hot metafunctions, ahead of V3, does. Verified on the 
 30-TU corpus builds and `unit_test`, `quantity_spec_test`, `quantity_test`, `dimension_test` and
 `chrono_test` all pass.
 
+## 19. Symbol metadata is not a second axis
+
+Two thirds of `text/output_format`'s 440 KB object file is not code, which looked like a second
+thing worth gating: emitted code has a remedy (instantiate fewer copies of the write path) and
+mangled-name volume has a different one (keep details out of the symbol table). The suite measured
+both from the same object scan and reported both. The question is whether the second one carries
+information the first does not.
+
+It does not. Across `v2.5.0 -> master`, on all eight configurations that produce counts,
+`symbol_bytes` moved on **exactly the same workflow set** as `code_bytes` every time - zero
+symbol-only movements, zero code-only. Its rank correlation with `code_bytes` over the corpus is
+**0.98** (with instantiations, -0.25 - so the code/symbol pair genuinely is a different axis from
+frontend work, which is why `code_bytes` is gated; the two members of the pair are not different
+from each other).
+
+Decomposing the object file says why. clang++-21, `-std=c++23`, libc++, `-O2 -DNDEBUG`:
+
+| | output_format | output_ostream | output_printf | kind_safe_interfaces |
+|---|---:|---:|---:|---:|
+| total object | 439,992 | 43,320 | 1,928 | 1,400 |
+| code (SHF_ALLOC) | 146,711 | 11,645 | 206 | 87 |
+| symbol metadata | 293,281 | 31,675 | 1,722 | 1,313 |
+| - string tables (names) | 105,123 | 10,173 | 210 | 163 |
+| - relocation records | 89,208 | 10,320 | 312 | 96 |
+| - section headers | 66,816 | 7,360 | 768 | 768 |
+| - symtab records | 25,704 | 3,072 | 312 | 168 |
+| symbols / sections | 1071 / 1044 | 128 / 115 | 13 / 12 | 7 / 12 |
+| name length mean / median / max | 102 / 20 / 454 | 76 / 26 / 404 | 8 / 8 / 17 | 10 / 6 / 24 |
+
+Only 105 KB of the 293 KB is names at all. The other 188 KB is **fixed-size records**: 24 bytes per
+symbol, 24 bytes per relocation, 64 bytes per section header. Those scale with the number of emitted
+entities, which is the same variable `code_bytes` tracks - and the ELF format charges for it three
+more times.
+
+`output_printf` against `output_format` isolates the cause, because the two differ ONLY in the
+output facility (they share `output_workload.h`, which is why the corpus is built that way): same
+quantity computations, 13 symbols versus 1071, 206 bytes of code versus 146,711. Attributing that
+code by owner: **57 KB is libc++'s `std::format` machinery, 49 KB is other libc++, 1.6 KB is the
+workflow itself, and mp-units' own code is ~0**. The cost is not mp-units code being emitted; it is
+libc++'s formatter templates stamped out roughly a thousand times over mp-units types whose
+spellings run to 451 characters.
+
+So the primary source is neither symbol length nor code size. It is **the number of out-of-line
+template instantiations that survive to the object file**, and both metrics are shadows of it. Code
+size is not "roughly equivalent everywhere" either: 87 -> 206 -> 11,645 -> 146,711 bytes across
+those four workflows is a 1700x spread, tracking the same count.
+
+That kills the case for gating symbol volume, and it also bounds the payoff of optimizing names:
+shortening every mangled name in `output_format` could reach at most 67 KB of a 440 KB object, and
+half of those bytes are in libc++ symbols that merely quote our type names. Emitting fewer
+instantiations reaches all of it. `symbol_bytes` is therefore measured and kept in the JSON, but no
+longer rendered in the report, where it cost 56-79 lines of every run to restate `code_bytes` in
+different units.
+
+What the decomposition does leave standing is a **different** metric for a **different** goal.
+Symbol name length (mean 102, max 454 characters here) is independently optimizable - shorter type
+spellings do not change instantiation counts - and it is the same quantity that makes mp-units
+diagnostics unreadable. If shortening type spellings ever becomes a project, the measurement for it
+is name length, not symbol bytes, and its floor has to be absolute: the corpus median is 6-26
+characters, where a percentage means nothing. Not built, because there is no candidate change to
+test it against yet.
+
+## 20. Hidden friends: real data against a no-brainer
+
+"Use hidden friends everywhere - they keep overload sets small and improve compile times." That
+advice is repeated as if it had no trade-off, and we believed it too: every operator and query on
+`unit_magnitude` was a hidden friend, with a comment admitting the queries "should in fact be in a
+`detail` namespace but are placed here to benefit from the ADL". Generating complete CODATA
+coverage falsified it with numbers.
+
+The workload: one TU containing only `#include <mp-units/systems/codata/codata2022.h>` - 205
+generated constants, 172 of them measured and therefore carrying a second exact magnitude for the
+published standard uncertainty. Configuration for this section: g++-15.2.0 `-std=c++26` and
+clang++-21.1.8 `-std=c++2c`, header-only include paths, frontend-bound (no `-O`), WSL2. Before the
+change the TU cost **44.8 s on gcc and 42.0 s on clang**.
+
+`-ftime-trace` attribution (exclusive, top-level-deduplicated) put **30.3 s of the 42 s inside
+`InstantiateClass` of `unit_magnitude`** - 6775 specializations, median 2.3 ms, worst 83 ms - plus
+6.2 s in its `magnitude_base` CRTP base (2395 more). Tracing a single constant (the Bohr magneton)
+showed where the specializations come from: one `mag_ratio * mag_power * unit` definition plus its
+uncertainty plus two canonical-unit computations materializes **110 distinct `unit_magnitude`
+types**, because the pack-merge mints a specialization for nearly every suffix of every product and
+the per-element fold helpers (`integer_part(unit_magnitude<Ms>{})`...) mint single-element types on
+top. Almost none of those types is ever named again; they are transient intermediates.
+
+That is the half of the trade-off the advice drops. A hidden friend is **redeclared by every
+specialization** of the class template. `unit_magnitude` carried ~20 of them (4 operators, ~15
+queries, and `multiply_impl`/`common_magnitude` in the base), so the TU built roughly **135k friend
+declarations** - signatures, requires-clauses, mangling context - for functions that are never
+called on the overwhelming majority of the types declaring them. Hidden friends optimize *call
+sites* (smaller ordinary-lookup overload sets). They charge per *specialization*. The advice is
+correct exactly when a type is call-site-dominated with few specializations - `std::chrono::duration`,
+or `quantity`'s operators - and inverts for instantiation-dominated types like expression-template
+intermediates, where thousands of specializations exist and almost no call site ever touches one.
+
+The fix (in 2.6.0) happened in two steps, and the second one is the stronger data point. Step one
+moved every query plus `multiply_impl`/`common_magnitude` to namespace-scope function templates
+constrained on `unit_magnitude<Ms...>` and deleted the CRTP `magnitude_base`, keeping only the
+four operators as hidden friends ("operators genuinely want ADL-only lookup" - or so we assumed).
+Step two removed even those from the class itself, and the final shape hosts the whole interface
+in a **non-template base** as hidden friends (next table). No call site changed in either step,
+because moving a function from hidden friend to the class's own namespace does not weaken ADL -
+[basic.lookup.argdep] finds namespace-scope functions of the argument's namespace just as well.
+What is given up is only their *invisibility* to ordinary lookup inside `detail`, which for
+internal names costs nothing measurable.
+
+The same TU after each step (gcc-15 unless noted):
+
+| TU | before | queries moved | fully empty class |
+|---|---:|---:|---:|
+| `codata/codata2022.h` (205 constants) | 44.8 s | 16.8 s | **4.6 s** |
+| same, clang-21 | 42.0 s | 23.1 s | **7.2 s** |
+| `codata/codata2022_essential.h` (~40 constants) | 3.9 s | 2.1 s | **1.7 s** |
+| `iau.h` | 4.6 s | 2.3 s | **2.0 s** |
+| si units + constants + framework baseline | 4.9 s | 2.0 s | **1.9 s** |
+
+Step two deserves its own sentence: **four remaining hidden friends cost 12 s of a 17 s TU** -
+per-specialization declaration of four constrained operator templates, times 2397 specializations,
+was three quarters of everything left. The per-friend arithmetic is consistent across both steps
+at roughly **0.5-1.2 ms per friend declaration per specialization** on both compilers.
+
+The last row is the finding for the library at large: a **2.5x on the cost of every mp-units
+header**, nothing codata-specific - every TU that includes any system pays magnitude
+instantiations.
+
+The design space closes with a controlled three-arm comparison - the original (all functions as
+hidden friends of the class template), plain namespace-scope functions, and the **non-template
+interface base** hosting *all* of them as hidden friends (the `unit_interface` /
+`quantity_spec_interface` shape). Best-of-3, rep-major arm-minor interleaving, only
+`bits/unit_magnitude.h` swapped between arms:
+
+| TU | compiler | friends in class template | free functions | interface base, all friends |
+|---|---|---:|---:|---:|
+| `codata2022.h` (205 constants) | gcc-15 | 40.23 s | 4.19 s | 4.11 s |
+| `codata2022.h` | clang-21 | 44.02 s | 6.84 s | 6.77 s |
+| `codata2022_essential.h` | gcc-15 | 2.52 s | 1.66 s | 1.62 s |
+| `codata2022_essential.h` | clang-21 | 3.70 s | 2.77 s | 2.84 s |
+| si units + constants baseline | gcc-15 | 2.56 s | 1.67 s | 1.64 s |
+| si units + constants baseline | clang-21 | 3.91 s | 2.79 s | 2.84 s |
+
+The last two columns are identical within noise, on both compilers, on every TU. That confirms the
+mechanism exactly: friend declarations are paid per specialization *of the declaring class*, and a
+non-template base has exactly one. Priced: friends in a class template cost ~0.5-1.2 ms per friend
+per specialization; friends in a non-template interface base cost nothing while keeping every
+hidden-friend benefit (ADL finds them because a base class is an associated class of the argument;
+they stay out of ordinary lookup; operator candidate lists in diagnostics stay short). mp-units
+adopted the interface base for `unit_magnitude`, matching `unit_interface`. The one mechanical
+constraint: the base precedes the class, so friend bodies may not name a concrete specialization
+of the still-incomplete class template in a non-dependent expression - two one-line helpers
+(`empty_magnitude(m)`, `negate_magnitude(m)`) keep such spellings dependent.
+
+The corrected guidance, then, is not "hidden friends are slow" - it is **"hidden friends of a
+class template are a per-specialization tax; host them in a non-template interface base and the
+tax is zero."** For call-site-dominated types with a handful of specializations the tax never
+shows; for expression-template machinery it was 10x of a real-world header. Two related numbers
+from the same investigation, for completeness:
+
+- The per-constant marginal cost is **superlinear**: 180 ms/constant at 25 constants, 280 at 50,
+  310 at 100 (pre-fix, gcc). Lookup and caches degrade as specializations accumulate, so per-entity
+  costs measured in small TUs understate large ones.
+- Definition-time constraints are the other per-declaration multiplier (the §12 archetype again):
+  A/B-ing the `standard_uncertainty` specialization's `ConvertibleUnits` check off saved 11 s of
+  the pre-fix 44.8 s (~58 ms per measured constant) - it computes canonical units of both the
+  uncertainty expression and the constant's unit at class-head matching time. Left in place for
+  now; deferring the check to the accessors is a measured candidate.
+
+Where the belief still holds, and why the units and quantity specs were never hurt by it: their
+hidden friends live in **non-template interface bases** (`unit_interface`,
+`quantity_spec_interface`, `dimension_interface`), which are instantiated once per program, not per
+specialization. That pattern - operators and queries on a plain base class, concrete entities
+deriving from it - gets the ADL benefits at zero marginal cost and is the shape to reach for by
+default. The class template with hidden friends is the shape that needs a specialization-count
+estimate before it earns the idiom.
+
+## 21. `consteval` trial division: the loop-limit cliff, and Pollard's rho
+
+The same CODATA generation found the first published constant that mp-units could not define at
+all. The 2018 atomic unit of electric potential is `27.211 386 245 988 V`, and
+`27'211'386'245'988 = 2^2 * 3 * 7 * 531'871 * 609'067`. After the first-100-primes sweep,
+`find_first_factor` reached the remainder `323'945'074'357 = 531'871 * 609'067`; Baillie-PSW
+correctly answered "composite" (BPSW *certifies primes* cheaply - it is why the proton-mass case
+from P3133 works - but it cannot *find* a factor), and the odd trial-division tail then needed
+**265,665 iterations against gcc's default `-fconstexpr-loop-limit` of 262,144**. Not a time wall:
+with `-fconstexpr-loop-limit=400000` the value compiles in 1.4 s, and clang's default budget passes
+it. A cliff, and we were already standing at its edge: the CODATA 2018 electron Compton wavelength
+shipped in `hep` needs 233k iterations, **89% of the default ceiling**, and nobody knew.
+
+It was also the dominant scale cost: 22.0 s of the pre-§20 42 s clang TU was `prime_factorization`
+(665 instantiations, ~33 ms average - mantissas whose smallest post-541 factor sits in the
+10^4..10^5 range burn tens of thousands of `consteval` divisions each).
+
+The fix follows Au (aurora-opensource/au#686, blessed by Chip for porting): `mul_mod` forms the
+full product in `unsigned __int128` where available (the original chunking reduction stays as the
+portable fallback), and the tail is batched-Brent Pollard's rho - accumulate |x-y| products mod n,
+one gcd per 128-step batch, one-step replay on overshoot, escalating polynomial parameters, and
+BPSW-guided recursion to return the smallest prime factor. Trial division remains as the
+last-resort fallback, deliberately: Chip believes some `uint64` composites can defeat any fixed rho
+parameterization schedule. After the change `prime_factorization` costs **0.9 s** in the same TU,
+and the impossible value compiles in ~1.1 s including the framework parse.
+
+Two portability notes worth keeping: gcc-12 rejects a captured `consteval` lambda in this context
+("`x` is not a constant expression") - plain free functions work; and a `u`-suffixed literal is
+`unsigned int`, so `1'000'033u * 1'000'003u` in a test overflowed 32 bits and produced a value
+divisible by 3 - the compiler's "reduces to `(3 == 1000003)`" diagnostic was the whole bug report.
+
+## 23. Two questions behind every "just ship a smaller header"
+
+The lean-header question from the Open threads - whether the advice still earns its ergonomic cost -
+turned out to be two questions, and the order matters. Before asking *how many symbols does a user
+need*, ask *is the per-symbol cost real*. Skip the first and you ship a subset that papers over a bug;
+skip the second and you optimize a mechanism that was never the problem. Configuration throughout:
+clang++-21, `-std=c++23`, libc++, `-O2 -DNDEBUG`, header-only include paths, instantiation counts from
+`-ftime-trace -ftime-trace-granularity=0` (deterministic - the machine was busy, and no wall-clock
+number here would have survived that).
+
+**What the header costs, after §20.** Against a floor of 6528 instantiations for
+`si/units.h` + `si/prefixes.h`, the full `si/unit_symbols.h` adds **2781 (+43%)**. The split inside
+that number is the whole story: the 49 unprefixed symbols - every SI base unit, all 22 named derived
+units, and the non-SI units accepted for use with the SI - add **29**. The other **2752** are the
+671 distinct prefixed types, at ~4.1 instantiations each. Prefixed symbols are 99% of the cost of the
+symbol header and the unprefixed ones are free.
+
+**Where the 4.1 goes.** Each `si::kilo_<metre_>` is a four-deep chain - the prefix type, then
+`prefixed_unit`, then `scaled_unit`, then `scaled_unit_impl` - costing 0.40 ms inclusive, spread
+evenly over all 24 prefix templates with no hotspot. Three suspects were priced and all three
+acquitted:
+
+- **Symbol concatenation** (`Symbol + U._symbol_`): 19 `operator+` instantiations *in total*, because
+  the specialization is shared by every symbol pair of the same lengths. 0.03 s of constant
+  evaluation across 8066 events is all the text work there is.
+- **Magnitude construction**: `make_magnitude` instantiation counts are *identical* with and without
+  the symbol header. The 24 prefix magnitudes are shared by all 28 prefixable units.
+- **The declarations themselves**: an arm with all 674 prefixed declarations rewritten as aliases of
+  their unprefixed unit measured **exactly** the floor. Declaring 674 `inline constexpr` variables is
+  free; instantiating 674 distinct types is not.
+
+**One layer of the four was pure overhead.** `prefixed_unit` derived from
+`scaled_unit<M, U>::_base_type_` - instantiating the `scaled_unit` specialization for the sole purpose
+of naming its base, `scaled_unit_impl<M, U>`, which it then derives from. Naming that base directly
+gives the identical base class and removes one instantiation per prefixed symbol: **-673 on a
+`unit_symbols.h` TU (-7.2%)**, -6.5% on `si.h`, and 2.7-7.0% on *every* workflow in this corpus. The
+`requires(M != mag<1>)` that `scaled_unit` used to enforce is restated on `prefixed_unit` so a
+unit-magnitude prefix stays ill-formed; that guard costs 20 instantiations across the whole header.
+The other three layers are irreducible: the prefix type is user-visible, `prefixed_unit` is the type
+being defined, and `scaled_unit_impl` is the base the framework's `get_canonical_unit_impl` overload
+set deduces `M` and `U` from.
+
+So the mechanism fix is worth a quarter of the prefixed wall, and **the remaining three quarters can
+only be paid down by instantiating fewer types**. Subsetting was not made moot - which is exactly what
+the first question exists to find out.
+
+**Measuring which symbols are used, exactly.** The obvious approach - regex the corpora for symbol
+names - was written, run, and thrown away. In files that use `unit_symbols`, `T` matched template
+parameters, `t` matched `return d / t;`, `a` matched `walk_ulps(a, -4)`. Context filters ("preceded by
+`*` or `/`") shrank the error without bounding it, and the symbols they corrupt are single letters -
+`T`, `V`, `K`, `N`, `C` - which is to say the named SI derived units.
+
+The compiler already knows the answer. Copy `unit_symbols.h` into an include overlay with every
+declaration marked `[[deprecated("MPUSE:<name>")]]`, compile each corpus file with
+`-fsyntax-only -ferror-limit=0 -Wno-everything -Wdeprecated-declarations`, and keep the warnings whose
+file is the corpus file. That is an exact use-site count, it needs no parser, and `-ferror-limit=0`
+means files that do not fully compile - a corpus of deliberate compile-error examples, a test needing
+an absent backend - still report every use the front end reached. **8231 uses across 99 files**
+(`example/`, `test/static`, `test/runtime`, `test_package/`, this suite's workflows, and Chip's
+cross-library corpus). **85 of the 771 spellings are used at all. 686 are never used once.**
+
+**But usage data cannot design the subset.** The temptation is to cut at a coverage percentile - 19
+symbols reach 95%. That produces a header where `kHz` is present and `MHz` is not, because one corpus
+happened to write one and not the other, and no user could predict its contents. The corpus is small
+(47 hand-written example programs); absence is weak evidence. So the set is defined by **what industry
+writes**, researched per unit and per domain, and the usage data is demoted to a validator: the rule
+picks the symbols, the corpus checks that the rule missed nothing real.
+
+That research is worth more than the header it produced, because most of it is counter-intuitive:
+`cGy` is the radiotherapy prescribing convention (an error-reduction measure - AAPM 263); `daPa` is
+standardized for tympanometry and `daN` is printed on every EU lashing strap, making deca- a live
+professional prefix; `20 uPa` is the ISO 1683 acoustic reference; viscosity datasheets are in `mPa s`;
+Chandra denominates observing time in `ks`; ocean heat content is reported in `ZJ`; `nHz` is the
+pulsar-timing gravitational-wave band. And symmetrically, four "obvious" prefixes fail on evidence -
+`kcd`, `kF`, `kC`, `kK` all lose to the unprefixed form or a different unit in their own domain
+(lighthouses are rated in cd, supercapacitors are marked "3000 F", charge is sold in A h, plasma
+temperature is written in K or eV). `pH` is excluded for a different reason: picohenry is real, but the
+spelling is the chemistry quantity.
+
+**Result.** 218 spellings over 142 distinct prefixed types:
+
+| TU | HEAD | after | note |
+|---|---:|---:|---|
+| `si/units.h` + `si/prefixes.h` (floor) | 6528 | 6523 | no symbols at all |
+| `si/unit_symbols_essential.h` | - | **7035** | +512 over floor |
+| `si/unit_symbols.h` | 9309 | 8636 | +2113 over floor |
+| `si/core.h` | 7507 | **7037** | *gains* 218 symbols and still drops 6.3% |
+| `si.h` | 10298 | 9625 | -6.5%, all of it the mechanism fix |
+
+The essential header carries **24% of the full matrix's cost** and covers **100% of user-facing uses
+and 99.74% of all 8231** - the 21 misses are `si_test.cpp` sweeping every prefix of the metre, which is
+the library testing the prefix machinery rather than anyone using it. A TU moving from `si.h` to
+`si/core.h` now pays 7037 instead of 9625, **-27%**, and gets the symbols it is likely to want.
+
+**Gating this needed a new workflow.** Every existing workflow includes the full `si.h`, so the corpus
+could see the mechanism fix (uniform -673) but was structurally blind to the header split. `umbrella/
+si_lean_umbrella.cpp` includes `si/core.h`, and the gap between it and `si_umbrella.cpp` is now a gated
+number: what a TU pays for the parts most code does not use.
+
+The transferable part is the shape of the question. "Ship a smaller header" is a plausible answer to a
+question nobody measured - and here it was *half* right. The per-item cost had a 25% bug in it that no
+amount of subsetting would have found, and the item count needed an exact usage measurement plus
+outside evidence, because the codebase's own corpus is a biased sample of its users. Both halves were
+cheap to measure. Neither was guessable: the mechanism looked like symbol_text concatenation (it was
+0.03 s), and the subset looked like a frequency cut (which would have shipped `kHz` without `MHz`).
+
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That
@@ -1899,6 +2211,14 @@ is not the number that costs you* — which needs no mp-units background at all.
 ## Open threads
 
 - Re-record baselines at the `v2.6.0` tag once it exists.
+- The remaining magnitude cost after §20: with the class fully empty, the codata TU is down to
+  4.6 s (gcc) / 7.2 s (clang), and what remains is `multiply_impl`'s head/tail recursion minting a
+  specialization per suffix of every product plus NTTP pack construction (§17's cluster, now the
+  top item). A merge that computes the result pack in one consteval step and instantiates only the
+  final type is the measured next lever.
+- `quantity`/`quantity_point` carry many hidden-friend operators per specialization (§20's math).
+  They are call-site-dominated in typical code, but a TU instantiating thousands of quantity types
+  would hit the same wall; worth a specialization-count check before declaring them safe.
 - V3: hierarchy trees via language features (inheritance, aggregation) instead of template tricks, and
   a reflection-based implementation (g++-16 only so far). Both are exactly the kind of change the
   emitted-code and constant-evaluation gates exist to watch, since both trade instantiations for other
@@ -1907,8 +2227,10 @@ is not the number that costs you* — which needs no mp-units background at all.
 - **A safety-level corpus axis** (§0): the same problem solved at each of the six levels, so "what does
   quantity-kind safety cost?" has an answer. Currently the most valuable missing measurement, and the
   one that would let a level-2 user see what levels 4-6 are charging them.
-- Whether the "lean header" advice still earns its ergonomic cost after the July perf work, which
-  moved lean close enough to `si.h` to raise the question.
+- ~~Whether the "lean header" advice still earns its ergonomic cost after the July perf work.~~
+  Answered in §23: it does, but only after fixing a 25% per-symbol bug first, and the lean include
+  now carries the symbols most code wants (`si/core.h` 7037 vs `si.h` 9625). What remains open is
+  the same question for `isq.h`, whose domain-targeted sub-headers have never been measured.
 - Single-pass `merge_many` in the value domain (§17): ceiling measured at ~700 instantiations, about
   2.8%, needing a value-key extractor that reproduces `expr_less` semantics. Deliberately not built,
   because the pairwise form is predicted a wash and the `type_list_unique` result is direct evidence for
@@ -1917,3 +2239,7 @@ is not the number that costs you* — which needs no mp-units background at all.
   `expr_consolidate` cluster at ~1800 instantiations, and `std::pair` plus `try_extract_common_base` at
   ~1500 in the ingredient matcher. Both are what the reflection work aims at, and both are large enough
   that a value-domain rewrite has headroom the short-list operations lack.
+- Symbol name length as its own metric (§19): mp-units type spellings reach 451 characters inside
+  libc++'s formatter symbols, and they are the same spellings that make diagnostics unreadable. The
+  measurement is cheap and already in the object scan; it is not built because there is no candidate
+  change to test it against, and because the object-size payoff is bounded at 67 KB of 440 KB.

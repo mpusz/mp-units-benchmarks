@@ -1,15 +1,43 @@
 {
   "mp_units_version": "2.6",
-  "mp_units_sha": "bb2785aee0389186c2db2582b7fd460e2f223cd6",
-  "mp_units_describe": "bb2785a",
+  "mp_units_sha": "4a4cbd3ba7e015b664f734a2d5676e7d4b0fc9ac",
+  "mp_units_describe": "v2.5.0-703-g4a4cbd3ba-dirty",
   "cxx": "clang++-21",
   "std": "c++20",
   "stdlib": "libc++",
   "config_label": "",
   "extra_flags": "",
   "not_re_recorded": [
+    "affine/custom_origins",
+    "affine/temperature_points",
+    "generic/custom_representation",
+    "generic/dimensionless_and_angles",
+    "generic/generic_interfaces",
+    "isq/complex_quantities",
+    "isq/custom_hierarchy",
+    "isq/derived_spec_conversions",
+    "isq/fractional_exponents",
+    "isq/hierarchy_conversions",
+    "isq/kind_conversions",
+    "isq/kind_safe_interfaces",
+    "isq/vector_quantities",
+    "parity/kinetic_energy",
+    "parity/unit_conversions",
+    "parity/value_conversions",
+    "scaling/broad_016",
+    "scaling/broad_064",
+    "scaling/broad_256",
+    "scaling/narrow_016",
+    "scaling/narrow_064",
+    "scaling/narrow_256",
+    "systems/user_defined_units",
+    "text/output_format",
     "text/output_format_advanced",
-    "text/output_println"
+    "text/output_ostream",
+    "text/output_printf",
+    "text/output_println",
+    "umbrella/isq_umbrella",
+    "umbrella/si_umbrella"
   ],
   "results": {
     "affine/custom_origins": {
@@ -229,6 +257,14 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957
+    },
+    "umbrella/si_lean_umbrella": {
+      "InstantiateClass": 4467,
+      "InstantiateFunction": 2784,
+      "EvaluateAsConstantExpr": 27360,
+      "object_bytes": 960,
+      "code_bytes": 51,
+      "symbol_bytes": 909
     },
     "umbrella/si_umbrella": {
       "InstantiateClass": 7345,
