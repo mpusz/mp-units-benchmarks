@@ -2058,6 +2058,282 @@ Two portability notes worth keeping: gcc-12 rejects a captured `consteval` lambd
 `unsigned int`, so `1'000'033u * 1'000'003u` in a test overflowed 32 bits and produced a value
 divisible by 3 - the compiler's "reduces to `(3 == 1000003)`" diagnostic was the whole bug report.
 
+## 22. Finishing the interface-base sweep: a metric that can see declarations
+
+§20 priced hidden friends of a class template at ~0.5-1.2 ms per friend per specialization and
+adopted the non-template interface base everywhere it mattered for `unit_magnitude`. This section
+finishes the sweep across the rest of the library, and its first result is methodological: **for
+changes of this size, every metric the suite gates is blind.**
+
+Moving a friend from a class template into a base changes no instantiation. It changes what gets
+*declared*. Measured on the corpus, the three conversions in this section move
+`InstantiateClass + InstantiateFunction` by **exactly 0** on every workflow, and
+`EvaluateAsConstantExpr` by **-2 to -12** out of 37k-222k, which is rounding. Wall time is worse
+than useless here: pinned with `taskset` on this WSL2 host the repeat-to-repeat spread was
+**16-30%**, against an effect no larger than 3%. Two arms measured at 9.11 s and 9.20 s on
+`scaling/broad_256`, which says nothing whatsoever.
+
+The metric that works is `clang -Xclang -print-stats`, which is bit-deterministic like the trace
+counts and reports the AST directly - `decls total`, `Function decls`, `types total`. Friend
+declarations land in `Function decls`, one per specialization of the declaring class, exactly as
+the mechanism predicts. It is now the runner's fourth gated metric, and what it cost to add is
+covered in its own subsection below; it is the only one that can see a declaration-side change at
+all.
+
+The sweep. A census of every class template in the library still hosting friends, weighted by how
+many specializations a real TU actually mints (traced, clang-21, `-ftime-trace-granularity=0`):
+
+| class template | friends | specializations in a TU | | | | tax = friends x specs |
+|---|---:|---:|---:|---:|---:|---:|
+| | | si_umbrella | kind_safe | broad_256 | codata2022 | (worst) |
+| `basic_fixed_string` | 10 | 22 | 22 | 22 | 98 | **980** |
+| `symbol_text` | 3 | 17 | 17 | 17 | 58 | 174 |
+| `quantity` | 2 | 1 | 12 | 238 | 1 | 476 |
+| `reference` | 15 | 0 | 7 | 9 | 0 | 135 |
+| `safe_int` | 50 | 0 | 0 | 0 | 0 | 0 |
+| `uncertain` | 25 | 0 | 0 | 0 | 0 | 0 |
+| `double_width_int` | 14 | 0 | 0 | 0 | 0 | 0 |
+| `cartesian_vector`/`_tensor` | 8 / 3 | 0 | 0 | 0 | 0 | 0 |
+| `polar_vector`/`spherical_vector` | 7 / 7 | 0 | 0 | 0 | 0 | 0 |
+
+The bottom half of that table is the finding that stops work: those types have the *highest*
+per-specialization friend counts in the library - `safe_int` carries 50 - and are instantiated
+**zero** times by any workflow in the corpus. Their tax is real per specialization and unpaid in
+practice. They are left alone, deliberately: converting them would be a change with a measured
+effect of exactly nothing.
+
+Three conversions were made, each attributable to the arithmetic. Arms are include trees differing
+in one file; the numbers below are `Function decls` from `-print-stats`, clang-21 `-std=c++23`:
+
+| workflow | A: before | B: +`quantity::get` | C: +`symbol_text` | D: +`basic_fixed_string` | total |
+|---|---:|---:|---:|---:|---:|
+| `umbrella/si_umbrella` | 9102 | 9100 | 9049 | **8829** | -273 (-3.00%) |
+| `scaling/broad_256` | 33055 | 32579 | 32528 | **32308** | -747 (-2.26%) |
+| `isq/kind_safe_interfaces` | 13875 | 13851 | 13800 | **13580** | -295 (-2.13%) |
+| `affine/temperature_points` | 11447 | 11421 | 11353 | **11073** | -374 (-3.27%) |
+| `text/output_format` | 11171 | 11145 | 11094 | **10874** | -297 (-2.66%) |
+
+Every step equals `friends x specializations` to the declaration. The two `get()` friends on
+`quantity` cost **476 on broad_256 (2 x 238), 24 on kind_safe_interfaces (2 x 12), 2 on
+si_umbrella (2 x 1)**. `symbol_text` costs 51 (3 x 17) on four of the five. `basic_fixed_string`
+costs 220 (10 x 22) everywhere, because every TU that includes a system header mints ~22 of them
+just to spell unit symbols. The `si_umbrella` total checks out end to end: 220 + 51 + 2 = 273
+against 273 measured - the four new overloads discussed below are declared once in the base, and
+show up as the difference between the 273 predicted and the 269 measured before they were added.
+
+Whole-AST effect, same arms: `decls total` **-0.32% to -0.80%** (each friend drags ~5.5 declarations
+with it - the function plus its template parameters), `types total` **-0.14% to -0.40%**. `Total
+bytes` of AST moves by ±0.03%, i.e. not at all, because a smaller declaration count is offset by
+the base subobject; do not expect memory to show this.
+
+**Diagnostics did not improve, and the honest answer is that they were never going to.** The
+prediction in §20 was shorter operator candidate lists. Measured on four intentionally failing
+programs (incompatible-kind addition, quantity-vs-number comparison, `get<0>` on a non-decomposable
+quantity, a bad reference operator), the candidate count is **identical before and after** - 4, 0,
+8 and 12 respectively - as are the note count and the line count. Total stderr moves by -0.2%,
+except `get_on_nondecomposable` which got **2.4% larger** because the friend now prints as
+`quantity<R1, Rep1>` where it used to print as `quantity`. Hidden friends of a class template were
+already invisible to ordinary lookup; moving them to a base does not shorten anything a user sees.
+Recorded here so the claim is not repeated: the interface base is an AST-size optimization, not a
+diagnostics one.
+
+### The pattern is not semantically free
+
+This is the part §20 did not know. A friend declared inside a class template takes the enclosing
+specialization by a **non-deduced** parameter, so the *other* operand can reach it through the
+class's implicit converting constructors. Hosting the same operator in a non-template base means
+deducing both sides, and that conversion is gone.
+
+`symbol_text` relied on it in exactly the way that makes this expensive to notice: `sym == 'b'` and
+`unit._symbol_ == "km"` worked because the reversed candidate bound the raw operand to the
+non-deduced `const symbol_text&` and converted it. Both spellings are used in the test suite and in
+`unit_test.cpp`, and both broke. The fix is four explicit raw-operand overloads in the base, which
+must name `symbol_text<N, M>` - the *enclosing* specialization - rather than use CTAD, for two
+independent reasons: it reproduces the original conversion target exactly (a size mismatch stays
+ill-formed), and it keeps the expression dependent. CTAD would not have worked at all, because the
+class template is incomplete at that point in the header and its deduction guides are not declared
+until after it. That is the §20 incomplete-type constraint reappearing in a new disguise.
+
+So the corrected guidance from §20 gains a caveat: *hosting friends in a non-template base is free
+in AST cost and in ADL, but not in overload resolution.* Before converting, check whether any
+operand reaches the operator by conversion; if it does, the conversions must be restored by hand.
+
+### gcc-12, empty bases, and `bit_cast`
+
+`basic_fixed_string` is used as a non-type template parameter throughout the library. Giving it an
+empty base made **every compile-time symbol a non-constant expression on gcc-12**:
+
+```
+error: 'mp_units::symbol_text<1, 1>("%")' is not a constant expression
+       because it refers to an incompletely initialized variable
+```
+
+A second portability trap, this one in module builds: the interface base has to be declared before
+the class, which means adding a forward declaration - and **that forward declaration must be
+exported too**. Left unexported it has module linkage, and the exported definition then cannot
+redeclare it:
+
+```
+error: cannot export redeclaration 'basic_fixed_string' here
+       since the previous declaration has module linkage
+```
+
+Header builds never see this, so it is invisible until someone builds the module interface. With
+the declaration exported, clang-21 builds `mp_units.core` and `mp_units.systems` and a consumer
+resolves every operator - concatenation, comparison, `symbol_text == "km"`, quantity arithmetic and
+the vector-component `get()` used by structured bindings - through ADL into the non-exported
+`detail` bases, which is the property that makes the whole pattern legal across a module boundary.
+
+The cause is not the NTTP. It is `detail::to_u8string`, which built the UTF-8 half of every symbol
+with `std::bit_cast<fixed_u8string<N>>(txt)`: during constant evaluation `bit_cast` leaves the new
+empty base subobject uninitialized, and the object is then unusable in a constant expression.
+Adding the base to every constructor's mem-init list does **not** fix it - the bad object comes out
+of `bit_cast`, not a constructor - so those initializers were removed again; an empty base with no
+members is default-initialized anyway, and writing it out only implies a problem that is not there.
+Replacing the `bit_cast` with an element-wise copy is the actual fix.
+
+The version boundaries are worth recording, because the first diagnosis ("a gcc-12 quirk") was
+wrong by half the support matrix. A minimal repro - `bit_cast` between two trivially copyable
+structs that share an empty base, evaluated in a constant expression - fails on **gcc 12 and 13 and
+clang 16, 17 and 18**, and passes on gcc 14/15 and clang 20/21. That is five of mp-units' ten
+supported compilers, so the workaround is the majority path today, not an exotic fallback.
+
+That matters for how the fix is written. The library keeps `bit_cast` as the `#else` branch behind
+`(MP_UNITS_COMP_GCC < 14) || (MP_UNITS_COMP_CLANG < 19)` rather than replacing it outright, because
+this header tracks P3094 and `bit_cast` *is* the specification of the operation - reinterpret the
+object representation as `char8_t`. An element-wise loop states an implementation instead, and
+would be the wrong thing to lift into wording. The guarded form keeps the normative expression
+visible in the source and quarantines the defect as a defect, with an expiry condition attached.
+
+### The CRTP fallback: measured, and nothing to do
+
+§20 left open what the pre-deducing-this `quantity_spec_interface<Self>` costs. A/B on one compiler
+with `MP_UNITS_API_NO_CRTP` forced both ways (clang-21, so `-print-stats` works on both arms):
+
+| workflow | `quantity_spec_interface<Self>` specs | decls, deducing-this | decls, CRTP | delta |
+|---|---:|---:|---:|---:|
+| `umbrella/isq_umbrella` | 526 | 334221 | 351311 | +17090 (+5.1%) |
+| `isq/kind_safe_interfaces` | 288 | 310738 | 321225 | +10487 (+3.4%) |
+| `isq/custom_hierarchy` | 288 | 297831 | 308180 | +10349 (+3.5%) |
+
+That is **~33-36 declarations and ~70-78 types per specialization**, and it is what gcc-12, gcc-13
+and clang-16 pay for lacking P0847. `Function decls` barely moves (+26 to +60), which is the tell:
+the cost is the per-`Self` base class specialization itself, not its members. **No change is
+possible** - the four members are `operator[]` and `operator()`, which the language requires to be
+members, so there is no hidden-friend form to move them into. Measured, documented, closed.
+
+### Freestanding functions: inventoried, not converted
+
+The second half of the brief was to consider converting namespace-scope functions taking a
+framework entity into hidden friends. The inventory is done and the answer is **no, almost
+everywhere**, for a reason that has nothing to do with compile time.
+
+Converting a public function to a hidden friend **removes the `mp_units::`-qualified call
+spelling**. `mp_units::value_cast<m>(q)` stops compiling; only unqualified ADL works. That is a
+breaking source change for every one of these, and they are numerous: the whole of `math.h` (27
+functions - `abs`, `pow`, `sqrt`, `cbrt`, `exp`, `isfinite`, `isinf`, `isnan`, `fma`, `fmod`,
+`remainder`, `floor`, `ceil`, `round`, `inverse`, `hypot`, `lerp`, `midpoint`, and the
+`quantity_point` overloads), 12 `value_cast` overloads plus 2 `quantity_cast`, the 9
+quantity-spec queries in `quantity_spec_conversion.h` (`implicitly_convertible`,
+`explicitly_convertible`, `castable`, `interconvertible`, `get_kind`, `is_non_negative`, 3x
+`get_common_quantity_spec`), 6 `get_common_unit` overloads, `get_canonical_unit`, `unit_symbol` /
+`unit_symbol_to`, `dimension_symbol` / `dimension_symbol_to`, and 14 trig functions across
+`si::math` and `angular::math`.
+
+The **declaration-count** case for converting them is nil: they are namespace-scope function
+templates, declared once per program regardless of how many entities exist, so the
+per-specialization tax that motivated §20 does not apply to them at all.
+
+That is not the same as "no benefit", and an earlier draft of this section wrongly said so. There
+is a second, independent mechanism that §20 never measured: **ordinary lookup finds every overload
+of a name in the namespace, and overload resolution then has to rank them all - including checking
+each one's constraints.** Hidden friends are invisible to ordinary lookup, so a call sees only the
+overloads associated with its argument's type. That is a real cost, it applies to *qualified* calls
+too (qualifying suppresses ADL but not the ranking), and it shows up in diagnostics.
+
+Sizing the prize, clang-21, counting candidates printed for one bad call:
+
+| call | mp-units candidates | std candidates | what conversion would do |
+|---|---:|---:|---|
+| `value_cast<m>(len, len, len)` | **11** | 0 | split ~5 `quantity` / ~6 `quantity_point` |
+| `get_common_unit()` | 6 | 0 | all take units - no split available |
+| `hypot()` | 2 | 9 | mp-units pair leaves non-quantity calls |
+| `sqrt(len, len)` | 1 | 6 | already minimal (see below) |
+
+`value_cast` is the clear case: 11 overloads, every one reachable by ordinary lookup, and they
+divide cleanly into a `quantity` half and a `quantity_point` half that never compete for the same
+call. Hosted as hidden friends of `quantity_iface` and `quantity_point_iface`, each call site would
+see about half the list.
+
+`sqrt` is the control that shows the mechanism already working where mp-units applied it: the unit,
+quantity-spec and dimension `sqrt` overloads are *already* hidden friends of their interface bases,
+and they correctly do **not** appear in that candidate list - only the one freestanding
+quantity `sqrt` from `math.h` does, alongside six from libc/libc++. The library has already
+captured this win for `pow`/`sqrt`/`cbrt`/`equivalent`/`get_unit`/`get_quantity_spec`; what is left
+is the families that live on a single entity type.
+
+So the honest verdict is: converting is **not** free of benefit, and the benefit is a lookup and
+diagnostics effect that no metric in this suite currently gates. What it costs is real too - it
+removes the `mp_units::`-qualified spelling from public API, which is a breaking source change for
+every function listed above. That trade is a design decision, not a measurement, and it is recorded
+here as open rather than closed. The experiment that would settle the size of it: convert the
+`value_cast` family behind a macro, and A/B candidate counts plus `EvaluateAsConstantExpr` (the
+constraint checks that overload resolution performs are constant evaluations, so they *are*
+countable) on a `value_cast`-heavy TU.
+
+The `detail::` half of the inventory - roughly 130 helpers across `bits/` and `framework/`, the
+dense clusters being `quantity_spec_equation_conversion.h` (~20), `unit_conversion_impl.h` (~35
+counting the `collect_measured_constants` overload set), `quantity_spec_hierarchy.h` (9),
+`unit_text.h` (9) and `symbolic_expression.h` (13) - is free to change, since no public spelling is
+at stake. The same lookup argument applies to them, and more strongly: `detail` is one flat
+namespace holding all ~130, so every unqualified call in it ranks against every same-named sibling.
+These are the ones to convert first, precisely because they cost nothing to get wrong.
+
+One genuine candidate remains unconverted: **`reference`**, 15 friends in a class template, 4-9
+specializations in a typical TU (worst observed 9, so a ~135-declaration tax). It is left for a
+separate change because its friends return `detail::reference_t<...>` computed from the enclosing
+specialization's own `Q` and `U` in the *return type*, which is where the incomplete-type
+constraint bites hardest - every one of those return types would have to be re-expressed
+dependently over deduced parameters, and unlike the three conversions above that is not a
+mechanical edit.
+
+### The metric, as landed
+
+Adding it to the runner answered three questions the section above did not have to.
+
+**One compile, not two.** `-Xclang -print-stats` was expected to need its own `-fsyntax-only` pass.
+It does not: attached to the existing `-ftime-trace -c` compile that already produces the counts, it
+reports numbers **byte-identical** to a standalone run, so the AST census is free. It must *not* be
+paired with `-fsyntax-only` instead - skipping codegen changes the answer, by 16 decls and 10 types
+on `isq/kind_safe_interfaces`, which would leave two columns of the same table describing two
+different compiles. `Total bytes` is not parsed at all, for the reason given above.
+
+**Only `Function decls` is gated**, and the argument is dilution rather than redundancy. Two arms
+isolate one mechanism each: the hidden-friend conversions move `function_decls` -2.1% to -3.3% while
+`decls_total` moves -0.3% to -0.8%, and forcing the CRTP fallback on `isq/kind_safe_interfaces`
+moves instantiations +2.2% (18655 -> 19060) while `decls_total` moves +3.4% and `function_decls`
+only +0.4% (13580 -> 13640). So each of the two whole-AST numbers is a mixture of the two mechanisms
+the sharp metrics already own. The one thing only `decls_total` can see - a non-function member added
+to a widely specialized class template - it sees at 1/23rd the resolution: one member alias on
+`quantity` is 238 declarations out of 310759, or 0.08%, which no band will ever catch, because 75k
+`TemplateTypeParm` declarations that no design decision controls sit in the denominator. It is
+rendered as context and not gated. `types_total` is neither: rank **0.997** with `decls_total` across
+the corpus, same direction and smaller magnitude on both arms, and the library has no design decision
+that adds types without declarations - the §19 test for a second shadow, unchanged.
+
+**The floor is 0**, and the derivation matters more than the number. Every other gated metric earns
+its floor from being small: `code_bytes` has a median of 145, so a 1% band is 1.4 bytes. Declarations
+are the opposite case - the *smallest* value in the corpus is 8269 (`umbrella/si_lean_umbrella`), so
+CI's 1% band already resolves to 83 declarations, and repeats are bit-identical. A floor of 50, which
+looks reasonable by analogy, would sit below the band on every workflow in the corpus and never once
+bind. A floor that never binds is decoration.
+
+The parse is checked against arithmetic rather than against a recorded number. A synthetic TU with
+four hidden friends on a class template specialized N times charges exactly `4N` (290/450/1050
+`Function decls` at N = 10/50/200 against a flat 250 with the same functions in a base), and on the
+real corpus the runner reproduces every column-D number in the table above to the declaration -
+8829, 32308, 11073, 10874, 13580, at `a4ff2a425`, the tree that table was measured on.
+
 ## 23. Two questions behind every "just ship a smaller header"
 
 The lean-header question from the Open threads - whether the advice still earns its ergonomic cost -
