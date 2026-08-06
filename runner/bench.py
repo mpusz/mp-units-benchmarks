@@ -6,8 +6,10 @@ Measures the compile-time cost of idiomatic mp-units workflows across library ve
 Subcommands:
   time     interleaved wall-clock A/B across two or more git refs (best-of-K, rep-major
            interleaving so machine-load drift hits all arms equally)
-  counts   deterministic template-instantiation counts (clang -ftime-trace event counts;
-           bit-stable for a pinned compiler, usable even on noisy CI machines)
+  counts   deterministic frontend counts from one traced clang compile: -ftime-trace events
+           (instantiations, constant evaluations) plus the AST census from -print-stats
+           (declarations, types) - all bit-stable for a pinned compiler, so a noisy CI
+           machine measures them as well as a quiet one
   check    compare instantiation counts of a checkout against baselines/ with a two-sided
            gate: regressions fail; improvements emit a visible "tighten baselines" notice
   update   re-record baselines/ from a checkout
@@ -27,6 +29,7 @@ from __future__ import annotations  # 3.12 evaluates annotations eagerly, 3.14 d
 
 import argparse
 import collections
+import contextlib
 import hashlib
 import json
 import os
@@ -250,8 +253,13 @@ def compile_cmd(tc: Toolchain, repo, out, src, trace=False, ctx: BuildContext = 
         cmd += [f"-stdlib={tc.standard_library}"]
     if trace:
         # Tracing inflates BOTH wall time (~11-15%) and peak RSS (~12-17%), so counts must never
-        # come from the same compile as the time/memory numbers.
-        cmd += ["-ftime-trace", "-ftime-trace-granularity=0"]
+        # come from the same compile as the time/memory numbers. `-print-stats` rides along because
+        # it changes neither the object file nor the trace, and its numbers are byte-identical to a
+        # clean compile's - so the AST counts cost no second invocation. It must NOT be paired with
+        # `-fsyntax-only` instead: skipping codegen drops a handful of decls and types (16 and 10 on
+        # isq/kind_safe_interfaces), which would make these counts describe a different compile than
+        # the instantiation counts beside them.
+        cmd += ["-ftime-trace", "-ftime-trace-granularity=0", "-Xclang", "-print-stats"]
     if tc.import_std:
         cmd += ["-DMP_UNITS_IMPORT_STD"]
     if tc.modules:
@@ -283,9 +291,11 @@ def build_modules(repo: Path, tc: Toolchain, workdir: Path, trace=False):
     base = [tc.cxx, f"-std={tc.std}", "-O2", "-DNDEBUG", "-DMP_UNITS_API_CONTRACTS=0",
             "-DMP_UNITS_API_THROWING_CONSTRAINTS=0"]
     if trace:
-        # Counting the BMI build matters: under modules the consumer instantiates almost nothing,
-        # because the work happened here. Tracing does not change the BMI, so consumers can reuse it.
-        base += ["-ftime-trace", "-ftime-trace-granularity=0"]
+        # Counting the BMI build matters: under modules the consumer instantiates almost nothing and
+        # declares almost nothing - a `si_lean_umbrella` consumer reports 1 function declaration against
+        # 8269 with headers - because the work happened here. Leaving these rows out would price modules
+        # as free. Tracing does not change the BMI, so consumers can reuse it.
+        base += ["-ftime-trace", "-ftime-trace-granularity=0", "-Xclang", "-print-stats"]
     if tc.standard_library:
         base += [f"-stdlib={tc.standard_library}"]
     if tc.import_std:
@@ -295,14 +305,16 @@ def build_modules(repo: Path, tc: Toolchain, workdir: Path, trace=False):
     cwd = None if tc.is_clang else str(workdir)
 
     def step(name, cmd, artifact):
+        stats_file = artifact.with_suffix(".stats") if trace else None
         try:
-            got = compile_once(cmd, cwd=cwd)
+            got = compile_once(cmd, cwd=cwd, stderr_to=stats_file)
         except subprocess.CalledProcessError:
             sys.exit(f"failed to build {name} for {config_key(tc)}:\n  " + " ".join(map(str, cmd)))
         got["mib_on_disk"] = round(artifact.stat().st_size / (1024 * 1024), 1) if artifact.exists() else None
         if trace:
             trace_file = artifact.with_suffix(".json")
-            got["counts"] = trace_counts(trace_file) if trace_file.exists() else None
+            got["counts"] = ({**trace_counts(trace_file), **ast_stats(stats_file.read_text())}
+                             if trace_file.exists() else None)
         steps.append({"name": f"bmi/{name}", **got})
 
     if tc.import_std:
@@ -310,8 +322,8 @@ def build_modules(repo: Path, tc: Toolchain, workdir: Path, trace=False):
         # mp-units, so it must not inherit its configuration macros or -O2. Doing so is not merely
         # untidy - GCC 16 miscompiles consumers of a std module built that way, ICEing in
         # nonnull_arg_p during GIMPLE ealias.
-        std_base = [tc.cxx, f"-std={tc.std}"] + (["-ftime-trace", "-ftime-trace-granularity=0"]
-                                                  if trace else [])
+        std_base = [tc.cxx, f"-std={tc.std}"] + (["-ftime-trace", "-ftime-trace-granularity=0",
+                                                  "-Xclang", "-print-stats"] if trace else [])
         if tc.standard_library:
             std_base += [f"-stdlib={tc.standard_library}"]
         if not tc.is_clang:
@@ -365,23 +377,46 @@ def measure_counts(repo: Path, tc: Toolchain, patterns=None):
             out = Path(tmp) / "wf.o"
             trace = Path(tmp) / "wf.json"
             try:
-                run(compile_cmd(tc, repo, out, src, trace=True, ctx=ctx), cwd=ctx.cwd)
+                proc = run(compile_cmd(tc, repo, out, src, trace=True, ctx=ctx), cwd=ctx.cwd)
             except subprocess.CalledProcessError as exc:
                 print(f"::error::{name} failed to compile: {exc.stderr.splitlines()[:1]}")
                 results[name] = "FAIL"
                 continue
             data = json.loads(trace.read_text())
-            # Instantiations are frontend work. Three more deterministic numbers come free from the
-            # same compile and cover what they cannot see: constant evaluation (which a constexpr
-            # implementation trades instantiations for), and the object file split into the code that
-            # reaches the binary versus the symbol metadata that does not - see object_sizes().
+            # Instantiations are frontend work. More deterministic numbers come free from the same
+            # compile and cover what they cannot see: constant evaluation (which a constexpr
+            # implementation trades instantiations for), the object file split into the code that
+            # reaches the binary versus the symbol metadata that does not - see object_sizes() - and
+            # the size of the AST that was built, which is the only one of them that can see a
+            # declaration that was never instantiated (see ast_stats).
             counts = {"InstantiateClass": 0, "InstantiateFunction": 0, "EvaluateAsConstantExpr": 0}
             for e in data["traceEvents"]:
                 if e.get("ph") == "X" and e["name"] in counts:
                     counts[e["name"]] += 1
             counts.update(object_sizes(out))
+            counts.update(ast_stats(proc.stderr))
             results[name] = counts
     return results
+
+
+# What clang's `-Xclang -print-stats` reports about the AST the frontend built, as opposed to the work
+# it did building it. `Function decls` is the one with a mechanism behind it: a hidden friend declared
+# inside a class template is redeclared by EVERY specialization of that template, so moving it into a
+# non-template interface base removes `friends x specializations` declarations while instantiating
+# nothing differently. Such a change moves InstantiateClass + InstantiateFunction by exactly 0 and
+# EvaluateAsConstantExpr by single digits out of hundreds of thousands (findings.md §22) - every other
+# metric here is blind to it. `Total bytes` is deliberately not parsed: across the same arms it moved by
+# ±0.03% with no consistent sign, because fewer declarations are offset by the added base subobject.
+STATS_FIELDS = (("decls_total", re.compile(r"^\s*(\d+) decls total\.", re.M)),
+                ("function_decls", re.compile(r"^\s*(\d+) Function decls,", re.M)),
+                ("types_total", re.compile(r"^\s*(\d+) types total\.", re.M)))
+
+
+def ast_stats(stderr: str) -> dict:
+    """Parse the `-print-stats` block. A field clang stops printing reports None rather than 0, so a
+    future rename degrades to "metric absent" - which comparisons skip - instead of "dropped to zero"."""
+    return {field: int(m.group(1)) if (m := pattern.search(stderr)) else None
+            for field, pattern in STATS_FIELDS}
 
 
 def object_sizes(obj: Path) -> dict:
@@ -418,18 +453,23 @@ def object_sizes(obj: Path) -> dict:
     return {"object_bytes": total, "code_bytes": code, "symbol_bytes": total - code}
 
 
-def compile_once(cmd, cwd=None, pin=None):
+def compile_once(cmd, cwd=None, pin=None, stderr_to=None):
     """Wall time and peak RSS of one compile. os.wait4 gives this child's own rusage, so no
     /usr/bin/time dependency and no interference between measurements.
 
     `pin` binds the compiler to one CPU via taskset. On a machine with any jitter this is the single
     most effective control available: measured on WSL2 it halved the within-arm spread, from 23-31%
-    down to 8-12%. It does not make a noisy host trustworthy - see the spread report in `cmd_time`."""
+    down to 8-12%. It does not make a noisy host trustworthy - see the spread report in `cmd_time`.
+
+    `stderr_to` redirects the compiler's diagnostics to a FILE - the caller wants `-print-stats` output.
+    A pipe would be the obvious choice and is the wrong one here: os.wait4() reaps the child before
+    anything reads it, so a compiler that fills the pipe buffer would block forever."""
     if pin is not None:
         cmd = ["taskset", "-c", str(pin), *cmd]
     started = time.perf_counter_ns()
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=cwd)
-    _, status, usage = os.wait4(proc.pid, 0)
+    with open(stderr_to, "w") if stderr_to else contextlib.nullcontext(subprocess.DEVNULL) as err:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=err, cwd=cwd)
+        _, status, usage = os.wait4(proc.pid, 0)
     ms = (time.perf_counter_ns() - started) // 1_000_000
     if status != 0:
         raise subprocess.CalledProcessError(status, cmd)
@@ -530,10 +570,12 @@ def cmd_counts(args):
     measured = {ref: measure_counts(r, tc, args.workflows) for ref, r in repos.items()}
     if len(refs) == 1:
         results = measured[refs[0]]
-        print_table(["inst_class", "inst_func", "const_eval", "code_B", "syms_B"],
-                    [(n, *[v[k] if isinstance(v, dict) else v
+        print_table(["inst_class", "inst_func", "const_eval", "code_B", "syms_B",
+                     "fn_decls", "decls", "types"],
+                    [(n, *[v.get(k) if isinstance(v, dict) else v
                            for k in ("InstantiateClass", "InstantiateFunction", "EvaluateAsConstantExpr",
-                                     "code_bytes", "symbol_bytes")])
+                                     "code_bytes", "symbol_bytes",
+                                     "function_decls", "decls_total", "types_total")])
                      for n, v in sorted(results.items())],
                     lambda v: "n/a" if v is None else str(v))
     else:
@@ -632,15 +674,47 @@ def time_spread_report(samples, comparable, args):
 # 1% band resolves to 1.4 bytes and a single instruction trips the gate. A helper that stops folding away
 # - the thing this metric exists to catch - moves it by thousands, so the floor costs no sensitivity.
 #
-# Two metrics are measured and reported but deliberately NOT gated:
+# `function declarations` is the exception that proves the floor's purpose: its smallest value in the
+# corpus is 8269, so even CI's 1% band resolves to 83 declarations, and repeats are bit-identical. A floor
+# of 50 there would sit below the band on every workflow and never once bind - decoration, not a
+# threshold. It gets 0, the same as the other two frontend counters, and earns it the same way. Revisit if
+# a workflow with three-digit declaration counts is ever added; nothing that includes the library is.
+#
+# Four metrics are measured but deliberately NOT gated:
 #   - peak memory, which correlates 0.97 with instantiations and would only fire when they already had.
-#   - `symbol_bytes` (mangled names, string table, relocations). It is linker input and error-message
-#     length, not compile-time cost, and its median is 1477 bytes - so adding one symbol name (~40-48
-#     bytes) reads as +3%. It once failed 52 workflows on a change that cost +0.08% instantiations, which
-#     is the definition of a metric that punishes growth rather than slowness.
+#   - `symbol_bytes` (mangled names, string table, relocations), which is also no longer rendered - see
+#     UNRENDERED. Gating it would gate the SAME variable `code_bytes` already gates: both are counts of
+#     emitted template instantiations wearing different clothes, which is why they moved on identical
+#     workflow sets across v2.5.0 -> master. The tempting reading - "names explode, so gate names" - does
+#     not survive the decomposition: two thirds of the metric is fixed-size records per symbol, per
+#     relocation and per section, and shortening every mangled name in text/output_format could reach at
+#     most 67 KB of its 440 KB. Emitting fewer instantiations reaches all of it.
+#   - `decls_total` and `types_total`, the other two `-print-stats` numbers. Both see the mechanisms the
+#     gated metrics see, and neither sees one of its own SHARPLY enough to gate. Measured on the two A/B
+#     arms that isolate a mechanism each: moving friends out of class templates moved `function_decls`
+#     -2.1% to -3.3% while `decls_total` moved -0.3% to -0.8%, and forcing the CRTP fallback on
+#     isq/kind_safe_interfaces moved instantiations +2.2% while `decls_total` moved +3.4%. So each of them
+#     is a mixture of the two sharp metrics, diluted by 75k TemplateTypeParm declarations that no design
+#     decision controls. The one thing only `decls_total` can see - a non-function member added to a
+#     widely-specialized class template - it sees at 1/23rd the resolution: one member alias on `quantity`
+#     is 238 declarations out of 310759, i.e. 0.08%, which no band will ever catch. `types_total` is
+#     weaker still (rank 0.997 with `decls_total`, smaller move in the same direction on both arms) and is
+#     therefore UNRENDERED as well - the §19 argument, unchanged.
 GATED = (("instantiations", lambda e: e["InstantiateClass"] + e["InstantiateFunction"], 0),
          ("constant evaluations", lambda e: e.get("EvaluateAsConstantExpr"), 0),
+         ("function declarations", lambda e: e.get("function_decls"), 0),
          ("emitted code (bytes)", lambda e: e.get("code_bytes"), 512))
+
+# Which gated metrics ALSO get a slope gate, and the noun their per-step figure is measured in. The
+# slope is the one number a purely additive library change cannot move: a new class or function costs a
+# workflow the same whether it uses 16 or 256 unit types, so it lifts the intercept and leaves the
+# per-step cost alone. That is why declarations belong here - it makes the growth-tolerant half of the
+# declaration gate explicit rather than relying on the total's band being loose enough.
+# `emitted code` is excluded because it does not scale with user code at all (87 bytes flat across the
+# whole series, so there is no slope to speak of). `constant evaluations` is a candidate - it scales at
+# ~585 per step on `broad` - and is left out until that slope has been reviewed across configurations:
+# putting a band on a number nobody has looked at is how a gate goes red for a reason no one can explain.
+SLOPE_GATED = (("instantiations", "instantiations"), ("function declarations", "declarations"))
 
 
 def baseline_deltas(baseline, results, extract):
@@ -709,13 +783,13 @@ def assert_same_config(recorded, tc: Toolchain, where):
 def gate_slope_table(slopes, band, tc: Toolchain):
     """The marginal-cost table. Separate from the per-workflow one because it answers a different
     question: not "did this workflow grow" but "did one more line of user code get more expensive"."""
-    rows = [[shape, f"{d['baseline']:.1f}", f"{d['current']:.1f}", f"{d['rel'] * 100:+.2f}%",
-             f"{band * 100:g}%", f"{(band - d['rel']) * 100:+.2f}pp",
+    rows = [[f"{label} - {shape}", f"{d['baseline']:.1f}", f"{d['current']:.1f}",
+             f"{d['rel'] * 100:+.2f}%", f"{band * 100:g}%", f"{(band - d['rel']) * 100:+.2f}pp",
              "FAILS" if d["rel"] > band else "ok"]
-            for shape, d in sorted(slopes.items())]
+            for label, per_shape in slopes.items() for shape, d in sorted(per_shape.items())]
     lines = [f"### marginal cost per step - `{config_key(tc)}`", ""]
-    lines += markdown_table(["shape", "baseline", "current", "delta", "limit", "headroom", ""], rows)
-    lines += ["", "Instantiations per step, from the `scaling/` series. This is the number that separates "
+    lines += markdown_table(["metric - shape", "baseline", "current", "delta", "limit", "headroom", ""], rows)
+    lines += ["", "Per step of the `scaling/` series. This is the number that separates "
               "*the library grew* from *the library got slower*: adding a feature lifts every workflow's "
               "total by a similar small amount, while a real regression lifts the slope. `narrow` reuses "
               "quantity types, `broad` composes a new derived unit per step.", ""]
@@ -795,9 +869,11 @@ def cmd_check(args):
                 if advisory_band is not None and past(d, label, advisory_band) and not past(d, label, slack)}
     deltas = [d["rel"] for d in details.values() if not d["umbrella"]]
     median = statistics.median(deltas) if deltas else 0.0
-    inst = GATED[0][1]
-    slopes = slope_deltas(baseline, measured, inst)
-    slope_regressions = {shape: d for shape, d in slopes.items() if d["rel"] > slope_band}
+    extract_of = {label: extract for label, extract, _ in GATED}
+    slopes = {label: s for label, _ in SLOPE_GATED
+              if (s := slope_deltas(baseline, measured, extract_of[label]))}
+    slope_regressions = {(label, shape): d for label, per_shape in slopes.items()
+                         for shape, d in per_shape.items() if d["rel"] > slope_band}
     if args.report:
         report = Path(args.report)
         report.parent.mkdir(parents=True, exist_ok=True)
@@ -807,8 +883,11 @@ def cmd_check(args):
              "bands": {"slack": args.slack, "median_alarm": args.median_alarm,
                        "tighten_notice": args.tighten_notice, "advisory_slack": args.advisory_slack,
                        "slope_slack": args.slope_slack if args.slope_slack is not None else args.slack},
+             # Keyed by metric since more than one is slope-gated: a consumer reading `slopes["broad"]`
+             # would now be reading a metric name, so the nesting is deliberate rather than incidental.
              "median_non_umbrella": median, "slopes": slopes,
-             "slope_regressions": list(slope_regressions), "regressions": list(regressions),
+             "slope_regressions": [f"{shape} [{label}]" for label, shape in slope_regressions],
+             "regressions": list(regressions),
              "improvements": list(improvements), "advisory": list(advisory),
              "workflows": details,
              "metrics": {label: m for label, m in per_metric.items()}}, indent=2) + "\n")
@@ -829,10 +908,11 @@ def cmd_check(args):
             f"{len(regressions)} regression(s) past the {args.slack:g}% band ({spread}); worst is "
             f"{name} {d['baseline']} -> {d['current']} ({d['rel']:+.1%}). See the table above for all of "
             f"them; if intentional, run bench.py update and commit the new baselines in this PR", "error")
-    for shape, d in slope_regressions.items():
+    units = dict(SLOPE_GATED)
+    for (label, shape), d in slope_regressions.items():
         gate_summary_line(
             f"marginal cost regression: the {shape} slope went {d['baseline']:.1f} -> {d['current']:.1f} "
-            f"instantiations per step ({d['rel']:+.1%}, band {slope_band:.0%}). Every translation unit that "
+            f"{units[label]} per step ({d['rel']:+.1%}, band {slope_band:.0%}). Every translation unit that "
             f"introduces units pays this, and unlike a total it cannot be explained by the library growing",
             "error")
     if median > alarm:
@@ -904,11 +984,30 @@ def cmd_update(args):
 
 METRICS = (("instantiations", "template instantiations (InstantiateClass + InstantiateFunction)"),
            ("const_evals", "compile-time constant evaluations (what constexpr code costs instead)"),
+           ("function_decls", "function declarations (what a declaration-only change moves, and nothing "
+                              "else does)"),
+           ("decls_total", "declarations in the AST (every kind, for context under the row above)"),
+           ("types_total", "types in the AST"),
            ("code_bytes", "emitted code (bytes reaching the binary - what the optimizer's time tracks)"),
            ("symbol_bytes", "symbol metadata (bytes of mangled names and relocations - linker input)"),
            ("time_ms", "wall time (ms, best of K - only trustworthy on a quiet machine)"),
            ("peak_mib", "peak compiler memory (MiB, best of K)"),
            ("mib_on_disk", "BMI size on disk (MiB)"))
+
+# Measured, kept in the JSON, and NOT rendered: a metric that is a second shadow of one already shown.
+# `symbol_bytes` ranks the corpus 0.98 with `code_bytes` and moved on exactly the same workflows across
+# v2.5.0 -> master on all eight counting configurations - never once alone. Decomposing text/output_format
+# says why: of its 293 KB, only 105 KB is names at all, the other 188 KB being 24 B per symbol, 24 B per
+# relocation and 64 B per section - all counts of emitted entities, which is what `code_bytes` tracks. For
+# the other 26 workflows it is a ~1.3 KB floor of ELF scaffolding that says nothing about the library. It
+# stays in the payload because the number is free and `counts` still prints it while investigating.
+#
+# `types_total` joins it on the same test: rank 0.997 with `decls_total` across the corpus, and on both
+# arms that move declarations at all - the hidden-friend conversions and the CRTP fallback - it moved in
+# the same direction and by less. A type is created by declaring something; the library has no design
+# decision that adds types without declarations, so the row would repeat the one above it.
+UNRENDERED = ("symbol_bytes", "types_total")
+REPORTED = tuple(m for m in METRICS if m[0] not in UNRENDERED)
 
 
 def trace_entities(repo: Path, tc: Toolchain, source: Path, ctx: BuildContext, workdir: Path):
@@ -991,7 +1090,7 @@ def cmd_report(args):
             metrics["instantiations"].setdefault(name, {})[ref] = "FAIL" if entry == "FAIL" else total(entry)
             if isinstance(entry, dict):
                 metrics["const_evals"].setdefault(name, {})[ref] = entry.get("EvaluateAsConstantExpr")
-                for key in ("code_bytes", "symbol_bytes"):
+                for key in ("code_bytes", "symbol_bytes", "function_decls", "decls_total", "types_total"):
                     metrics[key].setdefault(name, {})[ref] = entry.get(key)
         for name, entry in sorted(timed[ref].items()):
             # None means the workflow does not apply to this ref (version floor); "FAIL" means it
@@ -1121,12 +1220,29 @@ def metric_table(by_workflow, rows_wanted, columns, refs, totals_metric=None, la
         return []
     labels = labels or {c: c for c in present}
     header = ["workflow" if not rows_wanted or not rows_wanted[0].startswith("bmi/") else "interface"]
+    note = None
     if len(refs) == 2:
         old, new_ = refs
         header += [labels[c] for c in present]
-        rows = [[name.removeprefix("bmi/"),
-                 *[fmt_change(by_workflow[name].get((c, old)), by_workflow[name].get((c, new_)))
-                   for c in present]] for name in rows_wanted]
+        rows, flat = [], []
+        for name in rows_wanted:
+            values = [(by_workflow[name].get((c, old)), by_workflow[name].get((c, new_))) for c in present]
+            def identical(pair):
+                a, b = pair
+                return (a is None and b is None) or (isinstance(a, (int, float)) and a == b)
+            # A row that did not move on ANY column is a row of zeros in a table about what moved -
+            # `emitted code` printed 24 of 30 workflows as `84 -> 84 (+0.0%)`. Counted, not listed. The
+            # test is on values, so a `FAIL` on both sides stays visible and an `n/a -> 150` is a change.
+            # Never applied to a table with a totals row, where dropping rows stops the total adding up.
+            if not totals_metric and values and all(map(identical, values)) \
+                    and any(v[0] is not None for v in values):
+                flat.append(name)
+                continue
+            rows.append([name.removeprefix("bmi/"), *[fmt_change(a, b) for a, b in values]])
+        if flat:
+            note = (f"{len(flat)} entr{'y' if len(flat) == 1 else 'ies'} did not move on any column and "
+                    f"{'is' if len(flat) == 1 else 'are'} not listed"
+                    + (f": {', '.join(flat)}." if len(flat) <= 6 else f" ({len(rows)} did move)."))
         if totals_metric:
             rows.append([totals_label(totals_metric),
                          *[fmt_change(combine_totals(totals_metric, by_workflow, rows_wanted, c, old),
@@ -1148,7 +1264,9 @@ def metric_table(by_workflow, rows_wanted, columns, refs, totals_metric=None, la
             rows.append([totals_label(totals_metric),
                          *[fmt_value(combine_totals(totals_metric, by_workflow, rows_wanted, c, ref))
                            for c, ref in pairs]])
-    return markdown_table(header, rows)
+    if not rows:
+        return []
+    return markdown_table(header, rows) + (["", note] if note else [])
 
 
 def shorten_labels(keys):
@@ -1199,16 +1317,17 @@ def scaling_section(cells, columns, refs, labels=None):
     """A table per metric: what one more operation costs, next to the constant cost."""
     labels = labels or {c: c for c in columns}
     lines = []
-    for metric, title in METRICS:
+    for metric, title in REPORTED:
         by_workflow = cells.get(metric, {})
         rows = []
         measured = [False] * len(columns)
         for shape in ("narrow", "broad"):
             for what, index in (("per step", 0), ("intercept", 1)):
-                cols, anything = [], False
+                cols, anything, moved = [], False, len(refs) < 2
                 for i, column in enumerate(columns):
                     values = [scaling_fit(by_workflow, column, ref).get(shape) for ref in refs]
                     values = [v[index] if v else None for v in values]
+                    moved = moved or (len(values) == 2 and values[0] != values[1])
                     # Emptiness is decided on the VALUES, never on the rendered cell: a two-ref cell
                     # renders as `n/a -> n/a`, which no `!= "n/a"` test recognises, and that is how a
                     # BMI-only metric came to print a whole table of nothing but n/a.
@@ -1216,7 +1335,10 @@ def scaling_section(cells, columns, refs, labels=None):
                         measured[i] = anything = True
                     cols.append(fmt_change(values[0], values[1]) if len(refs) == 2 else fmt_value(
                         None if values[0] is None else round(values[0], 1)))
-                if anything:
+                # In a comparison, a line that is identical on every configuration says only "this
+                # metric does not scale with user code" - which the single-ref report already says, and
+                # which was four fifths of the emitted-code and symbol-metadata tables here.
+                if anything and moved:
                     rows.append([f"{shape} - {what}", *cols])
         # A configuration that cannot produce this metric AT ALL (no GCC gives counts) is not a
         # workflow held back by a REQUIRES floor, which is what the legend says `n/a` means: drop the
@@ -1241,6 +1363,15 @@ PREAMBLE = [
     "between runs, so it is trustworthy too. **Wall-clock time** is what a developer actually waits "
     "for, but it depends on the machine and its load - times measured on shared CI runners are "
     "indicative only, and are never compared between columns.",
+    "",
+    "**Declarations** count something instantiations cannot see. Before the compiler can decide whether "
+    "to *use* a function it must first *build* it: read its signature, its constraints and its template "
+    "parameters into memory. A function written inside a class template is built again for every version "
+    "of that class the program uses - a few hundred to a few thousand times in these workflows - even "
+    "when nothing ever calls it. Moving such a function out of the template removes all those copies "
+    "while the compiler stamps out exactly the same templates as before, so the instantiation count above "
+    "does not move at all and the declaration count falls by a few percent. Both numbers are exact and "
+    "machine-independent, and the project gates on both.",
     "",
     "Two costs are worth separating. The **constant cost** is what a file pays merely for using the "
     "library, before it does anything: including the headers, or importing the module. The **marginal "
@@ -1291,7 +1422,27 @@ def findings(cells, keys, refs):
                        f"instantiations for a typical workflow (median across {len(moved)}). The largest "
                        f"improvement is `{best[0]}` at {best[1]:+.0%}. {tail}")
 
-        # 2. the finding totals cannot show: constant cost and marginal cost moving apart
+        # 2. the finding the instantiation count is structurally unable to make. Reported only when the
+        # two disagree: a declaration-side change (a hidden friend leaving a class template, which is
+        # redeclared by every specialization of it) instantiates nothing differently, so the item above
+        # says "nothing moved" about work that really did disappear.
+        decls = cells.get("function_decls", {})
+        dmoved = {w: d for w in workflows
+                  if (d := pct(decls.get(w, {}).get((col, old)), decls.get(w, {}).get((col, new))))
+                  is not None}
+        if moved and dmoved:
+            dmedian = statistics.median(dmoved.values())
+            if abs(dmedian) > 0.005 and abs(dmedian - median) > 0.005:
+                out.append(f"A typical workflow declares **{abs(dmedian):.1%} "
+                           f"{'fewer' if dmedian < 0 else 'more'} functions** against `{new}` than "
+                           f"against `{old}` (median across {len(dmoved)}), while instantiating "
+                           f"{abs(median):.1%} {'fewer' if median < 0 else 'more'} templates. Those are "
+                           f"different kinds of work and they move independently: a function declared "
+                           f"inside a class template is declared again by every specialization of that "
+                           f"template, whether or not anything ever calls it, so declarations can be "
+                           f"removed in bulk without changing a single instantiation.")
+
+        # 3. the finding totals cannot show: constant cost and marginal cost moving apart
         fits = [scaling_fit(inst, col, ref) for ref in (old, new)]
         if all(f.get("broad") for f in fits):
             (slope_old, base_old), (slope_new, base_new) = (f["broad"] for f in fits)
@@ -1323,14 +1474,14 @@ def findings(cells, keys, refs):
                            f"{'dearer' if ds > 0 else 'cheaper'}** ({slope_old:.0f} -> {slope_new:.0f} "
                            f"instantiations per unit). {verdict}")
 
-        # 3. is this run's wall clock worth reading at all?
+        # 4. is this run's wall clock worth reading at all?
         control = pct(time.get("bmi/std", {}).get((col, old)), time.get("bmi/std", {}).get((col, new)))
         if control is not None and abs(control) > 0.1:
             out.append(f"Treat wall-clock numbers in this run as noise: building the standard library "
                        f"module is identical work in both columns, yet differs by {control:+.0%}. The "
                        f"instantiation counts are unaffected - they are exact.")
 
-    # 4. what consuming the library as modules is worth - from the NEWEST toolchain that measured it,
+    # 5. what consuming the library as modules is worth - from the NEWEST toolchain that measured it,
     # since one statement is all this section gets and the oldest compiler is the least useful one to
     # spend it on.
     for col in sorted([k for k in keys if "-modules" in k], key=lambda k: (version_of(k), k), reverse=True):
@@ -1353,7 +1504,7 @@ def findings(cells, keys, refs):
                           f"{f' and {disk:.0f} MiB on disk' if disk else ''}." if build else "."))
         break  # one such statement is enough; the section below has the rest
 
-    # 5. how much of any improvement is really the compiler - only across keys of the same SHAPE, so a
+    # 6. how much of any improvement is really the compiler - only across keys of the same SHAPE, so a
     # stdlib or formatting-backend swap in the pair is never attributed to the toolchain.
     shapes = {}
     for k in plain:
@@ -1374,7 +1525,7 @@ def findings(cells, keys, refs):
                           "a newer toolchain is not automatically a cheaper one, and any comparison of "
                           "library versions has to pin the compiler."))
 
-    # 6. n/a is not failure - counted in WORKFLOWS per ref, not in cells: the same absent workflow
+    # 7. n/a is not failure - counted in WORKFLOWS per ref, not in cells: the same absent workflow
     # shows up once per metric per configuration, so a cell count read as "224 cells" when the fact
     # was "4 workflows do not exist at v2.5.0". A configuration that produces no counts at all (any
     # GCC) is not a workflow being skipped, and bmi/ rows exist only under modules.
@@ -1390,12 +1541,9 @@ def findings(cells, keys, refs):
     if absent:
         per_ref = ", ".join(f"{len(names)} at `{ref}`" for ref, names in
                             sorted(absent.items(), key=lambda kv: refs.index(kv[0]) if kv[0] in refs else 0))
-        out.append(f"Some workflows do not exist on every ref measured ({per_ref}): their `// REQUIRES:` "
-                   f"floor - a library version or a language standard - is newer than that ref, so those "
-                   f"cells read `n/a`. Every corpus total excludes them on BOTH sides, so an added "
-                   f"workflow cannot read as the library growing. The module-interface totals are the "
-                   f"exception and are meant to be: a module unit the newer ref has and the older one "
-                   f"does not is a real cost of building that ref's interfaces, not a gap in the corpus.")
+        out.append(f"Some workflows do not exist on every ref measured ({per_ref}) - their `// REQUIRES:` "
+                   f"floor is newer than that ref, so they read `n/a` and are excluded from both sides of "
+                   f"every total above.")
     return out
 
 
@@ -1431,10 +1579,18 @@ def broad_slope(payload, ref):
     return (sizes[hi] - sizes[lo]) / (hi - lo)
 
 
+SUMMARY_METRICS = (("instantiations", "inst"), ("function_decls", "decls"), ("time_ms", "time"))
+
+
 def comparison_rows(cell_pairs):
-    """The three change columns every per-configuration summary carries, from rows that already hold
-    (then, now, relative) triples."""
+    """The four change columns every per-configuration summary carries, from rows that already hold
+    (then, now, relative) triples.
+
+    Declarations are a column here and not only in the tables below, because this is the one table a
+    reader is guaranteed to see: a change that moves declarations and nothing else would otherwise be
+    summarized as "nothing moved" directly above a report full of cells saying it did."""
     return [[f"{r['inst'][0]} -> {r['inst'][1]} ({r['inst'][2]:+.1%})" if "inst" in r else "n/a",
+             f"{r['decls'][0]} -> {r['decls'][1]} ({r['decls'][2]:+.1%})" if "decls" in r else "n/a",
              f"{r['slope'][0]:.1f} -> {r['slope'][1]:.1f} ({r['slope'][2]:+.1%})" if "slope" in r else "n/a",
              f"{r['time'][0]} -> {r['time'][1]} ms ({r['time'][2]:+.1%})" if "time" in r else "n/a"]
             for r in cell_pairs]
@@ -1462,7 +1618,7 @@ def range_summary(payloads, refs):
             partial.add(key)  # named below: an arm that measured one end of the range must not vanish
             continue
         row = {"key": key}
-        for metric, name in (("instantiations", "inst"), ("time_ms", "time")):
+        for metric, name in SUMMARY_METRICS:
             got = corpus_pair(p, old, p, new, metric)
             if got and got[0]:
                 a, b, gaps = got
@@ -1476,14 +1632,17 @@ def range_summary(payloads, refs):
     if not lines:
         return None, []
     md = [f"## What `{old}` -> `{new}` costs, per configuration", ""]
-    md += markdown_table(["configuration", "instantiations", "broad slope", "wall time"],
+    md += markdown_table(["configuration", "instantiations", "declarations", "broad slope", "wall time"],
                          [[r["key"], *cols] for r, cols in zip(lines, comparison_rows(lines))])
     md += ["", f"Corpus totals over the workflows BOTH refs compile (`bmi/*` excluded"
            + (f"; {unmatched} workflow(s) exist on only one of the two refs and are left out of both "
               f"sides, so an added workflow cannot read as growth" if unmatched else "") + "). Every row "
            "measured its two refs in one session, interleaved, so the wall-time column is an A/B on one "
            "machine - still machine-dependent, so compare down a column and never across; the count "
-           "columns are exact. `n/a` means the configuration produces no counts at all (any GCC)."
+           "columns are exact. `declarations` counts function declarations rather than work done, and is "
+           "the only column that moves when a function is declared in fewer places without anything "
+           "being instantiated differently. `n/a` means the configuration produces no counts at all "
+           "(any GCC)."
            + (f" {len(partial)} configuration(s) measured only one end of the range and have no row: "
               f"{', '.join(f'`{k}`' for k in sorted(partial, key=config_order))}." if partial else ""), ""]
     counted = [r for r in lines if "inst" in r]
@@ -1536,9 +1695,16 @@ def run_over_run(payloads, previous):
         if rn is None or ro is None:
             skipped.add(key)
             continue
+        then_info, now_info = q["refs"][ro], p["refs"][rn]
         row = {"key": key,
-               "then": q["refs"][ro].get("mp_units_describe", ro), "now": p["refs"][rn].get("mp_units_describe", rn)}
-        for metric, name in (("instantiations", "inst"), ("time_ms", "time")):
+               "then": then_info.get("mp_units_describe", ro), "now": now_info.get("mp_units_describe", rn),
+               # Compared on the SHA, never on the describe: `git describe` needs the tags to be
+               # fetched, so one run called this commit `v2.5.0-695-g6111211d` and the next called it
+               # `6111211`, and the column read as a tree change while every count said otherwise.
+               "same_tree": bool(then_info.get("mp_units_sha")) and
+                            then_info.get("mp_units_sha") == now_info.get("mp_units_sha"),
+               "sha": (now_info.get("mp_units_sha") or "")[:7]}
+        for metric, name in SUMMARY_METRICS:
             got = corpus_pair(q, ro, p, rn, metric)
             if got and got[0]:
                 a, b, gaps = got
@@ -1553,17 +1719,34 @@ def run_over_run(payloads, previous):
                 movers.append(row)
     if not lines:
         return None, []
+    if all(r["same_tree"] for r in lines):
+        # Same commit on both sides: every deterministic column is 0.0% BY CONSTRUCTION, so the table
+        # would be a dozen rows of zeros whose only varying column is the one its own caption tells you
+        # to ignore. What such a run does establish is the runner's noise floor - and that is a sentence.
+        noise = max((abs(r["time"][2]) for r in lines if "time" in r), default=None)
+        return None, [f"The previous run measured this same commit (`{lines[0]['sha']}`), so this run is a "
+                      f"control: every count below is identical to last time by construction, and there is "
+                      f"no table for it."
+                      + (f" What it does measure is the CI runners' noise - identical work took up to "
+                         f"{noise:.0%} longer or shorter than last time, which is the floor any wall-clock "
+                         f"number here has to clear before it means anything." if noise else "")]
+    # One pair on every row is a column of one repeated fact: state it once instead.
+    pairs = {(r["then"], r["now"]) for r in lines}
     md = ["## Since the previous run", ""]
     md += markdown_table(
-        ["configuration", "measured then -> now", "instantiations", "broad slope", "wall time"],
-        [[r["key"], f"`{r['then']}` -> `{r['now']}`", *cols]
+        ["configuration", *(["measured then -> now"] if len(pairs) > 1 else []),
+         "instantiations", "declarations", "broad slope", "wall time"],
+        [[r["key"], *([f"`{r['then']}` -> `{r['now']}`"] if len(pairs) > 1 else []), *cols]
          for r, cols in zip(lines, comparison_rows(lines))])
     # `n/a` here is not a REQUIRES floor: it is a configuration that cannot produce the metric at all,
     # and saying so is the difference between "GCC gives no counts" and "something failed".
-    md += ["", "Corpus totals and slopes over the workflows both runs measured (`bmi/*` excluded); "
+    md += ["", (f"Measured `{lines[0]['then']}` -> `{lines[0]['now']}` on every configuration. "
+                if len(pairs) == 1 else "")
+           + "Corpus totals and slopes over the workflows both runs measured (`bmi/*` excluded); "
            "`n/a` in a deterministic column means the configuration produces no counts (any GCC), not "
-           "that a measurement is missing. Both count columns are instantiations - the slope is "
-           "instantiations per step. Wall time compares different runner sessions, so treat its column "
+           "that a measurement is missing. The slope is instantiations per step; `declarations` counts "
+           "function declarations, which move without any instantiation when a function is declared in "
+           "fewer places. Wall time compares different runner sessions, so treat its column "
            "as direction only - the deterministic columns are the finding."
            + (f" {unmatched} workflow(s) were measured by only one of the two runs and are excluded from "
               f"every column." if unmatched else "")
@@ -1639,7 +1822,7 @@ def render_report(payloads, previous=None):
     interfaces = [n for n in BMI_ORDER if any(n in m for m in cells.values())]
 
     lines = []
-    for metric, title in METRICS:
+    for metric, title in REPORTED:
         by_workflow = cells.get(metric, {})
         if not by_workflow or not header_keys:
             continue
@@ -1672,7 +1855,7 @@ def render_report(payloads, previous=None):
         labels, suffix = shorten_labels(cols)
         if suffix:
             lines += [f"Every column below is `{suffix}`; the headers name only what differs.", ""]
-        for metric, title in METRICS:
+        for metric, title in REPORTED:
             by_workflow = cells.get(metric, {})
             rows = [i for i in interfaces if i in by_workflow]
             table = metric_table(by_workflow, rows, cols, refs, metric, labels) if rows else []
@@ -1687,7 +1870,7 @@ def render_report(payloads, previous=None):
                       "library is consumed today, not against an intermediate configuration. Consumer "
                       "cost only: the interface build above is paid once per configuration, not per "
                       "translation unit.", ""]
-        for metric, title in METRICS:
+        for metric, title in REPORTED:
             by_workflow = cells.get(metric, {})
             rows = [w for w in workflows if any((c, r) in by_workflow.get(w, {}) for c in cols for r in refs)]
             table = metric_table(by_workflow, rows, cols, refs, None, labels,

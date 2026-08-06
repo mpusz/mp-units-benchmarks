@@ -19,7 +19,8 @@ The official compile-time performance suite for mp-units (see README.md for user
 
 There is no build system: `runner/bench.py` invokes the compiler directly on each workflow TU
 with `-I<repo>/src/{core,systems,utility}/include`. `counts`/`check`/`update` require clang (they
-parse `-ftime-trace` output and exit with a clear message on any other compiler); `time`, `report`
+parse `-ftime-trace` and `-print-stats` output and exit with a clear message on any other compiler);
+`time`, `report`
 and `summary` work with any compiler - GCC builds the whole corpus, it just cannot produce counts.
 
 ```bash
@@ -44,10 +45,13 @@ runner/bench.py $R --std c++26 --modules --import-std report   # consume mp-unit
 ```
 
 Every report opens with a `## What changed` section: at most a handful of ranked, plain-language
-findings (compile failures first, then the corpus-wide movement, then constant-vs-marginal cost
+findings (compile failures first, then the corpus-wide movement, then the declaration count moving
+by something the instantiation count does not explain - emitted ONLY when the two disagree, since
+that is the whole reason the metric exists - then constant-vs-marginal cost
 diverging, then a wall-clock noise warning derived from the `bmi/std` control row, then what modules
 buy, then how much of an improvement is really the compiler, then how many `n/a` cells exist and
-why), followed by a `How to read this` block that defines instantiations, constant vs marginal cost,
+why), followed by a `How to read this` block that defines instantiations, declarations, constant vs
+marginal cost,
 and which metrics are trustworthy - because these summaries get shared with people who do not know
 the library. All the tables live in a collapsed `<details>` beneath. NEVER put a number in a finding
 without saying what follows from it. A finding that names a tradeoff must compute where it flips: an
@@ -63,7 +67,11 @@ A range run must never be summarized against the previous run - that compares ma
 prints "nothing moved", and contradicts every cell of the report below it. Corpus totals in either
 table are summed over the entries BOTH sides measured; summing each side's own set turned a -19.0%
 range into -6.7% by counting workflows that do not exist on the older ref. Module-interface totals are
-deliberately NOT intersected: a module unit the newer ref has is a real cost of building it.
+deliberately NOT intersected: a module unit the newer ref has is a real cost of building it. Its
+columns are instantiations, DECLARATIONS, the broad slope and wall time (`SUMMARY_METRICS`): a
+declaration-only change moves the second and nothing else, and this is the one table every reader
+sees, so leaving it out would summarize such a change as "nothing moved" above a report of cells
+saying otherwise.
 
 Every emitted markdown paragraph is ONE line - in `bench.py`, in the workflow files' `echo` blocks
 into `$GITHUB_STEP_SUMMARY`, and in anything else GitHub renders (issue bodies, PR descriptions,
@@ -107,11 +115,12 @@ bigger one instantiate", which is how a scaling slope gets attributed). Pairs ar
 version, so a delta always reads old -> new. This is the tool that turned "slope +9.8%" into
 `type_list_merge_many_sorted_impl +5.5 per step`; reach for it before guessing at source.
 
-THREE metrics are gated, all bit-deterministic and all from the same traced compile: template
+FOUR metrics are gated, all bit-deterministic and all from ONE traced compile: template
 instantiations (frontend work), constant evaluations (`EvaluateAsConstantExpr` - what a constexpr
-implementation trades instantiations for), and `code_bytes` (every SHF_ALLOC section of the object file -
+implementation trades instantiations for), `function_decls` (declarations, see below) and `code_bytes`
+(every SHF_ALLOC section of the object file -
 what reaches the binary; `object_sizes()` also computes `symbol_bytes`, the symbol/string/reloc
-remainder, which is reported but NOT gated - see below). Emitted code is gated because instantiation
+remainder, which is neither gated nor rendered - see below). Emitted code is gated because instantiation
 counts are a FRONTEND metric and cannot see codegen: `text/output_format` spends ~31% of its time in the optimizer while
 ranking 6th of 21 on instantiations and 17th on wall time. NEVER gate the object file's total size -
 for that workflow it is 440 KB of which only 147 KB is code and 293 KB is mangled names (662 symbols
@@ -120,15 +129,63 @@ of a write path, metadata by keeping details out of the symbol table. Every work
 formatting family emits 27-93 bytes, so `code_bytes` is a TRIPWIRE for a constexpr helper that stops
 folding away - a change that lowers instantiations while raising cost.
 
+`function_decls` is gated because instantiation counts cannot see a DECLARATION. It comes from
+`-Xclang -print-stats`, which clang prints for the same `-ftime-trace -c` compile the other counts come
+from (verified byte-identical to a clean compile, so the AST census costs no second invocation) -
+`ast_stats()` parses `decls total`, `Function decls` and `types total` off stderr. NEVER pair it with
+`-fsyntax-only` instead: skipping codegen drops 16 decls and 10 types on isq/kind_safe_interfaces, which
+would make these numbers describe a different compile than the ones beside them. `Total bytes` of AST is
+deliberately not parsed - it moved ±0.03% with no consistent sign on the arms that moved everything else,
+because fewer declarations are offset by the added base subobject. The mechanism the metric exists for:
+a hidden friend declared in a class template is REDECLARED BY EVERY SPECIALIZATION, so hosting it in a
+non-template interface base removes `friends x specializations` declarations and instantiates nothing
+differently. Findings §22 measured three such conversions at -206 to -747 declarations per TU
+(2.1-3.3%) with instantiations moving EXACTLY 0 and constant evaluations by 2-12 out of 37k-222k. Wall
+time cannot substitute: pinned with taskset on WSL2 the repeat spread was 16-30% against a sub-3%
+effect. The oracle for any change here is arithmetic, not a baseline - `runner/bench.py counts` on
+scaling/broad_256 must charge exactly 476 for `quantity`'s two vector-component `get()` friends
+(2 x 238 specializations), and every step of the §22 table equals `friends x specializations` to the
+declaration.
+
+A gate must catch the library getting SLOWER without firing when it GROWS - adding a class or a
+function is normal evolution, and a gate that goes red on it gets rebaselined away until it catches
+nothing. `function_decls` qualifies for a structural reason: `-print-stats` counts what THIS TU built,
+so an entity a workflow never includes costs it nothing. Measured on `feat(systems): essential SI unit
+symbols header` (mp-units 77cca13c1, a new 328-line header): +0.00% on isq/kind_safe_interfaces,
+scaling/broad_256 and umbrella/si_umbrella, and +3 declarations out of 200k-750k on `decls_total`.
+Inside a header a workflow DOES include, declaring costs 1 and using costs many - so this metric is if
+anything more growth-tolerant than instantiations, which every new unit definition moves in every
+umbrella workflow. The one case where it moves in bulk - a new class template with hidden friends that
+a workflow specializes - is the cost it exists to price, not a false positive. Apply the same test to
+any metric proposed for `GATED`: what does a purely additive library change do to it?
+
 Each gated metric carries a MINIMUM ABSOLUTE MOVEMENT (third field of `GATED`) that must be exceeded in
 addition to the percentage band, because a percentage on a small number is not a measurement:
 `code_bytes` has a median of 145 across the corpus, so a 1% band resolves to 1.4 bytes. Its floor is 512
-bytes - a helper that stops folding moves it by thousands, so the floor costs no sensitivity. `symbol_bytes`
-is NOT gated at all: it is mangled-name volume (linker input, error-message length), not compile-time cost,
-its median is 1477 bytes so one added symbol name reads as +3%, and it once failed 52 workflows on a change
-that cost +0.08% instantiations. A gate must catch code getting SLOWER, not code getting BIGGER. Peak RSS is measured and
+bytes - a helper that stops folding moves it by thousands, so the floor costs no sensitivity. The
+opposite case is `function_decls`, whose floor is 0 and has to be: its SMALLEST value in the corpus is
+8269 (umbrella/si_lean_umbrella), so CI's 1% band already resolves to 83 declarations and repeats are
+bit-identical - any floor below that would never once bind, and a floor that never binds is decoration
+rather than a threshold. Derive a floor from the corpus spread, never by analogy with another metric.
+`symbol_bytes`
+is neither gated nor rendered (`UNRENDERED`): it is a SECOND SHADOW of what `code_bytes` already gates, not a
+second axis. It ranks the corpus 0.98 with `code_bytes` and moved on exactly the same workflows across
+v2.5.0 -> master on all eight counting configurations - never once alone. "Names explode, so gate names" does
+not survive the decomposition (findings §19): of text/output_format's 293 KB only 105 KB is names, the rest
+being 24 B per symbol, 24 B per relocation and 64 B per section - counts of emitted entities. For the other
+26 workflows the number is a ~1.3 KB floor of ELF scaffolding. It stays in the payload because it is free
+and `counts` still prints it. A gate must catch code getting SLOWER, not code getting BIGGER. Peak RSS is measured and
 reported but deliberately NOT gated - it correlates 0.97 with instantiations, so it would only ever
-fire when they already had. Wall time is quiet-machine-only (rank correlation with counts is just
+fire when they already had. The other two `-print-stats` numbers are not gated either, and the reason is
+DILUTION rather than redundancy: each is a mixture of the two mechanisms the sharp metrics own, measured
+on the two arms that isolate one each - the hidden-friend conversions moved `function_decls` -2.1 to
+-3.3% while `decls_total` moved -0.3 to -0.8%, and forcing `MP_UNITS_API_NO_CRTP=0` on
+isq/kind_safe_interfaces moved instantiations +2.2% while `decls_total` moved +3.4%. The one thing only
+`decls_total` can see - a non-function member added to a widely-specialized class template - it sees at
+1/23rd the resolution (one member alias on `quantity` is 238 declarations out of 310759, i.e. 0.08%), so
+no band would ever catch it. It IS rendered, as the whole-AST context under the gated row.
+`types_total` is UNRENDERED with `symbol_bytes`: rank 0.997 with `decls_total`, same direction and
+smaller magnitude on both arms, and no design decision in the library adds types without declarations. Wall time is quiet-machine-only (rank correlation with counts is just
 0.69) - and `time` now prints each arm's own repeat-to-repeat spread beside the between-arm delta,
 plus a verdict when the delta is smaller than the spread, because a 2% difference is meaningless on a
 host whose repeats vary by 20%. `--pin CPU` binds each compile with taskset, which halved the spread
@@ -216,7 +273,14 @@ loose in mp-units).
   every total a little, only a real regression lifts the slope. Keep it TIGHTER than `--slack`, because
   totals must stay loose enough for the library to gain features. Gating totals alone also under-reacts:
   the slope is ~62% of `scaling/broad_256`'s total, so a +2% slope move shows there as +1.2% and a 2%
-  totals band misses it entirely.
+  totals band misses it entirely. `SLOPE_GATED` names which metrics get this treatment and the noun each
+  is counted in: instantiations (125.0/step on `broad`, 3.0 on `narrow`) and DECLARATIONS (74.2 and 1.0).
+  Declarations are there because the slope is the only form of the metric a purely additive library change
+  cannot move at all - a new class or function costs a workflow the same at 16 unit types as at 256, so it
+  lifts the intercept and leaves the per-step cost alone. `code_bytes` is excluded for having no slope (87
+  bytes flat across the series); `EvaluateAsConstantExpr` has a real one (~585/step) and is a candidate,
+  left out until that slope has been reviewed across configurations - a band on a number nobody has looked
+  at is how a gate goes red for a reason no one can explain.
 - Median growth across non-umbrella workflows > `--median-alarm` -> framework-wide regression
   error (should almost never be rebaselined away).
 - Growth > `--advisory-slack` but within `--slack` -> `::warning::` only, never fatal. This is how

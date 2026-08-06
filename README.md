@@ -67,14 +67,22 @@ intercept measurement cannot distinguish from a one-off tax on inclusion.
 
 ## Metrics and methodology
 
-Three metrics, with very different trust levels:
+Five metrics, with very different trust levels:
 
 1. **Template-instantiation counts** (`bench.py counts`) — `InstantiateClass` + `InstantiateFunction`
    events from clang's `-ftime-trace` (granularity 0). Bit-stable for a pinned compiler and
    standard, machine-independent, and it measures exactly what makes C++ headers slow. This is the
    **gated** metric. It needs clang, and the count depends on `-std`, so the gate always runs with
    the standard the baselines were recorded with.
-2. **Compile-time constant evaluations** and **emitted code** (`bench.py counts`) — also exact, also
+2. **Function declarations** (`bench.py counts`) — from `-Xclang -print-stats` on that same traced
+   compile, and the only metric that can see a change to what is *declared* rather than to what is
+   *instantiated*. A function written inside a class template is declared again by every
+   specialization of it, called or not, so moving one into a non-template base removes
+   `friends × specializations` declarations while instantiating exactly the same templates: three such
+   changes in mp-units 2.6 moved instantiations by 0 and declarations by 2–3%. Also gated. The other
+   two numbers from the same block — declarations and types in the whole AST — are 20–50× larger and
+   move by fractions of a percent on the same changes, so they are context, not gates.
+3. **Compile-time constant evaluations** and **emitted code** (`bench.py counts`) — also exact, also
    from the same traced compile, and gated alongside instantiations. **Symbol metadata** is measured and
    reported but deliberately not gated: it tracks mangled-name volume, which is linker input rather than
    compile-time cost, and it is far too small in absolute terms for a percentage band to mean anything. They exist because instantiations only measure the *front end*:
@@ -83,11 +91,11 @@ Three metrics, with very different trust levels:
    are watched. Object files are split rather than measured whole, because for that workflow two
    thirds of the 440 KB is mangled names, not code — and mangled-name volume (linker input, error
    message length) shrinks by different means than emitted code does.
-3. **Peak compiler memory** (`bench.py time`, `report`) — peak RSS of the compiler process, taken
+4. **Peak compiler memory** (`bench.py time`, `report`) — peak RSS of the compiler process, taken
    from the child's own `rusage`. Measured spread between runs is <0.1% on both clang and GCC, which
    makes it almost as trustworthy as counts, works with **any** compiler, and maps directly onto
    what users feel: how many parallel compiles fit in RAM.
-4. **Wall-clock time** (`bench.py time`, `report`) — the user-visible truth, but machine-sensitive.
+5. **Wall-clock time** (`bench.py time`, `report`) — the user-visible truth, but machine-sensitive.
    Refs are compiled interleaved (rep-major, arm-minor) with best-of-K per workflow, so load drift
    hits all arms equally. Meaningful on a quiet machine; on CI, only compare within one arm, never
    between arms measured on different runners.
