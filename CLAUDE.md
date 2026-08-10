@@ -243,7 +243,16 @@ extra flags attached (`--extra-flags=-DFOO=1`): argparse reads a detached `-D...
   residual; includes per-chapter ISQ umbrellas, whose rows are read as MARGINAL diffs because
   chapters include their dependencies - mechanics contains space_and_time), control (core_only: the
   framework intercept every umbrella row and per-entity price is read against; it defines nothing,
-  so its census is empty by construction). Workflow preambles are STRUCTURED by convention -
+  so its census is empty by construction), safety (ONE flight profile at four safety rungs -
+  raw_doubles / simple_quantities (levels 1-4) / typed_quantities (adds level 5) /
+  affine_quantities (adds level 6) - identical std includes and identical printed values on every
+  rung, so adjacent use-cost diffs price each safety increment and raw_doubles doubles as the
+  adoption-cost control; never let the rungs' computations drift apart, comparability IS the
+  workload), real_life (frozen snapshots of mp-units' own example programs - they price the MIX of
+  features in one TU, not production SIZE, which is the scaling series' axis; a production file
+  reads as intercept + slopes x its size. NEVER include them from the measured checkout - a
+  workflow whose source changes with the ref compares different programs and calls it a
+  regression). Workflow preambles are STRUCTURED by convention -
   comments, then `#include <mp-units/compat_macros.h>`, then the `#ifdef` import/include branches,
   then the first line of C++ - because `workflow_preamble()` splits on exactly that shape to
   generate the include twin; user code above the includes would silently land in the twin.
@@ -266,7 +275,14 @@ extra flags attached (`--extra-flags=-DFOO=1`): argparse reads a detached `-D...
   derived unit per step - `base_a * pow<e>(base_b)` - at 130.3/step; never "fix" broad to reuse
   units, that erases the axis it exists to measure. It must not scale magnitudes either (an earlier
   `mag<I+1> * unit` made each step a new magnitude, so ~12% of its slope was prime factorization
-  rather than unit diversity - a user reaches for `m / s`, not a new scaling factor).
+  rather than unit diversity - a user reaches for `m / s`, not a new scaling factor). The
+  `define_*` shapes (units / specs / constants over `define_workload.h`) are the DEFINITION-side
+  series: one entity defined per line, names minted from `__LINE__`, because a definition cannot be
+  stamped out by a template loop without changing what is measured. Their slopes are immune to
+  library growth by construction - the entities live in the workflow - so they carry the tightest
+  bands and are never rebaselined for growth. The reference unit stays FIXED for units and specs
+  (the broad lesson); the constants shape VARIES its magnitude per line on purpose, factorization
+  being what a measured constant is.
 - Only `*.cpp` files are workflows, so a category may carry a shared header. `text/` does:
   `output_workload.h` holds the quantity computations that output_printf / output_ostream /
   output_format / output_println all print. Those four differ ONLY in the output facility -
@@ -302,7 +318,12 @@ the gate table names which one it used in its `basis` column:
   templates (`named_unit`, `prefixed_unit`, `quantity_spec`, `named_constant`, point origins) off
   the same traced compile as every other count - clang emits exactly one InstantiateClass event per
   distinct specialization (verified events == distinct on six umbrellas), so it is bit-deterministic
-  and free. Rates are recorded by `update` into the baseline file (`entity_rates`, per metric) from
+  and free. One caveat, discovered by the define-series: under the deducing-this API (the default on
+  every gate compiler) a leaf spec's base is `quantity_spec<parent>`, so SIBLING leaf specs share one
+  specialization and the census's quantity_spec kind counts distinct base FORMS, not defined names.
+  Both sides of every comparison count the same way, which is all the residual needs - but never
+  read that census column as "number of specs the chapter defines". Rates are recorded by `update`
+  into the baseline file (`entity_rates`, per metric) from
   the `RATE_AXES` pairs - workflow pairs whose include sets differ in almost nothing but one kind
   (codata_2022 -> codata for constants, si_lean -> si for prefixed units, core -> space_and_time for
   specs, core -> si_lean for named units, in that order because later axes subtract kinds priced by
@@ -331,10 +352,13 @@ the gate table names which one it used in its `basis` column:
   totals must stay loose enough for the library to gain features. Gating totals alone also under-reacts:
   the slope is ~62% of `scaling/broad_256`'s total, so a +2% slope move shows there as +1.2% and a 2%
   totals band misses it entirely. `SLOPE_GATED` names which metrics get this treatment and the noun each
-  is counted in: instantiations (125.0/step on `broad`, 3.0 on `narrow`) and DECLARATIONS (74.2 and 1.0).
+  is counted in: instantiations (125.0/step on `broad`, 3.0 on `narrow`; on the definition side 1.0 per
+  bare named unit, 0.0 per leaf spec and 28.6 per bare constant) and DECLARATIONS (74.2 and 1.0).
   Declarations are there because the slope is the only form of the metric a purely additive library change
   cannot move at all - a new class or function costs a workflow the same at 16 unit types as at 256, so it
-  lifts the intercept and leaves the per-step cost alone. `code_bytes` is excluded for having no slope (87
+  lifts the intercept and leaves the per-step cost alone. A ZERO slope is a number to protect, not a gap:
+  `slope_deltas` takes the delta against max(base, 1), so define_specs going from 0.0 to 1.0
+  instantiations per step reads as +100% and trips the band instead of being skipped for the division. `code_bytes` is excluded for having no slope (87
   bytes flat across the series); `EvaluateAsConstantExpr` has a real one (~585/step) and is a candidate,
   left out until that slope has been reviewed across configurations - a band on a number nobody has looked
   at is how a gate goes red for a reason no one can explain.

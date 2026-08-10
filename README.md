@@ -19,9 +19,11 @@ Each workflow is a small idiomatic translation unit in `workflows/<category>/<na
 | `text/`      | quantity text output: the same workload printed through `printf`, `operator<<`, `std::format` and `std::println`, plus the format-spec grammar in depth |
 | `systems/`   | **defining** units rather than consuming them: named and derived units, prefixes, awkward magnitudes, a quantity tree to hang them on |
 | `constants/` | computing **with** measured constants: each is a unit whose magnitude is an arbitrary rational, so every product of two is a derived unit the framework has never seen and every conversion is magnitude arithmetic rather than a lookup |
-| `scaling/`   | the **slope**: the same work at 16, 64 and 256 steps, so cost-per-operation falls out of the difference. `narrow_*` reuses five quantity types (a production file's shape), `broad_*` composes a distinct derived unit per step (what grows the instantiation table) |
+| `scaling/`   | the **slope**: the same work at 16, 64 and 256 steps, so cost-per-operation falls out of the difference. `narrow_*` reuses five quantity types (a production file's shape), `broad_*` composes a distinct derived unit per step (what grows the instantiation table), and the `define_*` shapes define one entity per step — a named unit, a leaf quantity spec, a measured constant — so the cost of a *definition* is a slope too, immune to library growth by construction |
 | `umbrella/`  | bare umbrella-header inclusion cost — **churn-expected**: these grow when systems legitimately grow and are excluded from the framework-regression alarm. Includes per-chapter ISQ umbrellas (space_and_time, mechanics, …), read as marginal diffs since chapters include their dependencies |
 | `control/`   | `core_only`: the framework intercept — including the core machinery that defines nothing. Every umbrella row and per-entity price is read against this number |
+| `safety/`    | **one flight profile at four safety rungs** — `raw_doubles` (no library), `simple_quantities` (levels 1–4), `typed_quantities` (adds level 5), `affine_quantities` (adds level 6) — same std includes, same printed values, so adjacent diffs price each safety increment and the raw rung is the adoption-cost control |
+| `real_life/` | frozen snapshots of mp-units' own `example/` programs — the **mix** the sharp workflows avoid (custom specs with equations, class hierarchies over typed quantities, chrono interop, formatted output in one TU). Still far smaller than production code: size is `scaling/`'s axis, this tier keeps the mix honest |
 
 Every workflow is compiled in each of three configurations from **one** source, using the two-macro
 preamble mp-units' own examples use — `MP_UNITS_IMPORT_STD` selects `import std;` over standard
@@ -66,6 +68,12 @@ diverge sharply (clang 21, C++23):
 So writing more code in units you already use is nearly free; introducing *distinct* unit types is
 what costs. A regression in the slope means every real translation unit got slower, which an
 intercept measurement cannot distinguish from a one-off tax on inclusion.
+
+The `define_*` shapes measure the same way on the definition side, and the bare definitions turn
+out to be nearly free — a named unit costs 1.0 instantiation, a leaf quantity spec 0.0 (all
+siblings share one `quantity_spec<parent>` base under the deducing-this API), a constant with a
+varied rational magnitude 28.6. The rest of what the systems pay per entity (≈62 per SI unit, ≈92
+per CODATA constant) is ecosystem: symbol tables, hierarchies with equations, uncertainty payloads.
 
 ## Metrics and methodology
 

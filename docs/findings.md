@@ -2595,6 +2595,68 @@ rate), the median across use-bases is +0.0%, and the run exits green. One tree, 
 the new one tells growth from slowness.
 
 
+## 26. The safety ladder, the define-series, and what an entity costs without its ecosystem
+
+Unit 2 of the redesign adds the three workflow tiers unit 1's machinery was built to read: a
+`safety/` ladder, the definition-side scaling shapes, and the first `real_life/` snapshot. Same
+configuration as §25 (clang-21, c++23, libc++, clean `a742af8c4`), and every number below is a
+USE-COST - the include twin is already subtracted, so these are what the code in the file costs,
+not what its headers cost.
+
+**What each safety level charges.** One flight profile (altitudes, airspeed, kinetic and potential
+energy, ISA temperature at cruise), written four times with identical std includes and identical
+printed values - only the safety level differs:
+
+| rung | safety | use-cost (inst) | increment | fn decls | inclusion paid |
+|---|---|---:|---:|---:|---:|
+| raw_doubles | none (no library) | 0 | - | 14 | 0 |
+| simple_quantities | levels 1-4 | 2,042 | +2,042 | 1,242 | 9,795 (si) |
+| typed_quantities | + level 5 (quantity safety) | 5,041 | +2,999 | 2,850 | 15,918 (si + mechanics) |
+| affine_quantities | + level 6 (points/deltas) | 5,334 | +293 | 3,081 | 15,918 (same set) |
+
+The headline: dimension-through-kind safety costs ~2k instantiations of use for a small TU, full
+quantity safety roughly 2.5x that, and mathematical-space safety is nearly free (+293) once the
+typed rung is paid - `quantity_point` adds origins, not machinery. The raw rung measures exactly 0
+instantiations, which makes the simple rung THE adoption-cost number an evaluating user asks for
+(Chip's question from §25's margins): ~2k instantiations of use plus the ~9.8k si include, in ms on
+whatever machine the report ran.
+
+**A definition without its ecosystem is nearly free.** The `scaling/define_*` shapes define one
+entity per line (names minted from `__LINE__`; magnitudes fixed for units and specs, varied for
+constants, because factorization IS the constants axis). Their slopes, against the as-shipped rates
+the umbrella family diffs recorded in §25:
+
+| entity | bare definition (slope) | as the system ships one (rate) | the difference is |
+|---|---:|---:|---|
+| named unit | 1.0 | 62.0 | the SI symbol/prefix ecosystem |
+| leaf quantity spec | 0.0 | 49.8 | hierarchy diversity and equations |
+| measured constant | 28.6 | 91.9 | the uncertainty payload and unit refs |
+
+The spec row is the discovery: under the deducing-this API a leaf spec's base is
+`quantity_spec<parent>`, so every sibling shares ONE specialization and a leaf definition costs
+exactly 0 instantiations, 1 constant evaluation and 9 declarations. Two consequences. For §25's
+chapter economics: the 34.5-119.1 per-spec chapter prices are ENTIRELY equations and base-form
+diversity - the definitions themselves are free. For the census: the quantity_spec kind counts
+distinct base forms, not defined names (both sides of any comparison count the same way, so the
+residual gate is unaffected - but the column must not be read as "specs defined"). The zero also
+forced a gate fix: `slope_deltas` now takes deltas against max(base, 1), so a regression from 0.0
+to 1.0 inst/step reads as +100% instead of being skipped to dodge the division.
+
+**The first real_life snapshot.** `real_life/storage_tank` (frozen from mp-units' example, custom
+specs with a constrained equation, a class hierarchy over typed quantities, chrono interop,
+iostream + std::format output) pays 32,637 instantiations of inclusion and 8,624 of use - and emits
+223 KB of code, instantly the corpus's largest object file, against text/output_format's isolated
+147 KB. The tier's claim is deliberately modest: it prices the feature MIX in one TU, not
+production scale - a 145-line example is still tiny next to a real application file, and size
+itself is what the scaling slopes model (a production TU reads as its include intercept plus the
+slopes times its size).
+
+Upstream leads this adds to §25's list: an SI unit's cost is ~98% ecosystem (what exactly in si.h
+charges 61 instantiations per unit beyond the 1-instantiation definition - the symbol table?), and
+a CODATA constant's uncertainty payload costs about twice the constant itself (91.9 vs 28.6 bare;
+each `standard_uncertainty` carries its own magnitude arithmetic).
+
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That

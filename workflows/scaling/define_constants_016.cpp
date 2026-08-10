@@ -1,0 +1,27 @@
+// REQUIRES: mp-units >= 2.6
+// Scaling series, definition side: 16 measured-constant definitions, each with a distinct rational magnitude (the factorization axis is the point).
+// Read this row against the other sizes of the same shape - the difference divided by the
+// difference in steps is the marginal cost of one definition, separated from the constant cost
+// of inclusion, which the include twin carries. See define_workload.h for what a step is.
+#include "define_workload.h"
+
+namespace defs {
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+DEFINE_CONSTANT
+}  // namespace defs
+
+int main() {}

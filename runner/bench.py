@@ -923,6 +923,13 @@ def gated_deltas(baseline, results, extract, rates):
     return details
 
 
+# The scaling/ series' shapes: narrow/broad measure the marginal cost of USING quantity types, the
+# define_* shapes the marginal cost of DEFINING entities. The define shapes are immune to library
+# growth by construction (their entities live in the workflow), so their slopes can carry the
+# tightest bands the counts' determinism allows and are never rebaselined for growth.
+SCALING_SHAPES = ("narrow", "broad", "define_units", "define_specs", "define_constants")
+
+
 def slope_from(entries, extract):
     """Marginal cost of one more step, per shape, from a flat {workflow: entry} mapping.
 
@@ -931,7 +938,7 @@ def slope_from(entries, extract):
     slope. Gating only totals therefore blocks growth and under-reacts to regression - and the slope is
     only ~62% of `broad_256`'s total, so even that workflow dilutes a slope move by a third."""
     out = {}
-    for shape in ("narrow", "broad"):
+    for shape in SCALING_SHAPES:
         sizes = {}
         for name, entry in entries.items():
             m = re.fullmatch(rf"scaling/{shape}_(\d+)", name)
@@ -948,13 +955,19 @@ def slope_from(entries, extract):
 
 def slope_deltas(baseline, results, extract):
     """Per-shape baseline/current/relative-delta for the scaling slopes, skipping shapes absent
-    from either side so a baseline predating the series does not read as change."""
+    from either side so a baseline predating the series does not read as change.
+
+    A zero baseline is a real number here, not a gap: define_specs costs 0.0 instantiations per
+    step under the deducing-this API, and that zero is exactly what the shape protects. The delta
+    is therefore taken against max(base, 1) - one whole count per step - so a regression from
+    nothing to one instantiation per step reads as +100% and trips any band, instead of being
+    skipped to dodge the division."""
     base, cur = slope_from(baseline, extract), slope_from(results, extract)
     out = {}
     for shape in sorted(base):
-        if shape in cur and base[shape]:
+        if shape in cur:
             out[shape] = {"baseline": base[shape], "current": cur[shape],
-                          "rel": (cur[shape] - base[shape]) / base[shape]}
+                          "rel": (cur[shape] - base[shape]) / max(base[shape], 1.0)}
     return out
 
 
@@ -1004,21 +1017,44 @@ def price_list_lines(results, tc: Toolchain):
         over_core = f" ({(v - core) / entities:.1f}/entity over core)" if core and v > core else ""
         rows.append([f"include {name.removeprefix('umbrella/').removesuffix('_umbrella')} - "
                      f"{entities} entities, mostly {dominant}", f"{v}{over_core}", name])
-    nouns = {"named_constant": "define one measured constant",
+    # "As the system ships one": these rates price an entity WITH its ecosystem - an SI named unit
+    # brings its symbol table, a CODATA constant its uncertainty payload. The synthetic define_*
+    # slope rows below price the bare definition; the difference between the two is the ecosystem.
+    nouns = {"named_constant": "define one measured constant, as CODATA ships one",
              "prefixed_unit": "define one prefixed unit",
-             "quantity_spec": "define one quantity spec (shallowest chapter)",
-             "named_unit": "define one named unit"}
+             "quantity_spec": "define one quantity spec, as ISQ ships one",
+             "named_unit": "define one named unit, as SI ships one"}
     for kind, rate in entity_rates(results, inst).items():
         lo, hi = next((l, h) for k, l, h in RATE_AXES if k == kind)
         rows.append([nouns.get(kind, f"define one {kind}"), f"{rate:g}",
                      f"{hi.split('/', 1)[1]} minus {lo.split('/', 1)[1]}"])
     slopes = slope_from(results, inst)
-    if "broad" in slopes:
-        rows.append(["compose one more DISTINCT derived unit in user code",
-                     f"{slopes['broad']:.1f}/step", "scaling/broad slope"])
-    if "narrow" in slopes:
-        rows.append(["one more line reusing warm quantity types",
-                     f"{slopes['narrow']:.1f}/step", "scaling/narrow slope"])
+    for shape, label in (("broad", "compose one more DISTINCT derived unit in user code"),
+                         ("narrow", "one more line reusing warm quantity types"),
+                         ("define_units", "define one bare named unit (synthetic, no symbol table)"),
+                         ("define_specs", "define one leaf quantity spec (synthetic, no equation)"),
+                         ("define_constants", "define one bare constant (synthetic, no uncertainty)")):
+        if shape in slopes:
+            rows.append([label, f"{slopes[shape]:.1f}/step", f"scaling/{shape} slope"])
+
+    def use_cost(name):
+        entry = results.get(name)
+        twin = results.get(entry.get("twin", "")) if isinstance(entry, dict) else None
+        v, t = (inst(entry) if isinstance(entry, dict) else None,
+                inst(twin) if isinstance(twin, dict) else None)
+        return v - t if isinstance(v, int) and isinstance(t, int) else None
+
+    ladder = [use_cost(f"safety/{r}") for r in ("raw_doubles", "simple_quantities",
+                                                "typed_quantities", "affine_quantities")]
+    if all(v is not None for v in ladder):
+        raw, simple, typed, affine = ladder
+        rows += [["write the safety-ladder profile with raw doubles", str(raw), "safety/raw_doubles"],
+                 [f"the same at safety levels 1-4 (simple quantities)", f"{simple} (+{simple - raw})",
+                  "safety/simple_quantities"],
+                 ["add level 5, quantity safety (typed quantities)", f"{typed} (+{typed - simple})",
+                  "safety/typed_quantities"],
+                 ["add level 6, point/delta safety (affine)", f"{affine} (+{affine - typed})",
+                  "safety/affine_quantities"]]
     if not rows:
         return []
     return [f"### price list - `{config_key(tc)}`", "",
@@ -1128,7 +1164,9 @@ def gate_slope_table(slopes, band, tc: Toolchain):
     lines += ["", "Per step of the `scaling/` series. This is the number that separates "
               "*the library grew* from *the library got slower*: adding a feature lifts every workflow's "
               "total by a similar small amount, while a real regression lifts the slope. `narrow` reuses "
-              "quantity types, `broad` composes a new derived unit per step.", ""]
+              "quantity types, `broad` composes a new derived unit per step, and the `define_*` shapes "
+              "define one entity per step - immune to library growth by construction, since their "
+              "entities live in the workflow itself.", ""]
     text = "\n".join(lines)
     print(text)
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
@@ -1659,7 +1697,7 @@ def scaling_fit(by_workflow, column, ref):
     and the constant cost of pulling the library in. The whole point of the series is that these two
     move independently - a release can improve the intercept while making the slope worse."""
     fits = {}
-    for shape in ("narrow", "broad"):
+    for shape in SCALING_SHAPES:
         sizes = {}
         for name, row in by_workflow.items():
             m = re.fullmatch(rf"scaling/{shape}_(\d+)", name)
