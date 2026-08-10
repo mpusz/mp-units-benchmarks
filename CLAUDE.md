@@ -9,6 +9,10 @@ The official compile-time performance suite for mp-units (see README.md for user
 - NEVER `git push` or create PRs/repos on GitHub - Mateusz does that himself.
 - Present substantial changes as an uncommitted diff for review; commit only on an explicit
   "commit"; one logical commit per reviewable unit.
+- NEVER write to `/mnt/d/Claude` (the shared drive) without asking first. It is a deliberate
+  inter-repo/inter-machine/inter-OS exchange point, not scratch space - temporary files go to the
+  session scratchpad. The one standing exception is this repo's `memory/` symlink, which lives
+  there by design.
 - Timing measurements: always interleave arms (rep-major, arm-minor), take best-of-K,
   single-threaded, quiet machine; never compare a fresh number against one measured earlier.
 - Instantiation counts (clang `-ftime-trace -ftime-trace-granularity=0`, count
