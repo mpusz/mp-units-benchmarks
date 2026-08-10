@@ -2609,10 +2609,10 @@ printed values - only the safety level differs:
 
 | rung | safety | use-cost (inst) | increment | fn decls | inclusion paid |
 |---|---|---:|---:|---:|---:|
-| raw_doubles | none (no library) | 0 | - | 14 | 0 |
-| simple_quantities | levels 1-4 | 2,042 | +2,042 | 1,242 | 9,795 (si) |
-| typed_quantities | + level 5 (quantity safety) | 5,041 | +2,999 | 2,850 | 15,918 (si + mechanics) |
-| affine_quantities | + level 6 (points/deltas) | 5,334 | +293 | 3,081 | 15,918 (same set) |
+| raw_doubles | none (no library) | 0 | - | 0 | 0 |
+| simple_quantities | levels 1-4 | 2,042 | +2,042 | 1,242 | 9,790 (si) |
+| typed_quantities | + level 5 (quantity safety) | 5,042 | +3,000 | 2,850 | 15,837 (si + mechanics) |
+| affine_quantities | + level 6 (points/deltas) | 5,335 | +293 | 3,081 | 15,837 (same set) |
 
 The headline: dimension-through-kind safety costs ~2k instantiations of use for a small TU, full
 quantity safety roughly 2.5x that, and mathematical-space safety is nearly free (+293) once the
@@ -2644,7 +2644,7 @@ to 1.0 inst/step reads as +100% instead of being skipped to dodge the division.
 
 **The first real_life snapshot.** `real_life/storage_tank` (frozen from mp-units' example, custom
 specs with a constrained equation, a class hierarchy over typed quantities, chrono interop,
-iostream + std::format output) pays 32,637 instantiations of inclusion and 8,624 of use - and emits
+iostream + std::format output) pays 26,758 instantiations of inclusion and 8,794 of use - and emits
 223 KB of code, instantly the corpus's largest object file, against text/output_format's isolated
 147 KB. The tier's claim is deliberately modest: it prices the feature MIX in one TU, not
 production scale - a 145-line example is still tiny next to a real application file, and size
@@ -2655,6 +2655,35 @@ Upstream leads this adds to §25's list: an SI unit's cost is ~98% ecosystem (wh
 charges 61 instantiations per unit beyond the 1-instantiation definition - the symbol table?), and
 a CODATA constant's uncertainty payload costs about twice the constant itself (91.9 vs 28.6 bare;
 each `standard_uncertainty` carries its own magnitude arithmetic).
+
+
+## 27. glide_computer, and the report now leads with its answers
+
+Unit 3 closes the redesign's loose ends. Configuration as before; numbers from the recorded
+clean-sha baselines.
+
+**The corpus's biggest TU.** `real_life/glide_computer` flattens mp-units' four-file example
+(geographic.h, the glide computer lib and its driver) into one frozen 869-line workflow: kind-safe
+geographic coordinates over bounded point origins, frame projections between azimuth conventions,
+six custom formatters, chrono interop, ranges algorithms over vectors of typed quantities and a
+simulation loop. It measures 21,118 total instantiations - 11,816 for its 28-header include set,
+9,302 of use - plus 44,104 constant evaluations and 6,283 function declarations of use, and 234.6 KB
+of emitted code, the corpus's largest object file. The instructive comparison: six times
+storage_tank's source buys almost the same use-cost (9,302 vs 8,794), because most of
+glide_computer's lines are type definitions, formatters and plumbing rather than quantity
+expressions - one more data point for "the mix, not the line count, is what costs".
+
+**The price list now travels.** `report` carries the per-ref price-list rows in its JSON payload
+and `summary` renders a `## Price list` section per configuration right under `What changed` -
+so the CI artifact and the merged fleet report lead with the corpus's answers instead of burying
+them under evidence tables. `check` and single-ref `counts` already printed it; now every consumer
+of the numbers sees the same headline.
+
+**Chip's cell.** Modules consumer wall-time cells now lead with the ABSOLUTE ms difference against
+the same compiler's plain build - `27 (-1749 ms, -98%)` for si_umbrella as a module consumer -
+because each workflow's own total is a different denominator, and the §25 margins showed an expert
+reader could not extract "each TU compiles ~1.7 s faster" from a column of percentages. The
+percentage stays for scale; the milliseconds are the finding.
 
 
 ## Talk skeleton

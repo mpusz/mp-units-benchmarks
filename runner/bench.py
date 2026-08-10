@@ -989,12 +989,12 @@ def emit_block(lines):
             f.write(text + "\n")
 
 
-def price_list_lines(results, tc: Toolchain):
+def price_list_rows(results):
     """The handful of numbers the corpus exists to produce, from one measured results dict - each
     denominated in something a reader can multiply by their own code: an include, an entity, a step.
 
-    Rendered above the gate tables because this is the answer to "what does using this cost"; the
-    per-workflow cells below are the evidence, not the result."""
+    Returned as (what, value, source) rows so `check` and `counts` can print them and `report` can
+    carry them in its payload for `summary` to merge across configurations."""
     inst = GATED[0][1]
 
     def val(name):
@@ -1055,15 +1055,24 @@ def price_list_lines(results, tc: Toolchain):
                   "safety/typed_quantities"],
                  ["add level 6, point/delta safety (affine)", f"{affine} (+{affine - typed})",
                   "safety/affine_quantities"]]
+    return rows
+
+
+PRICE_LIST_NOTE = ("Chapter and system rows include everything their header pulls in, so a chapter's own "
+                   "cost is its row minus the chapters it includes (mechanics includes space_and_time). "
+                   "Per-entity definition prices come from pairs of rows whose include sets differ in almost "
+                   "nothing but that kind; the per-step prices are the slopes of the scaling/ series and are "
+                   "what multiplies with the size of real user code.")
+
+
+def price_list_lines(results, tc: Toolchain):
+    """The price list as markdown, for `check` and single-ref `counts` output."""
+    rows = price_list_rows(results)
     if not rows:
         return []
     return [f"### price list - `{config_key(tc)}`", "",
             *markdown_table(["what one thing costs", "instantiations", "measured from"], rows),
-            "", "Chapter and system rows include everything their header pulls in, so a chapter's own "
-            "cost is its row minus the chapters it includes (mechanics includes space_and_time). "
-            "Per-entity definition prices come from pairs of rows whose include sets differ in almost "
-            "nothing but that kind; the per-step prices are the slopes of the scaling/ series and are "
-            "what multiplies with the size of real user code.", ""]
+            "", PRICE_LIST_NOTE, ""]
 
 
 def census_growth_lines(details_by_metric, baseline, results):
@@ -1503,6 +1512,8 @@ def cmd_report(args):
                "host": platform.node(), "cpu": cpu_model(), "extra_flags": tc.extra,
                "refs": {ref: {"mp_units_version": ".".join(map(str, detect_version(repos[ref]))),
                               **git_provenance(repos[ref])} for ref in refs},
+               # The corpus reduced to its answers, carried per ref so `summary` can lead with it.
+               "price_list": {ref: rows for ref in refs if (rows := price_list_rows(counts[ref] or {}))},
                "metrics": metrics}
     print(render_report([payload]))
     if args.output:
@@ -1586,11 +1597,17 @@ def counterparts(columns, candidates):
     return plain
 
 
-def fmt_against(value, reference):
-    """The value, and how it compares with the same measurement in another configuration."""
+def fmt_against(value, reference, abs_unit=None):
+    """The value, and how it compares with the same measurement in another configuration.
+
+    `abs_unit` adds the absolute difference in that unit before the percentage. Wall-time cells
+    need it because a percentage over denominators that vary per workflow answers no question a
+    reader has - "each TU compiles 900 ms faster under modules" is the finding, "-55%" is not
+    (review feedback from an expert reader who could not extract the former from the latter)."""
     if not isinstance(value, (int, float)) or not isinstance(reference, (int, float)) or not reference:
         return fmt_value(value)
-    return f"{fmt_value(value)} ({(value - reference) / reference:+.0%})"
+    delta = f"{value - reference:+.0f}{abs_unit}, " if abs_unit else ""
+    return f"{fmt_value(value)} ({delta}{(value - reference) / reference:+.0%})"
 
 
 def markdown_table(header, rows):
@@ -1609,7 +1626,8 @@ BMI_ORDER = ("bmi/std", "bmi/mp_units.core", "bmi/mp_units.systems", "bmi/mp_uni
 TOTALS = {"time_ms": sum, "mib_on_disk": sum, "instantiations": sum, "peak_mib": max}
 
 
-def metric_table(by_workflow, rows_wanted, columns, refs, totals_metric=None, labels=None, against=None):
+def metric_table(by_workflow, rows_wanted, columns, refs, totals_metric=None, labels=None, against=None,
+                 abs_unit=None):
     """One table: a row per entry, a column per configuration. With exactly two refs the cell
     carries the change, so a comparison is read rather than computed across columns."""
     present = [c for c in columns if any(c in by_workflow.get(r, {}) or
@@ -1656,7 +1674,7 @@ def metric_table(by_workflow, rows_wanted, columns, refs, totals_metric=None, la
             for col, ref in pairs:
                 value = by_workflow[name].get((col, ref))
                 other = by_workflow[name].get(((against or {}).get(col), ref))
-                cells.append(fmt_against(value, other))
+                cells.append(fmt_against(value, other, abs_unit))
             rows.append([name.removeprefix("bmi/"), *cells])
         if totals_metric:
             rows.append([totals_label(totals_metric),
@@ -2185,6 +2203,32 @@ def run_over_run(payloads, previous):
     return "\n".join(md), [finding] if finding else []
 
 
+def price_list_section(payloads, refs):
+    """One price-list table per configuration that carried one, matched by row label across refs.
+
+    This leads the report because it is the report's answer; every table below it is evidence. Only
+    configurations that produce counts (clang) have one - the rows are count-denominated."""
+    lines = []
+    for key, p in payload_rows(payloads):
+        per_ref = p.get("price_list") or {}
+        cols = [r for r in refs if r in per_ref]
+        if not cols:
+            continue
+        values, order = {}, []
+        for ref in cols:
+            for what, value, _source in per_ref[ref]:
+                if what not in values:
+                    values[what] = {}
+                    order.append(what)
+                values[what][ref] = value
+        header = ["what one thing costs (instantiations)", *(cols if len(cols) > 1 else ["value"])]
+        rows = [[what, *[values[what].get(r, "n/a") for r in cols]] for what in order]
+        lines += [f"### price list - `{key}`", "", *markdown_table(header, rows), ""]
+    if lines:
+        lines = ["## Price list", "", PRICE_LIST_NOTE, "", *lines]
+    return lines
+
+
 def render_report(payloads, previous=None):
     refs = refs_oldest_first(payloads)
     # A run that measured a range answers for that range. Comparing its newest ref against the previous
@@ -2265,14 +2309,18 @@ def render_report(payloads, previous=None):
         if against and len(refs) == 1:
             lines += ["In brackets: change against the same compiler's plain build - headers, no "
                       "`import std` - so the number says what modules are worth against how the "
-                      "library is consumed today, not against an intermediate configuration. Consumer "
+                      "library is consumed today, not against an intermediate configuration. Wall-time "
+                      "cells carry the ABSOLUTE ms difference first, because each workflow's own total "
+                      "is a different denominator and a column of percentages over varying denominators "
+                      "answers no question a reader has. Consumer "
                       "cost only: the interface build above is paid once per configuration, not per "
                       "translation unit.", ""]
         for metric, title in REPORTED:
             by_workflow = cells.get(metric, {})
             rows = [w for w in workflows if any((c, r) in by_workflow.get(w, {}) for c in cols for r in refs)]
             table = metric_table(by_workflow, rows, cols, refs, None, labels,
-                                 against if len(refs) == 1 else None) if rows else []
+                                 against if len(refs) == 1 else None,
+                                 abs_unit=" ms" if metric == "time_ms" else None) if rows else []
             if table:
                 lines += [f"### module consumers - {title}", "", *table, ""]
 
@@ -2290,7 +2338,8 @@ def render_report(payloads, previous=None):
     if story:
         story = ["## What changed", "", *[f"{i}. {s}" for i, s in enumerate(story, 1)], ""]
     comparison = [comparison_md, ""] if comparison_md else []
-    lines = [*story, *comparison, *PREAMBLE, "<details><summary>All measurements</summary>", "", *legend, "",
+    prices = price_list_section(payloads, refs)
+    lines = [*story, *comparison, *prices, *PREAMBLE, "<details><summary>All measurements</summary>", "", *legend, "",
              *lines, "</details>", ""]
     lines += ["<details><summary>How this was measured</summary>", ""] + notes + [
         "", "Instantiation counts are bit-deterministic for a pinned compiler and peak memory varies by "

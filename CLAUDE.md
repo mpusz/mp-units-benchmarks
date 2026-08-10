@@ -84,7 +84,9 @@ reaches the reader as a ragged column. Wrap in the SOURCE with Python implicit s
 (adjacent literals, one per source line) and keep the emitted line unbroken. This file and the other
 checked-in `*.md` stay hard-wrapped; only generated output follows the rule.
 
-`report`/`summary` put every modules measurement in its OWN `## C++20 modules` section - interface
+`report`/`summary` render a `## Price list` section per configuration right under `What changed`
+(the rows travel in the report JSON per ref, so `summary` merges them across arms), and put every
+modules measurement in its OWN `## C++20 modules` section - interface
 builds (time, memory, size on disk, instantiations, each with a total row) first, then the consumers
 - because a `bmi/*` row interleaved with workflows is noise to every configuration that has no
 modules, and the corpus grows a column per compiler. Column headers there drop the tokens all of
