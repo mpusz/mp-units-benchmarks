@@ -238,7 +238,8 @@ def std_module_source(tc: Toolchain):
     return (manifest.parent / entry["source-path"]).resolve()
 
 
-def compile_cmd(tc: Toolchain, repo, out, src, trace=False, ctx: BuildContext = BuildContext()):
+def compile_cmd(tc: Toolchain, repo, out, src, trace=False, ctx: BuildContext = BuildContext(),
+                quote_dir=None):
     ver = detect_version(repo)
     cmd = [tc.cxx, f"-std={tc.std}", "-O2", "-DNDEBUG", "-DMP_UNITS_API_CONTRACTS=0",
            # The throwing-constraints path targets an experimental constexpr-exceptions compiler and
@@ -268,6 +269,10 @@ def compile_cmd(tc: Toolchain, repo, out, src, trace=False, ctx: BuildContext = 
         cmd += ["-fmodules"]  # GCC finds the BMIs through gcm.cache, relative to the working directory
     cmd += list(ctx.flags)
     cmd += tc.extra.split() + [f"-I{d}" for d in include_dirs(repo)]
+    if quote_dir is not None:
+        # An include twin is compiled from a temporary directory, so the workflow's own quoted
+        # includes ("scaling_workload.h") need the original directory on the quote path.
+        cmd += ["-iquote", str(quote_dir)]
     cmd += ["-c", str(src), "-o", str(out)]
     return cmd
 
@@ -279,6 +284,54 @@ def trace_counts(trace: Path):
         if e.get("ph") == "X" and e["name"] in counts:
             counts[e["name"]] += 1
     return counts
+
+
+# The entity census: how many things the headers in this TU DEFINE, counted off the same traced
+# compile as every other count. Defining a unit/spec/constant means deriving a struct from one of
+# these scaffolding class templates, and clang emits exactly one InstantiateClass event per distinct
+# specialization of them (verified on six umbrella TUs: events == distinct specializations, every
+# time), so counting distinct `detail` strings is bit-deterministic and costs nothing. The census is
+# what lets a gate tell the library GROWING from the library GETTING SLOWER: an umbrella that grew by
+# 40 constants priced at the recorded per-constant rate is expected growth; the same total moving with
+# the census unchanged is a regression. It is counted from the compiler rather than from the source or
+# the documentation because the compiler pays per specialization, not per spelling - si.h SPELLS 24
+# prefix templates and INSTANTIATES 673 prefixed units for the symbol matrix.
+CENSUS_KINDS = (("named_unit", "mp_units::named_unit<"),
+                ("prefixed_unit", "mp_units::prefixed_unit<"),
+                ("quantity_spec", "mp_units::quantity_spec<"),
+                ("named_constant", "mp_units::named_constant<"),
+                ("point_origin", "mp_units::absolute_point_origin<"),
+                ("point_origin", "mp_units::relative_point_origin<"))
+
+
+def census_delta(old: dict, new: dict):
+    return {k: new.get(k, 0) - old.get(k, 0) for k in {*old, *new}
+            if new.get(k, 0) != old.get(k, 0)}
+
+
+def workflow_preamble(src: Path):
+    """Split a workflow into its include preamble and everything after it.
+
+    The preamble is the run of comments, blank lines and preprocessor directives (plus the `import`
+    lines living inside their #ifdef branches) before the first line of C++ - i.e. the include set
+    the TU pays for whether or not the code below it uses any of it. The corpus writes preambles
+    exactly this way by convention, and the empty-main twin built from one is what turns a workflow's
+    total into a use-cost."""
+    text = src.read_text()
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if s and not s.startswith(("//", "#", "import ")):
+            return "".join(lines[:i]), "".join(lines[i:])
+    return text, ""
+
+
+def twin_name(preamble: str):
+    """Row name for an include set: the included headers' stems, so `include/cstdio+si` reads as
+    what it is. Distinct preambles that collide on the name get a digest suffix in measure_counts."""
+    headers = re.findall(r'#\s*include\s*[<"]([^>"]+)[>"]', preamble)
+    stems = sorted({Path(h).stem for h in headers if h != "mp-units/compat_macros.h"})
+    return "include/" + "+".join(stems)
 
 
 def build_modules(repo: Path, tc: Toolchain, workdir: Path, trace=False):
@@ -360,6 +413,40 @@ def checkout(repo: Path, ref, cache: Path):
     return wt
 
 
+def measure_one(tc: Toolchain, repo, src, ctx: BuildContext, tmp: Path, quote_dir=None):
+    """Every deterministic count from ONE traced compile of `src`.
+
+    Instantiations are frontend work. More deterministic numbers come free from the same compile and
+    cover what they cannot see: constant evaluation (which a constexpr implementation trades
+    instantiations for), the entity census (what the included headers DEFINE - see CENSUS_KINDS), the
+    object file split into the code that reaches the binary versus the symbol metadata that does not
+    - see object_sizes() - and the size of the AST that was built, which is the only one of them that
+    can see a declaration that was never instantiated (see ast_stats)."""
+    out = tmp / "wf.o"
+    trace = tmp / "wf.json"
+    proc = run(compile_cmd(tc, repo, out, src, trace=True, ctx=ctx, quote_dir=quote_dir), cwd=ctx.cwd)
+    data = json.loads(trace.read_text())
+    counts = {"InstantiateClass": 0, "InstantiateFunction": 0, "EvaluateAsConstantExpr": 0}
+    census, seen = {}, set()
+    for e in data["traceEvents"]:
+        if e.get("ph") != "X":
+            continue
+        if e["name"] in counts:
+            counts[e["name"]] += 1
+        # Census on class instantiations only: a member function of a scaffolding template would
+        # match the prefix too, and it is a use, not a definition.
+        if e["name"] == "InstantiateClass":
+            detail = e.get("args", {}).get("detail", "")
+            for kind, prefix in CENSUS_KINDS:
+                if detail.startswith(prefix) and detail not in seen:
+                    seen.add(detail)
+                    census[kind] = census.get(kind, 0) + 1
+    counts["census"] = census
+    counts.update(object_sizes(out))
+    counts.update(ast_stats(proc.stderr))
+    return counts
+
+
 def measure_counts(repo: Path, tc: Toolchain, patterns=None):
     if not tc.is_clang:
         sys.exit(f"instantiation counts need clang's -ftime-trace; {tc.cxx} cannot produce them "
@@ -370,31 +457,47 @@ def measure_counts(repo: Path, tc: Toolchain, patterns=None):
         ctx = build_modules(repo, tc, Path(tmp) / "bmi", trace=True)
         for step in ctx.steps:
             results[step["name"]] = step.get("counts")
+        twins = {}  # (preamble text, source dir) -> the include/ row it was measured under
+
+        def twin_row(src: Path):
+            """Measure this workflow's include set once, as an empty-main twin TU, and return the
+            row it lives under - or None when the workflow IS its include set (umbrella/, control/),
+            where the subtraction would leave nothing by construction. Identity is the preamble's
+            DIRECTIVES, not its text: two workflows of one family differ in their leading comments
+            and share every include, and measuring that set twice is the same number twice."""
+            preamble, body = workflow_preamble(src)
+            if re.sub(r"\s+", "", body) == "intmain(){}":
+                return None
+            directives = "\n".join(line.strip() for line in preamble.splitlines()
+                                   if line.strip().startswith(("#", "import "))) + "\n"
+            ident = (directives, str(src.parent))
+            if ident not in twins:
+                key = twin_name(directives)
+                if key in results:  # same stems, different directives or directory
+                    key += "-" + hashlib.sha1("|".join(ident).encode()).hexdigest()[:4]
+                twin_src = Path(tmp) / "twin.cpp"
+                twin_src.write_text(directives + "\nint main() {}\n")
+                try:
+                    results[key] = measure_one(tc, repo, twin_src, ctx, Path(tmp), quote_dir=src.parent)
+                except subprocess.CalledProcessError as exc:
+                    print(f"::error::{key} (include twin of {src.name}) failed to compile: "
+                          f"{exc.stderr.splitlines()[:1]}")
+                    results[key] = "FAIL"
+                twins[ident] = key
+            return twins[ident]
+
         for name, src in select_workflows(version, patterns, tc.std).items():
             if src is None:
                 results[name] = None
                 continue
-            out = Path(tmp) / "wf.o"
-            trace = Path(tmp) / "wf.json"
             try:
-                proc = run(compile_cmd(tc, repo, out, src, trace=True, ctx=ctx), cwd=ctx.cwd)
+                counts = measure_one(tc, repo, src, ctx, Path(tmp))
             except subprocess.CalledProcessError as exc:
                 print(f"::error::{name} failed to compile: {exc.stderr.splitlines()[:1]}")
                 results[name] = "FAIL"
                 continue
-            data = json.loads(trace.read_text())
-            # Instantiations are frontend work. More deterministic numbers come free from the same
-            # compile and cover what they cannot see: constant evaluation (which a constexpr
-            # implementation trades instantiations for), the object file split into the code that
-            # reaches the binary versus the symbol metadata that does not - see object_sizes() - and
-            # the size of the AST that was built, which is the only one of them that can see a
-            # declaration that was never instantiated (see ast_stats).
-            counts = {"InstantiateClass": 0, "InstantiateFunction": 0, "EvaluateAsConstantExpr": 0}
-            for e in data["traceEvents"]:
-                if e.get("ph") == "X" and e["name"] in counts:
-                    counts[e["name"]] += 1
-            counts.update(object_sizes(out))
-            counts.update(ast_stats(proc.stderr))
+            if (twin := twin_row(src)) is not None:
+                counts["twin"] = twin
             results[name] = counts
     return results
 
@@ -570,14 +673,18 @@ def cmd_counts(args):
     measured = {ref: measure_counts(r, tc, args.workflows) for ref, r in repos.items()}
     if len(refs) == 1:
         results = measured[refs[0]]
-        print_table(["inst_class", "inst_func", "const_eval", "code_B", "syms_B",
+        print_table(["inst_class", "inst_func", "const_eval", "entities", "code_B", "syms_B",
                      "fn_decls", "decls", "types"],
-                    [(n, *[v.get(k) if isinstance(v, dict) else v
-                           for k in ("InstantiateClass", "InstantiateFunction", "EvaluateAsConstantExpr",
-                                     "code_bytes", "symbol_bytes",
-                                     "function_decls", "decls_total", "types_total")])
+                    [(n, *([sum(v.get("census", {}).values()) or None if k == "entities" else v.get(k)
+                            for k in ("InstantiateClass", "InstantiateFunction", "EvaluateAsConstantExpr",
+                                      "entities", "code_bytes", "symbol_bytes",
+                                      "function_decls", "decls_total", "types_total")]
+                           if isinstance(v, dict) else [v] * 9))
                      for n, v in sorted(results.items())],
                     lambda v: "n/a" if v is None else str(v))
+        if price := price_list_lines(results, tc):
+            print()
+            print("\n".join(price))
     else:
         # Several refs: totals side by side, plus the delta of the last against the first. Counts are
         # deterministic per compiler, so unlike `time` this comparison is valid anywhere.
@@ -700,9 +807,19 @@ def time_spread_report(samples, comparable, args):
 #     is 238 declarations out of 310759, i.e. 0.08%, which no band will ever catch. `types_total` is
 #     weaker still (rank 0.997 with `decls_total`, smaller move in the same direction on both arms) and is
 #     therefore UNRENDERED as well - the §19 argument, unchanged.
-GATED = (("instantiations", lambda e: e["InstantiateClass"] + e["InstantiateFunction"], 0),
-         ("constant evaluations", lambda e: e.get("EvaluateAsConstantExpr"), 0),
-         ("function declarations", lambda e: e.get("function_decls"), 0),
+# The floors were re-derived when the gate moved from totals to use-costs (2026-08): the smallest
+# gated numbers fell from 8269 (fn decls, si_lean total) to 17 (fn decls, narrow_016 over its twin)
+# and 42 (instantiations, output_printf over its twin - printf really is that cheap), so a percentage
+# band alone would fail on single-count movements. The floors are set where the corpus says movement
+# stops meaning anything: findings §22 measured 2-12 constant evaluations of drift on arms that moved
+# nothing else, and every mechanism worth catching moves by hundreds (a hidden friend costs
+# friends x specializations; one broad-slope step is 125). At CI's 1% band a floor of 8/16 binds only
+# below the corpus's 25th percentile of use-costs, so the mid and large rows keep full percentage
+# sensitivity; on totals these floors sit far under the band's own resolution (83+ declarations) and
+# never bind at all.
+GATED = (("instantiations", lambda e: e["InstantiateClass"] + e["InstantiateFunction"], 8),
+         ("constant evaluations", lambda e: e.get("EvaluateAsConstantExpr"), 16),
+         ("function declarations", lambda e: e.get("function_decls"), 16),
          ("emitted code (bytes)", lambda e: e.get("code_bytes"), 512))
 
 # Which gated metrics ALSO get a slope gate, and the noun their per-step figure is measured in. The
@@ -717,20 +834,91 @@ GATED = (("instantiations", lambda e: e["InstantiateClass"] + e["InstantiateFunc
 SLOPE_GATED = (("instantiations", "instantiations"), ("function declarations", "declarations"))
 
 
-def baseline_deltas(baseline, results, extract):
-    """Per-workflow baseline/current/relative-delta for every comparable entry.
+# Where each entity kind's marginal price comes from: a pair of workflows whose include sets differ in
+# (almost) nothing but that kind. Order matters - a later axis subtracts the contribution of the kinds
+# priced before it (the si pair carries ~10 constants alongside its ~528 prefixed units), so the purest
+# axis goes first. A kind a pair adds that no earlier axis priced is tolerated only because its count is
+# noise against the axis kind (a couple of point origins against hundreds of constants).
+RATE_AXES = (("named_constant", "umbrella/codata_2022_umbrella", "umbrella/codata_umbrella"),
+             ("prefixed_unit", "umbrella/si_lean_umbrella", "umbrella/si_umbrella"),
+             ("quantity_spec", "control/core_only", "umbrella/isq_space_and_time_umbrella"),
+             ("named_unit", "control/core_only", "umbrella/si_lean_umbrella"))
 
-    A metric missing from either side is skipped rather than assumed: baselines recorded before a
-    metric existed must not read as a change."""
+
+def entity_rates(results, extract):
+    """What one more entity of each kind costs in this metric, derived from the measured corpus.
+
+    Recorded into the baseline file by `update` and used by `check` to price census growth: an
+    umbrella that gained entities is expected to grow by count x rate, and only the residual above
+    that expectation gates. The rates are per configuration and per metric because they are
+    measurements, not constants - a different compiler or standard prices a constant differently."""
+    rates = {}
+    for kind, lo_name, hi_name in RATE_AXES:
+        lo, hi = results.get(lo_name), results.get(hi_name)
+        if not isinstance(lo, dict) or not isinstance(hi, dict):
+            continue
+        vlo, vhi = extract(lo), extract(hi)
+        if not isinstance(vlo, (int, float)) or not isinstance(vhi, (int, float)):
+            continue
+        dc = census_delta(lo.get("census") or {}, hi.get("census") or {})
+        steps = dc.pop(kind, 0)
+        if steps <= 0:
+            continue
+        # An axis is only as pure as its side kinds are priced: attributing an unpriced kind's cost
+        # to the axis kind produced a "named unit" rate of 91 when a filtered run had no
+        # quantity_spec axis to subtract. A trace of an unpriced kind is noise; more is a bad axis.
+        if any(k not in rates and abs(d) > max(2, 0.05 * steps) for k, d in dc.items()):
+            continue
+        priced = sum(rates.get(k, 0) * d for k, d in dc.items())
+        rates[kind] = round((vhi - vlo - priced) / steps, 2)
+    return rates
+
+
+def gated_deltas(baseline, results, extract, rates):
+    """Per-workflow baseline/current/relative-delta on the basis the gate reads, for every
+    comparable entry.
+
+    The basis is what makes a red gate mean SLOWER rather than BIGGER. `use` subtracts the
+    workflow's own include twin from both sides, so a system header gaining entities moves both
+    sides equally and cancels - the gate prices only the code the workflow itself writes.
+    `residual` (umbrella/, whose workflows ARE their include sets) replaces the baseline with the
+    expected value under census growth priced at the recorded per-kind rates - an unchanged census
+    makes it the plain total, so no sensitivity is lost on the common run. `total` is the fallback
+    when neither is available: control/ rows by design, and any entry whose baseline predates twins
+    and censuses. A metric missing from either side is skipped rather than assumed: baselines
+    recorded before a metric existed must not read as a change."""
+    def twin_value(entry, pool):
+        twin = pool.get(entry.get("twin")) if isinstance(entry, dict) else None
+        v = extract(twin) if isinstance(twin, dict) else None
+        return v if isinstance(v, (int, float)) else None
+
     details = {}
     for name, base in sorted(baseline.items()):
+        if name.startswith(("bmi/", "include/")):
+            continue  # an include set is gated through the workflows that subtract it, not twice
         cur = results.get(name)
         if not isinstance(cur, dict) or not isinstance(base, dict):
             continue  # n/a, FAIL, or a baseline entry whose workflow is gone
-        b, c = extract(base), extract(cur)
-        if not isinstance(b, (int, float)) or not isinstance(c, (int, float)) or not b:
+        b_tot, c_tot = extract(base), extract(cur)
+        if not isinstance(b_tot, (int, float)) or not isinstance(c_tot, (int, float)) or not b_tot:
             continue
-        details[name] = {"baseline": b, "current": c, "rel": (c - b) / b, "abs": c - b,
+        basis, b, c = "total", b_tot, c_tot
+        if name.startswith("umbrella/"):
+            if isinstance(base.get("census"), dict):
+                dc = census_delta(base["census"], cur.get("census") or {})
+                # A kind without a recorded rate is priced at this workflow's own baseline average -
+                # imperfect, but the unpriced kinds are the rare ones (point origins).
+                avg = b_tot / max(1, sum(base["census"].values()))
+                b = b_tot + sum(d * rates.get(k, avg) for k, d in dc.items())
+                basis = "residual"
+        else:
+            bt, ct = twin_value(base, baseline), twin_value(cur, results)
+            if bt is not None and ct is not None and b_tot - bt > 0:
+                b, c, basis = b_tot - bt, c_tot - ct, "use"
+        if b <= 0:
+            continue
+        details[name] = {"baseline": round(b, 1), "current": round(c, 1), "rel": (c - b) / b,
+                         "abs": c - b, "basis": basis, "total_baseline": b_tot, "total_current": c_tot,
                          "umbrella": name.startswith("umbrella/")}
     return details
 
@@ -780,6 +968,154 @@ def assert_same_config(recorded, tc: Toolchain, where):
                      f"counts are only comparable within one configuration")
 
 
+def emit_block(lines):
+    text = "\n".join(lines)
+    print(text)
+    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(summary, "a") as f:
+            f.write(text + "\n")
+
+
+def price_list_lines(results, tc: Toolchain):
+    """The handful of numbers the corpus exists to produce, from one measured results dict - each
+    denominated in something a reader can multiply by their own code: an include, an entity, a step.
+
+    Rendered above the gate tables because this is the answer to "what does using this cost"; the
+    per-workflow cells below are the evidence, not the result."""
+    inst = GATED[0][1]
+
+    def val(name):
+        v = results.get(name)
+        return inst(v) if isinstance(v, dict) else None
+
+    rows = []
+    core = val("control/core_only")
+    if core:
+        rows.append(["include the core framework (defines nothing)", str(core), "control/core_only"])
+    for name in sorted(n for n in results if n.startswith("umbrella/")):
+        entry = results[name]
+        if not isinstance(entry, dict) or not entry.get("census"):
+            continue
+        entities = sum(entry["census"].values())
+        v = inst(entry)
+        if not entities or not isinstance(v, (int, float)):
+            continue
+        dominant = max(entry["census"], key=entry["census"].get)
+        over_core = f" ({(v - core) / entities:.1f}/entity over core)" if core and v > core else ""
+        rows.append([f"include {name.removeprefix('umbrella/').removesuffix('_umbrella')} - "
+                     f"{entities} entities, mostly {dominant}", f"{v}{over_core}", name])
+    nouns = {"named_constant": "define one measured constant",
+             "prefixed_unit": "define one prefixed unit",
+             "quantity_spec": "define one quantity spec (shallowest chapter)",
+             "named_unit": "define one named unit"}
+    for kind, rate in entity_rates(results, inst).items():
+        lo, hi = next((l, h) for k, l, h in RATE_AXES if k == kind)
+        rows.append([nouns.get(kind, f"define one {kind}"), f"{rate:g}",
+                     f"{hi.split('/', 1)[1]} minus {lo.split('/', 1)[1]}"])
+    slopes = slope_from(results, inst)
+    if "broad" in slopes:
+        rows.append(["compose one more DISTINCT derived unit in user code",
+                     f"{slopes['broad']:.1f}/step", "scaling/broad slope"])
+    if "narrow" in slopes:
+        rows.append(["one more line reusing warm quantity types",
+                     f"{slopes['narrow']:.1f}/step", "scaling/narrow slope"])
+    if not rows:
+        return []
+    return [f"### price list - `{config_key(tc)}`", "",
+            *markdown_table(["what one thing costs", "instantiations", "measured from"], rows),
+            "", "Chapter and system rows include everything their header pulls in, so a chapter's own "
+            "cost is its row minus the chapters it includes (mechanics includes space_and_time). "
+            "Per-entity definition prices come from pairs of rows whose include sets differ in almost "
+            "nothing but that kind; the per-step prices are the slopes of the scaling/ series and are "
+            "what multiplies with the size of real user code.", ""]
+
+
+def census_growth_lines(details_by_metric, baseline, results):
+    """One line per umbrella whose entity census moved: what was added, and what that growth was
+    priced at. This is the transparency the residual basis owes the reader - a gate that silently
+    prices growth invites the question the table must answer."""
+    inst_details = details_by_metric.get("instantiations", {})
+    out = []
+    for name, d in sorted(inst_details.items()):
+        if d.get("basis") != "residual":
+            continue
+        base, cur = baseline.get(name), results.get(name)
+        if not isinstance(base, dict) or not isinstance(cur, dict):
+            continue
+        dc = census_delta(base.get("census") or {}, cur.get("census") or {})
+        if not dc:
+            continue
+        moved = ", ".join(f"{v:+d} {k}" for k, v in sorted(dc.items()))
+        priced = d["baseline"] - d["total_baseline"]
+        out.append(f"- `{name}` census moved ({moved}): growth priced at {priced:+.0f} instantiations, "
+                   f"and the residual above that is what gates ({d['rel']:+.2%}).")
+    if out:
+        out = ["### census changes", "",
+               "The library gained or lost defined entities since the baselines were recorded. That is "
+               "growth, not slowness: the gate charges it at the per-entity rates recorded with the "
+               "baselines and gates only the remainder.", *out, ""]
+    return out
+
+
+def entity_diff_lines(left, right, label_left, label_right, top, min_delta=1):
+    """Markdown for an entity-level diff of two instantiation tallies, biggest mover first."""
+    rows = []
+    for entity in sorted(set(left) | set(right), key=lambda k: -(right.get(k, 0) - left.get(k, 0))):
+        a, b = left.get(entity, 0), right.get(entity, 0)
+        if abs(b - a) >= min_delta:
+            rows.append([entity, str(a), str(b), f"{b - a:+d}"])
+    total = sum(right.values()) - sum(left.values())
+    lines = [f"Total instantiations {sum(left.values())} -> {sum(right.values())} ({total:+d}). Entities "
+             f"below are templates with their arguments collapsed, ranked by how much they moved.", ""]
+    if not rows:
+        return lines + [f"No entity moved by at least {min_delta} instantiation(s): the two measurements "
+                        f"instantiate the same templates the same number of times.", ""]
+    lines += markdown_table(["entity", label_left, label_right, "delta"], rows[:top])
+    if len(rows) > top:
+        lines += ["", f"{len(rows) - top} further entities moved by at least {min_delta}."]
+    return lines + [""]
+
+
+def name_the_offenders(args, tc: Toolchain, repo: Path, recorded, offenders):
+    """Turn "slower" into a name, without being asked: for the worst offenders, diff instantiation
+    events by entity between the tree the baselines were recorded from and the tree being checked.
+
+    This is the report's obligation: a gate that says only "3% slower" leaves the finding to whoever
+    reruns `attribute` by hand, and nobody does that from a red CI page. Runs only when something
+    moved, costs two traced compiles per named workflow, and degrades to a warning when the baseline
+    commit is not reachable (shallow clone)."""
+    sha = recorded.get("mp_units_sha")
+    if not sha or not offenders:
+        return
+    try:
+        base_repo = checkout(repo, sha, Path(args.worktree_cache).resolve())
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        gate_summary_line(f"cannot attribute the movement: baseline commit {sha[:9]} is not reachable "
+                          f"in {repo} - fetch it (or deepen the clone) to get named offenders", "warning")
+        return
+    selections = {r: select_workflows(detect_version(r), None, tc.std) for r in (base_repo, repo)}
+    lines = ["### what got slower, by entity", "",
+             f"Instantiation events grouped by entity, baseline tree (`{sha[:9]}`) against the checked "
+             f"tree, for the workflows that moved the most. This is `bench.py attribute`, run for you.", ""]
+    named = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        contexts = {id(r): build_modules(r, tc, Path(tmp) / f"bmi-{i}")
+                    for i, r in enumerate((base_repo, repo))}
+        for name in offenders:
+            src_base, src_cur = selections[base_repo].get(name), selections[repo].get(name)
+            if src_base is None or src_cur is None:
+                continue
+            try:
+                then = trace_entities(base_repo, tc, src_base, contexts[id(base_repo)], Path(tmp))
+                now = trace_entities(repo, tc, src_cur, contexts[id(repo)], Path(tmp))
+            except subprocess.CalledProcessError:
+                continue
+            lines += [f"#### {name}", "", *entity_diff_lines(then, now, "baseline", "current", top=10)]
+            named += 1
+    if named:
+        emit_block(lines)
+
+
 def gate_slope_table(slopes, band, tc: Toolchain):
     """The marginal-cost table. Separate from the per-workflow one because it answers a different
     question: not "did this workflow grow" but "did one more line of user code get more expensive"."""
@@ -816,18 +1152,25 @@ def gate_summary_table(details, median, args, tc: Toolchain, label="instantiatio
             status = "can tighten"
         else:
             status = "ok"
-        rows.append([name + (" (churn-expected)" if d["umbrella"] else ""), str(d["baseline"]),
+        rows.append([name, d.get("basis", "total"), str(d["baseline"]),
                      str(d["current"]), f"{delta:+.2f}%", f"{args.slack:g}%",
                      f"{args.slack - delta:+.2f}pp", status])
     # Name the configuration: the same compiler at a different -std produces different counts, so a
     # table without it looks like it contradicts the measurement fleet's numbers.
     lines = [f"### {label} - `{config_key(tc)}`", ""]
-    lines += markdown_table(["workflow", "baseline", "current", "delta", "limit", "headroom", ""], rows)
+    lines += markdown_table(["workflow", "basis", "baseline", "current", "delta", "limit", "headroom", ""],
+                            rows)
     lines += ["", (f"median across non-umbrella workflows: **{median:+.2%}** against a "
                    f"{args.median_alarm:g}% alarm ({args.median_alarm - median * 100:+.2f}pp headroom)"
                    if median is not None else
                    f"gated at the same {args.slack:g}% band as instantiations; the median alarm "
                    f"applies to instantiations only"),
+              "", "`basis` is what the numbers on that row ARE, chosen so that red means slower rather "
+              "than bigger: `use` is the workflow minus its own include twin (a system header gaining "
+              "entities moves both sides equally and cancels), `residual` compares an umbrella against "
+              "its baseline plus census growth priced at the recorded per-entity rates (equal to the "
+              "plain total whenever the census did not move), and `total` is the raw number, used only "
+              "where nothing better exists.",
               "", "`headroom` is how much further a workflow could grow before it fails: negative means "
               "it already has. A re-record resets every headroom to the full band, which is why "
               "`bench.py update --workflows <filters>` exists - it moves only what you name.", ""]
@@ -847,13 +1190,19 @@ def cmd_check(args):
     recorded = json.loads(baseline_file.read_text())
     assert_same_config(recorded, tc, baseline_file.name)
     baseline = recorded["results"]
+    rates_by_metric = recorded.get("entity_rates", {})
     slack, alarm, notice = args.slack / 100, args.median_alarm / 100, args.tighten_notice / 100
     advisory_band = args.advisory_slack / 100 if args.advisory_slack is not None else None
     slope_band = (args.slope_slack if args.slope_slack is not None else args.slack) / 100
     measured = measure_counts(repo, tc)
-    per_metric = {label: baseline_deltas(baseline, measured, extract) for label, extract, _ in GATED}
+    per_metric = {label: gated_deltas(baseline, measured, extract, rates_by_metric.get(label, {}))
+                  for label, extract, _ in GATED}
     floors = {label: floor for label, _, floor in GATED}
     details = per_metric["instantiations"]
+    if price := price_list_lines(measured, tc):
+        emit_block(price)
+    if census_notes := census_growth_lines(per_metric, baseline, measured):
+        emit_block(census_notes)
 
     def past(d, label, band):
         """Both the percentage band and the metric's absolute floor have to be exceeded."""
@@ -889,6 +1238,7 @@ def cmd_check(args):
              "slope_regressions": [f"{shape} [{label}]" for label, shape in slope_regressions],
              "regressions": list(regressions),
              "improvements": list(improvements), "advisory": list(advisory),
+             "entity_rates": rates_by_metric,
              "workflows": details,
              "metrics": {label: m for label, m in per_metric.items()}}, indent=2) + "\n")
     for label, m in per_metric.items():
@@ -917,7 +1267,9 @@ def cmd_check(args):
             "error")
     if median > alarm:
         gate_summary_line(f"framework-wide regression: median instantiation growth {median:+.1%} "
-                          f"across all workflows - this should almost never be rebaselined away", "error")
+                          f"across the non-umbrella workflows, measured on each one's gated basis "
+                          f"(use-cost where a twin exists) - this should almost never be rebaselined "
+                          f"away", "error")
     if advisory:
         worst = max(advisory.items(), key=lambda kv: kv[1]["rel"])
         gate_summary_line(
@@ -930,6 +1282,20 @@ def cmd_check(args):
             f"{len(improvements)} workflow(s) improved past the {args.tighten_notice:g}% notice band; best "
             f"is {best[0]} ({best[1]['rel']:+.1%}) - baselines can be tightened, run bench.py update in a "
             f"follow-up PR", "warning")
+    # Anything that moved past the advisory band gets NAMED, not just measured: attribution against
+    # the tree the baselines were recorded from, so the finding arrives with the failure instead of
+    # waiting for someone to rerun `attribute` by hand.
+    movers = {}
+    for key, d in {**regressions, **advisory}.items():
+        wf = key.rsplit(" [", 1)[0]
+        movers[wf] = max(movers.get(wf, 0), d["rel"])
+    for (label, shape), d in slope_regressions.items():
+        sizes = [n for n in baseline if re.fullmatch(rf"scaling/{shape}_\d+", n)]
+        if sizes:  # the largest workflow of the shape carries most of the slope
+            movers[max(sizes, key=lambda n: int(n.rsplit("_", 1)[1]))] = d["rel"]
+    if movers and args.attribute_top:
+        name_the_offenders(args, tc, repo, recorded,
+                           sorted(movers, key=movers.get, reverse=True)[:args.attribute_top])
     if not regressions and not slope_regressions and median <= alarm:
         msg = f"compile-cost gate OK (median instantiation delta {median:+.1%})"
         if improvements:
@@ -971,6 +1337,11 @@ def cmd_update(args):
     if carried:
         # The metadata above describes the re-recorded entries only; these predate it.
         data["not_re_recorded"] = carried
+    # The per-entity prices `check` uses to tell growth from slowness, recorded with the numbers they
+    # price so the two can never drift apart. Derived from the merged results, so a filtered update
+    # keeps rates consistent with whatever mix of old and new entries the file now holds.
+    data["entity_rates"] = {label: rates for label, extract, _ in GATED
+                            if (rates := entity_rates(results, extract))}
     data["results"] = results
     out.write_text(json.dumps(data, indent=2) + "\n")
     print(f"baselines written to {out}: {len(recorded)} re-recorded, {len(carried)} carried over")
@@ -1057,21 +1428,8 @@ def cmd_attribute(args):
             labels.append(name if len(refs) == 1 else f"{name} @ {shown}")
 
     left, right = tallies
-    rows, total = [], sum(right.values()) - sum(left.values())
-    for entity in sorted(set(left) | set(right), key=lambda k: -(right.get(k, 0) - left.get(k, 0))):
-        a, b = left.get(entity, 0), right.get(entity, 0)
-        if abs(b - a) >= args.min_delta:
-            rows.append([entity, str(a), str(b), f"{b - a:+d}"])
-    print(f"### what accounts for the difference: {labels[0]} vs {labels[1]}", "")
-    print(f"\nTotal instantiations {sum(left.values())} -> {sum(right.values())} ({total:+d}). Entities "
-          f"below are templates with their arguments collapsed, ranked by how much they moved.\n")
-    if not rows:
-        print(f"No entity moved by at least {args.min_delta} instantiation(s): the two measurements "
-              f"instantiate the same templates the same number of times.")
-        return
-    print("\n".join(markdown_table(["entity", labels[0], labels[1], "delta"], rows[:args.top])))
-    if len(rows) > args.top:
-        print(f"\n{len(rows) - args.top} further entities moved by at least {args.min_delta}.")
+    print(f"### what accounts for the difference: {labels[0]} vs {labels[1]}\n")
+    print("\n".join(entity_diff_lines(left, right, labels[0], labels[1], args.top, args.min_delta)))
 
 
 def cmd_report(args):
@@ -1087,6 +1445,8 @@ def cmd_report(args):
     metrics = {metric: {} for metric, _ in METRICS}
     for ref in refs:
         for name, entry in sorted(counts[ref].items()):
+            if name.startswith("include/"):
+                continue  # the twins feed the gate's use basis; as report rows they are noise
             metrics["instantiations"].setdefault(name, {})[ref] = "FAIL" if entry == "FAIL" else total(entry)
             if isinstance(entry, dict):
                 metrics["const_evals"].setdefault(name, {})[ref] = entry.get("EvaluateAsConstantExpr")
@@ -1970,6 +2330,13 @@ def main():
                    help="band for the marginal cost per step from the scaling/ series (default: --slack). "
                         "Keep this tighter than --slack: a total can grow because the library gained a "
                         "feature, but the slope only grows when user code got more expensive")
+    g.add_argument("--attribute-top", type=int, default=3, metavar="N",
+                   help="name the offenders: for the N workflows that moved the most past the advisory "
+                        "band, diff instantiation events by entity against the tree the baselines were "
+                        "recorded from (default 3; 0 disables). Costs two traced compiles per workflow, "
+                        "paid only when something moved")
+    g.add_argument("--worktree-cache", default=str(ROOT / ".worktrees"),
+                   help="where to materialize the baseline commit for attribution")
 
     r = sub.add_parser("report", help="all metrics this compiler can produce, as markdown + JSON")
     r.add_argument("refs", nargs="*", help="git refs to measure (default: WORKTREE)")

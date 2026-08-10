@@ -1,336 +1,995 @@
 {
   "mp_units_version": "2.6",
-  "mp_units_sha": "41d41096de6d62464fbf80f807a3d17c6d747a3b",
-  "mp_units_describe": "v2.5.0-709-g41d41096d-dirty",
+  "mp_units_sha": "a742af8c42bc27109726aaa4bebcda17d3dcd8ad",
+  "mp_units_describe": "v2.5.0-710-ga742af8c4",
   "cxx": "clang++-21",
   "std": "c++23",
   "stdlib": "libc++",
   "config_label": "",
   "extra_flags": "",
+  "entity_rates": {
+    "instantiations": {
+      "named_constant": 91.86,
+      "prefixed_unit": 3.17,
+      "quantity_spec": 49.77,
+      "named_unit": 61.98
+    },
+    "constant evaluations": {
+      "named_constant": 428.98,
+      "prefixed_unit": 13.02,
+      "quantity_spec": 181.23,
+      "named_unit": 278.47
+    },
+    "function declarations": {
+      "named_constant": 59.32,
+      "prefixed_unit": -0.06,
+      "quantity_spec": 23.14,
+      "named_unit": 32.26
+    },
+    "emitted code (bytes)": {
+      "named_constant": 0.0,
+      "prefixed_unit": 0.0,
+      "quantity_spec": 0.0,
+      "named_unit": 0.0
+    }
+  },
   "results": {
     "affine/custom_origins": {
       "InstantiateClass": 7039,
       "InstantiateFunction": 3992,
       "EvaluateAsConstantExpr": 43822,
+      "census": {
+        "quantity_spec": 57,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 5
+      },
       "object_bytes": 1248,
       "code_bytes": 84,
       "symbol_bytes": 1164,
       "decls_total": 220007,
       "function_decls": 9716,
-      "types_total": 467686
+      "types_total": 467686,
+      "twin": "include/cstdio+si+space_and_time"
     },
     "affine/temperature_points": {
       "InstantiateClass": 7414,
       "InstantiateFunction": 5459,
       "EvaluateAsConstantExpr": 55421,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 109,
+        "named_constant": 15,
+        "prefixed_unit": 675,
+        "point_origin": 4
+      },
       "object_bytes": 1624,
       "code_bytes": 150,
       "symbol_bytes": 1474,
       "decls_total": 249746,
       "function_decls": 11082,
-      "types_total": 529629
+      "types_total": 529629,
+      "twin": "include/cstdio+si+usc"
     },
     "constants/codata_expressions": {
       "InstantiateClass": 12446,
       "InstantiateFunction": 9549,
       "EvaluateAsConstantExpr": 87094,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 39,
+        "prefixed_unit": 674,
+        "point_origin": 3
+      },
       "object_bytes": 1968,
       "code_bytes": 268,
       "symbol_bytes": 1700,
       "decls_total": 365342,
       "function_decls": 15675,
-      "types_total": 828606
+      "types_total": 828606,
+      "twin": "include/codata2022_essential+cstdio+numbers+si"
+    },
+    "control/core_only": {
+      "InstantiateClass": 1566,
+      "InstantiateFunction": 990,
+      "EvaluateAsConstantExpr": 8067,
+      "census": {
+        "quantity_spec": 1,
+        "named_unit": 3,
+        "named_constant": 1
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 107786,
+      "function_decls": 6287,
+      "types_total": 205588
     },
     "generic/custom_representation": {
       "InstantiateClass": 10457,
       "InstantiateFunction": 6324,
       "EvaluateAsConstantExpr": 66222,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1624,
       "code_bytes": 145,
       "symbol_bytes": 1479,
       "decls_total": 286833,
       "function_decls": 12571,
-      "types_total": 649392
+      "types_total": 649392,
+      "twin": "include/cstdio+mechanics+si+space_and_time"
     },
     "generic/dimensionless_and_angles": {
       "InstantiateClass": 7482,
       "InstantiateFunction": 4546,
       "EvaluateAsConstantExpr": 48295,
+      "census": {
+        "quantity_spec": 59,
+        "named_unit": 49,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1936,
       "code_bytes": 220,
       "symbol_bytes": 1716,
       "decls_total": 232574,
       "function_decls": 10440,
-      "types_total": 493335
+      "types_total": 493335,
+      "twin": "include/angular+cstdio+math+si+space_and_time"
     },
     "generic/generic_interfaces": {
       "InstantiateClass": 8863,
       "InstantiateFunction": 5206,
       "EvaluateAsConstantExpr": 56223,
+      "census": {
+        "quantity_spec": 57,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1552,
       "code_bytes": 125,
       "symbol_bytes": 1427,
       "decls_total": 255700,
       "function_decls": 11236,
-      "types_total": 566392
+      "types_total": 566392,
+      "twin": "include/cstdio+si+space_and_time-741f"
+    },
+    "include/angular+cstdio+math+si+space_and_time": {
+      "InstantiateClass": 6980,
+      "InstantiateFunction": 3862,
+      "EvaluateAsConstantExpr": 42422,
+      "census": {
+        "quantity_spec": 59,
+        "named_unit": 49,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 215930,
+      "function_decls": 9577,
+      "types_total": 456474
+    },
+    "include/cartesian_vector+cstdio+mechanics+si+space_and_time": {
+      "InstantiateClass": 9830,
+      "InstantiateFunction": 5811,
+      "EvaluateAsConstantExpr": 61334,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 273065,
+      "function_decls": 11912,
+      "types_total": 615853
+    },
+    "include/codata2022_essential+cstdio+numbers+si": {
+      "InstantiateClass": 8799,
+      "InstantiateFunction": 6080,
+      "EvaluateAsConstantExpr": 58138,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 39,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 266877,
+      "function_decls": 11767,
+      "types_total": 577552
+    },
+    "include/complex+cstdio+electromagnetism+si": {
+      "InstantiateClass": 14556,
+      "InstantiateFunction": 8643,
+      "EvaluateAsConstantExpr": 90935,
+      "census": {
+        "quantity_spec": 169,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 366662,
+      "function_decls": 15300,
+      "types_total": 879128
+    },
+    "include/cstdint+cstdio+si+usc": {
+      "InstantiateClass": 7074,
+      "InstantiateFunction": 4375,
+      "EvaluateAsConstantExpr": 47973,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 109,
+        "named_constant": 15,
+        "prefixed_unit": 675,
+        "point_origin": 4
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 227949,
+      "function_decls": 9983,
+      "types_total": 477313
+    },
+    "include/cstdio+electromagnetism+math+si+space_and_time": {
+      "InstantiateClass": 14548,
+      "InstantiateFunction": 8643,
+      "EvaluateAsConstantExpr": 90776,
+      "census": {
+        "quantity_spec": 169,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 367270,
+      "function_decls": 15326,
+      "types_total": 879734
+    },
+    "include/cstdio+format+output_workload": {
+      "InstantiateClass": 7078,
+      "InstantiateFunction": 3877,
+      "EvaluateAsConstantExpr": 43819,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 220161,
+      "function_decls": 9595,
+      "types_total": 469257
+    },
+    "include/cstdio+math+mechanics+si+space_and_time": {
+      "InstantiateClass": 9824,
+      "InstantiateFunction": 5811,
+      "EvaluateAsConstantExpr": 61236,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 273134,
+      "function_decls": 11904,
+      "types_total": 615714
+    },
+    "include/cstdio+mechanics+si+space_and_time": {
+      "InstantiateClass": 9826,
+      "InstantiateFunction": 5811,
+      "EvaluateAsConstantExpr": 61287,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 272514,
+      "function_decls": 11877,
+      "types_total": 615051
+    },
+    "include/cstdio+mechanics+si+space_and_time-6491": {
+      "InstantiateClass": 9826,
+      "InstantiateFunction": 5811,
+      "EvaluateAsConstantExpr": 61287,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 272514,
+      "function_decls": 11877,
+      "types_total": 615051
+    },
+    "include/cstdio+mechanics+si+space_and_time-b28d": {
+      "InstantiateClass": 9826,
+      "InstantiateFunction": 5811,
+      "EvaluateAsConstantExpr": 61287,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 272514,
+      "function_decls": 11877,
+      "types_total": 615051
+    },
+    "include/cstdio+output_workload": {
+      "InstantiateClass": 7078,
+      "InstantiateFunction": 3877,
+      "EvaluateAsConstantExpr": 43819,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 220160,
+      "function_decls": 9595,
+      "types_total": 469263
+    },
+    "include/cstdio+scaling_workload+utility": {
+      "InstantiateClass": 11390,
+      "InstantiateFunction": 6918,
+      "EvaluateAsConstantExpr": 72640,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 305416,
+      "function_decls": 13335,
+      "types_total": 700464
+    },
+    "include/cstdio+si": {
+      "InstantiateClass": 6323,
+      "InstantiateFunction": 3267,
+      "EvaluateAsConstantExpr": 37790,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 200744,
+      "function_decls": 8832,
+      "types_total": 420076
+    },
+    "include/cstdio+si+space_and_time": {
+      "InstantiateClass": 6886,
+      "InstantiateFunction": 3765,
+      "EvaluateAsConstantExpr": 41646,
+      "census": {
+        "quantity_spec": 57,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 212810,
+      "function_decls": 9443,
+      "types_total": 450402
+    },
+    "include/cstdio+si+space_and_time-741f": {
+      "InstantiateClass": 6886,
+      "InstantiateFunction": 3765,
+      "EvaluateAsConstantExpr": 41646,
+      "census": {
+        "quantity_spec": 57,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 212810,
+      "function_decls": 9443,
+      "types_total": 450402
+    },
+    "include/cstdio+si+usc": {
+      "InstantiateClass": 7074,
+      "InstantiateFunction": 4375,
+      "EvaluateAsConstantExpr": 47973,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 109,
+        "named_constant": 15,
+        "prefixed_unit": 675,
+        "point_origin": 4
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 227949,
+      "function_decls": 9983,
+      "types_total": 477313
+    },
+    "include/cstdio+si+usc-59dc": {
+      "InstantiateClass": 7074,
+      "InstantiateFunction": 4375,
+      "EvaluateAsConstantExpr": 47973,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 109,
+        "named_constant": 15,
+        "prefixed_unit": 675,
+        "point_origin": 4
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 227949,
+      "function_decls": 9983,
+      "types_total": 477313
+    },
+    "include/format+output_workload+print": {
+      "InstantiateClass": 7183,
+      "InstantiateFunction": 3978,
+      "EvaluateAsConstantExpr": 44773,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 223229,
+      "function_decls": 9750,
+      "types_total": 477423
+    },
+    "include/iostream+ostream+output_workload": {
+      "InstantiateClass": 7193,
+      "InstantiateFunction": 3979,
+      "EvaluateAsConstantExpr": 44912,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 223351,
+      "function_decls": 9762,
+      "types_total": 477684
+    },
+    "include/output_workload+print": {
+      "InstantiateClass": 7183,
+      "InstantiateFunction": 3978,
+      "EvaluateAsConstantExpr": 44773,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 223229,
+      "function_decls": 9750,
+      "types_total": 477423
     },
     "isq/complex_quantities": {
       "InstantiateClass": 15639,
       "InstantiateFunction": 9331,
       "EvaluateAsConstantExpr": 98508,
+      "census": {
+        "quantity_spec": 170,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 2080,
       "code_bytes": 361,
       "symbol_bytes": 1719,
       "decls_total": 389347,
       "function_decls": 16183,
-      "types_total": 939399
+      "types_total": 939399,
+      "twin": "include/complex+cstdio+electromagnetism+si"
     },
     "isq/custom_hierarchy": {
       "InstantiateClass": 10888,
       "InstantiateFunction": 6762,
       "EvaluateAsConstantExpr": 69753,
+      "census": {
+        "quantity_spec": 105,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1464,
       "code_bytes": 106,
       "symbol_bytes": 1358,
       "decls_total": 297848,
       "function_decls": 13091,
-      "types_total": 676851
+      "types_total": 676851,
+      "twin": "include/cstdio+mechanics+si+space_and_time-b28d"
     },
     "isq/derived_spec_conversions": {
       "InstantiateClass": 12242,
       "InstantiateFunction": 7996,
       "EvaluateAsConstantExpr": 80980,
+      "census": {
+        "quantity_spec": 102,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1784,
       "code_bytes": 188,
       "symbol_bytes": 1596,
       "decls_total": 332383,
       "function_decls": 14621,
-      "types_total": 760938
+      "types_total": 760938,
+      "twin": "include/cstdio+mechanics+si+space_and_time-b28d"
     },
     "isq/fractional_exponents": {
       "InstantiateClass": 14840,
       "InstantiateFunction": 8920,
       "EvaluateAsConstantExpr": 93434,
+      "census": {
+        "quantity_spec": 169,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1616,
       "code_bytes": 139,
       "symbol_bytes": 1477,
       "decls_total": 375464,
       "function_decls": 15645,
-      "types_total": 898433
+      "types_total": 898433,
+      "twin": "include/cstdio+electromagnetism+math+si+space_and_time"
     },
     "isq/hierarchy_conversions": {
       "InstantiateClass": 10763,
       "InstantiateFunction": 6821,
       "EvaluateAsConstantExpr": 69850,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1552,
       "code_bytes": 133,
       "symbol_bytes": 1419,
       "decls_total": 297803,
       "function_decls": 13140,
-      "types_total": 671757
+      "types_total": 671757,
+      "twin": "include/cstdio+mechanics+si+space_and_time-b28d"
     },
     "isq/kind_conversions": {
       "InstantiateClass": 10429,
       "InstantiateFunction": 6447,
       "EvaluateAsConstantExpr": 67028,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1776,
       "code_bytes": 182,
       "symbol_bytes": 1594,
       "decls_total": 289339,
       "function_decls": 12697,
-      "types_total": 652161
+      "types_total": 652161,
+      "twin": "include/cstdio+mechanics+si+space_and_time-b28d"
     },
     "isq/kind_safe_interfaces": {
       "InstantiateClass": 11496,
       "InstantiateFunction": 7157,
       "EvaluateAsConstantExpr": 73853,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1400,
       "code_bytes": 87,
       "symbol_bytes": 1313,
       "decls_total": 310763,
       "function_decls": 13584,
-      "types_total": 712690
+      "types_total": 712690,
+      "twin": "include/cstdio+math+mechanics+si+space_and_time"
     },
     "isq/vector_quantities": {
       "InstantiateClass": 10438,
       "InstantiateFunction": 6369,
       "EvaluateAsConstantExpr": 66669,
+      "census": {
+        "quantity_spec": 102,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 2104,
       "code_bytes": 314,
       "symbol_bytes": 1790,
       "decls_total": 288343,
       "function_decls": 12657,
-      "types_total": 653302
+      "types_total": 653302,
+      "twin": "include/cartesian_vector+cstdio+mechanics+si+space_and_time"
     },
     "parity/kinetic_energy": {
       "InstantiateClass": 7031,
       "InstantiateFunction": 3914,
       "EvaluateAsConstantExpr": 43355,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1392,
       "code_bytes": 89,
       "symbol_bytes": 1303,
       "decls_total": 218134,
       "function_decls": 9607,
-      "types_total": 465381
+      "types_total": 465381,
+      "twin": "include/cstdio+si"
     },
     "parity/unit_conversions": {
       "InstantiateClass": 7176,
       "InstantiateFunction": 4949,
       "EvaluateAsConstantExpr": 51252,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 109,
+        "named_constant": 15,
+        "prefixed_unit": 675,
+        "point_origin": 4
+      },
       "object_bytes": 1936,
       "code_bytes": 228,
       "symbol_bytes": 1708,
       "decls_total": 238101,
       "function_decls": 10603,
-      "types_total": 499191
+      "types_total": 499191,
+      "twin": "include/cstdio+si+usc-59dc"
     },
     "parity/value_conversions": {
       "InstantiateClass": 7226,
       "InstantiateFunction": 4703,
       "EvaluateAsConstantExpr": 50955,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 109,
+        "named_constant": 15,
+        "prefixed_unit": 675,
+        "point_origin": 4
+      },
       "object_bytes": 1656,
       "code_bytes": 179,
       "symbol_bytes": 1477,
       "decls_total": 235367,
       "function_decls": 10328,
-      "types_total": 496037
+      "types_total": 496037,
+      "twin": "include/cstdint+cstdio+si+usc"
     },
     "scaling/broad_016": {
       "InstantiateClass": 12179,
       "InstantiateFunction": 7984,
       "EvaluateAsConstantExpr": 82495,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1384,
       "code_bytes": 87,
       "symbol_bytes": 1297,
       "decls_total": 331826,
       "function_decls": 14507,
-      "types_total": 769807
+      "types_total": 769807,
+      "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/broad_064": {
       "InstantiateClass": 13707,
       "InstantiateFunction": 9845,
       "EvaluateAsConstantExpr": 99548,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1384,
       "code_bytes": 87,
       "symbol_bytes": 1297,
       "decls_total": 377174,
       "function_decls": 16463,
-      "types_total": 903669
+      "types_total": 903669,
+      "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/broad_256": {
       "InstantiateClass": 25776,
       "InstantiateFunction": 24383,
       "EvaluateAsConstantExpr": 222728,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1384,
       "code_bytes": 87,
       "symbol_bytes": 1297,
       "decls_total": 749875,
       "function_decls": 32312,
-      "types_total": 1870764
+      "types_total": 1870764,
+      "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/narrow_016": {
       "InstantiateClass": 11407,
       "InstantiateFunction": 6951,
       "EvaluateAsConstantExpr": 72883,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1392,
       "code_bytes": 87,
       "symbol_bytes": 1305,
       "decls_total": 305836,
       "function_decls": 13352,
-      "types_total": 700997
+      "types_total": 700997,
+      "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/narrow_064": {
       "InstantiateClass": 11455,
       "InstantiateFunction": 7047,
       "EvaluateAsConstantExpr": 73603,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1392,
       "code_bytes": 87,
       "symbol_bytes": 1305,
       "decls_total": 307036,
       "function_decls": 13400,
-      "types_total": 702485
+      "types_total": 702485,
+      "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/narrow_256": {
       "InstantiateClass": 11647,
       "InstantiateFunction": 7431,
       "EvaluateAsConstantExpr": 76483,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1392,
       "code_bytes": 87,
       "symbol_bytes": 1305,
       "decls_total": 311836,
       "function_decls": 13592,
-      "types_total": 708437
+      "types_total": 708437,
+      "twin": "include/cstdio+scaling_workload+utility"
     },
     "systems/user_defined_units": {
       "InstantiateClass": 10069,
       "InstantiateFunction": 6367,
       "EvaluateAsConstantExpr": 65421,
+      "census": {
+        "quantity_spec": 102,
+        "named_unit": 49,
+        "named_constant": 11,
+        "prefixed_unit": 674,
+        "point_origin": 3
+      },
       "object_bytes": 1696,
       "code_bytes": 163,
       "symbol_bytes": 1533,
       "decls_total": 284462,
       "function_decls": 12493,
-      "types_total": 640324
+      "types_total": 640324,
+      "twin": "include/cstdio+mechanics+si+space_and_time-6491"
     },
     "text/output_format": {
       "InstantiateClass": 7863,
       "InstantiateFunction": 5111,
       "EvaluateAsConstantExpr": 52107,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 440584,
       "code_bytes": 146711,
       "symbol_bytes": 293873,
       "decls_total": 246760,
       "function_decls": 10878,
-      "types_total": 539769
+      "types_total": 539769,
+      "twin": "include/cstdio+format+output_workload"
     },
     "text/output_format_advanced": {
       "InstantiateClass": 8004,
       "InstantiateFunction": 5374,
       "EvaluateAsConstantExpr": 53879,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 496384,
       "code_bytes": 163120,
       "symbol_bytes": 333264,
       "decls_total": 253063,
       "function_decls": 11215,
-      "types_total": 555784
+      "types_total": 555784,
+      "twin": "include/output_workload+print"
     },
     "text/output_ostream": {
       "InstantiateClass": 7244,
       "InstantiateFunction": 4095,
       "EvaluateAsConstantExpr": 45781,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 43448,
       "code_bytes": 11645,
       "symbol_bytes": 31803,
       "decls_total": 226147,
       "function_decls": 9921,
-      "types_total": 484610
+      "types_total": 484610,
+      "twin": "include/iostream+ostream+output_workload"
     },
     "text/output_printf": {
       "InstantiateClass": 7078,
       "InstantiateFunction": 3919,
       "EvaluateAsConstantExpr": 44063,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 1928,
       "code_bytes": 206,
       "symbol_bytes": 1722,
       "decls_total": 220620,
       "function_decls": 9633,
-      "types_total": 470199
+      "types_total": 470199,
+      "twin": "include/cstdio+output_workload"
     },
     "text/output_println": {
       "InstantiateClass": 7903,
       "InstantiateFunction": 5152,
       "EvaluateAsConstantExpr": 52298,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 441176,
       "code_bytes": 146541,
       "symbol_bytes": 294635,
       "decls_total": 247846,
       "function_decls": 10958,
-      "types_total": 543239
+      "types_total": 543239,
+      "twin": "include/format+output_workload+print"
     },
     "umbrella/codata_2022_umbrella": {
       "InstantiateClass": 16930,
       "InstantiateFunction": 19826,
       "EvaluateAsConstantExpr": 151132,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 232,
+        "prefixed_unit": 6,
+        "point_origin": 2
+      },
       "object_bytes": 968,
       "code_bytes": 51,
       "symbol_bytes": 917,
@@ -342,6 +1001,13 @@
       "InstantiateClass": 6759,
       "InstantiateFunction": 6017,
       "EvaluateAsConstantExpr": 48831,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 39,
+        "prefixed_unit": 5,
+        "point_origin": 2
+      },
       "object_bytes": 968,
       "code_bytes": 51,
       "symbol_bytes": 917,
@@ -353,6 +1019,13 @@
       "InstantiateClass": 28476,
       "InstantiateFunction": 39053,
       "EvaluateAsConstantExpr": 294841,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 567,
+        "prefixed_unit": 6,
+        "point_origin": 2
+      },
       "object_bytes": 960,
       "code_bytes": 51,
       "symbol_bytes": 909,
@@ -360,10 +1033,127 @@
       "function_decls": 45675,
       "types_total": 2154758
     },
+    "umbrella/isq_atomic_and_nuclear_physics_umbrella": {
+      "InstantiateClass": 2694,
+      "InstantiateFunction": 1581,
+      "EvaluateAsConstantExpr": 14334,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 3,
+        "named_constant": 1
+      },
+      "object_bytes": 984,
+      "code_bytes": 51,
+      "symbol_bytes": 933,
+      "decls_total": 125854,
+      "function_decls": 6970,
+      "types_total": 255916
+    },
+    "umbrella/isq_electromagnetism_umbrella": {
+      "InstantiateClass": 11138,
+      "InstantiateFunction": 7030,
+      "EvaluateAsConstantExpr": 68397,
+      "census": {
+        "quantity_spec": 169,
+        "named_unit": 3,
+        "named_constant": 1
+      },
+      "object_bytes": 976,
+      "code_bytes": 51,
+      "symbol_bytes": 925,
+      "decls_total": 294921,
+      "function_decls": 13527,
+      "types_total": 724109
+    },
+    "umbrella/isq_information_science_umbrella": {
+      "InstantiateClass": 6706,
+      "InstantiateFunction": 4529,
+      "EvaluateAsConstantExpr": 41582,
+      "census": {
+        "quantity_spec": 113,
+        "named_unit": 3,
+        "named_constant": 1
+      },
+      "object_bytes": 976,
+      "code_bytes": 51,
+      "symbol_bytes": 925,
+      "decls_total": 208831,
+      "function_decls": 10498,
+      "types_total": 481095
+    },
+    "umbrella/isq_light_and_radiation_umbrella": {
+      "InstantiateClass": 11484,
+      "InstantiateFunction": 7271,
+      "EvaluateAsConstantExpr": 70762,
+      "census": {
+        "quantity_spec": 186,
+        "named_unit": 3,
+        "named_constant": 1
+      },
+      "object_bytes": 976,
+      "code_bytes": 51,
+      "symbol_bytes": 925,
+      "decls_total": 302551,
+      "function_decls": 13850,
+      "types_total": 743425
+    },
+    "umbrella/isq_mechanics_umbrella": {
+      "InstantiateClass": 6306,
+      "InstantiateFunction": 4160,
+      "EvaluateAsConstantExpr": 38294,
+      "census": {
+        "quantity_spec": 100,
+        "named_unit": 3,
+        "named_constant": 1
+      },
+      "object_bytes": 968,
+      "code_bytes": 51,
+      "symbol_bytes": 917,
+      "decls_total": 199163,
+      "function_decls": 10059,
+      "types_total": 455303
+    },
+    "umbrella/isq_space_and_time_umbrella": {
+      "InstantiateClass": 3262,
+      "InstantiateFunction": 2081,
+      "EvaluateAsConstantExpr": 18216,
+      "census": {
+        "quantity_spec": 57,
+        "named_unit": 3,
+        "named_constant": 1
+      },
+      "object_bytes": 976,
+      "code_bytes": 51,
+      "symbol_bytes": 925,
+      "decls_total": 138006,
+      "function_decls": 7583,
+      "types_total": 286479
+    },
+    "umbrella/isq_thermodynamics_umbrella": {
+      "InstantiateClass": 7423,
+      "InstantiateFunction": 4977,
+      "EvaluateAsConstantExpr": 45887,
+      "census": {
+        "quantity_spec": 132,
+        "named_unit": 3,
+        "named_constant": 1
+      },
+      "object_bytes": 976,
+      "code_bytes": 51,
+      "symbol_bytes": 925,
+      "decls_total": 222344,
+      "function_decls": 11076,
+      "types_total": 516788
+    },
     "umbrella/isq_umbrella": {
       "InstantiateClass": 12920,
       "InstantiateFunction": 8421,
       "EvaluateAsConstantExpr": 81381,
+      "census": {
+        "quantity_spec": 230,
+        "named_unit": 3,
+        "named_constant": 1
+      },
       "object_bytes": 960,
       "code_bytes": 51,
       "symbol_bytes": 909,
@@ -375,6 +1165,13 @@
       "InstantiateClass": 4264,
       "InstantiateFunction": 2736,
       "EvaluateAsConstantExpr": 26628,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 1,
+        "prefixed_unit": 145,
+        "point_origin": 2
+      },
       "object_bytes": 960,
       "code_bytes": 51,
       "symbol_bytes": 909,
@@ -386,6 +1183,13 @@
       "InstantiateClass": 6323,
       "InstantiateFunction": 3267,
       "EvaluateAsConstantExpr": 37790,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
       "object_bytes": 960,
       "code_bytes": 51,
       "symbol_bytes": 909,

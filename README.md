@@ -10,16 +10,18 @@ library shares.
 
 Each workflow is a small idiomatic translation unit in `workflows/<category>/<name>.cpp`:
 
-| category   | what it represents                                                        |
-|------------|---------------------------------------------------------------------------|
-| `parity/`  | basics common to all units libraries (arithmetic, conversions, `value_cast`/`force_in` and the integer scaling engine) |
-| `isq/`     | ISQ hierarchies: user-defined `QUANTITY_SPEC` trees with equations, kind-safe `QuantityOf` interfaces, cross-branch conversions, `kind_of` at API edges, vector- and complex-field quantities, and fractional dimensional exponents |
-| `affine/`  | `quantity_point`: offset units, user-defined absolute/relative origins    |
-| `generic/` | templates over references and representation types, user-defined representation types, dimensionless quantities and angles |
-| `text/`    | quantity text output: the same workload printed through `printf`, `operator<<`, `std::format` and `std::println`, plus the format-spec grammar in depth |
-| `systems/` | **defining** units rather than consuming them: named and derived units, prefixes, awkward magnitudes, a quantity tree to hang them on |
-| `scaling/` | the **slope**: the same work at 16, 64 and 256 steps, so cost-per-operation falls out of the difference. `narrow_*` reuses five quantity types (a production file's shape), `broad_*` composes a distinct derived unit per step (what grows the instantiation table) |
-| `umbrella/`| bare umbrella-header inclusion cost — **churn-expected**: these grow when systems legitimately grow and are excluded from the framework-regression alarm |
+| category     | what it represents                                                        |
+|--------------|---------------------------------------------------------------------------|
+| `parity/`    | basics common to all units libraries (arithmetic, conversions, `value_cast`/`force_in` and the integer scaling engine) |
+| `isq/`       | ISQ hierarchies: user-defined `QUANTITY_SPEC` trees with equations, kind-safe `QuantityOf` interfaces, cross-branch conversions, `kind_of` at API edges, vector- and complex-field quantities, and fractional dimensional exponents |
+| `affine/`    | `quantity_point`: offset units, user-defined absolute/relative origins    |
+| `generic/`   | templates over references and representation types, user-defined representation types, dimensionless quantities and angles |
+| `text/`      | quantity text output: the same workload printed through `printf`, `operator<<`, `std::format` and `std::println`, plus the format-spec grammar in depth |
+| `systems/`   | **defining** units rather than consuming them: named and derived units, prefixes, awkward magnitudes, a quantity tree to hang them on |
+| `constants/` | computing **with** measured constants: each is a unit whose magnitude is an arbitrary rational, so every product of two is a derived unit the framework has never seen and every conversion is magnitude arithmetic rather than a lookup |
+| `scaling/`   | the **slope**: the same work at 16, 64 and 256 steps, so cost-per-operation falls out of the difference. `narrow_*` reuses five quantity types (a production file's shape), `broad_*` composes a distinct derived unit per step (what grows the instantiation table) |
+| `umbrella/`  | bare umbrella-header inclusion cost — **churn-expected**: these grow when systems legitimately grow and are excluded from the framework-regression alarm. Includes per-chapter ISQ umbrellas (space_and_time, mechanics, …), read as marginal diffs since chapters include their dependencies |
+| `control/`   | `core_only`: the framework intercept — including the core machinery that defines nothing. Every umbrella row and per-entity price is read against this number |
 
 Every workflow is compiled in each of three configurations from **one** source, using the two-macro
 preamble mp-units' own examples use — `MP_UNITS_IMPORT_STD` selects `import std;` over standard

@@ -2441,6 +2441,160 @@ cheap to measure. Neither was guessable: the mechanism looked like symbol_text c
 0.03 s), and the subset looked like a frequency cut (which would have shipped `kHz` without `MHz`).
 
 
+## 24. CODATA: what a measured constant costs, and where the bill actually lands
+
+The generated CODATA system (549 constant definitions over three adjustments) is the first thing in
+the library whose cost is dominated by **magnitudes** rather than by unit diversity. `scaling/broad`
+deliberately holds magnitudes fixed - an earlier version scaled them and ~12% of its slope turned out
+to be prime factorization rather than the axis it exists to measure (§13) - so nothing in the corpus
+could see this until now. Four workflows were added: three nested umbrella includes
+(`codata_lean_umbrella` = the 25 essential constants, `codata_2022_umbrella` = one full adjustment,
+`codata_umbrella` = all three) plus `constants/codata_expressions`, which includes the lean tier and
+computes with it. Configuration throughout: clang++-21, `-std=c++23`, libc++, `-O2 -DNDEBUG`,
+header-only, counts from `-ftime-trace -ftime-trace-granularity=0`, wall time best-of-3 on a busy
+machine (quoted only where the ratio is larger than the noise by an order of magnitude).
+
+| TU | instantiations | const evals | fn decls | wall |
+|---|---:|---:|---:|---:|
+| floor: `si/units.h` + `si/constants.h` + `codata/adopted_values.h` | 7669 | 29219 | - | - |
+| `codata/codata2022_essential.h` (25 definitions) | 12776 | 48831 | 11658 | 2.10 s |
+| `codata/codata2022.h` (191) | 36756 | 151132 | 25802 | 5.79 s |
+| `codata.h` (549, three adjustments) | 67529 | 294841 | 45675 | 11.35 s |
+| `si/core.h`, for scale | 7000 | 26628 | 8272 | 1.41 s |
+| `si.h`, for scale | 9590 | 37790 | 8833 | 1.78 s |
+
+**A constant is the most expensive thing the library defines, and it gets cheaper the more of them
+you define.** The marginal cost per definition falls monotonically: **204** for the essential 25,
+**144** for the other 166 of the 2022 adjustment, **86** for the 358 definitions of 2014 and 2018 on
+top of it. That gradient is the finding. Against §12's per-definition scale - 1 instantiation for a
+base unit, 12.6 for a prefixed one, 114.2 for a derived one - even the cheapest constant costs more
+than a derived unit, because it *is* a derived unit plus a 10-15 digit rational magnitude plus a
+second magnitude for its standard uncertainty. What the later adjustments get for free is the unit
+expression: `J/T`, `m³ kg⁻¹ s⁻²` and the rest were already composed by 2022, and re-measuring the same
+physical constant only mints new magnitudes. So **86 is roughly the price of two magnitudes** and the
+difference up to 204 is the unit expression and the one-time framework machinery.
+
+**The header's own claim is off by a factor of 35.** `codata2022_essential.h` says the full table
+"costs two orders of magnitude more to compile" than the essential tier. Measured: **2.9x** on
+instantiations and 2.8x on wall time (5.7x if you count only what each adds over the floor). The tier
+split is still correct - 2.9x is a large multiple of a large number - but the sentence describes the
+library as it was before §21 gave `find_first_factor` a Pollard's rho path, when a full table was a
+`-fconstexpr-loop-limit` failure rather than a slow compile. A perf claim in a shipped header ages
+exactly as badly as a perf claim anywhere else.
+
+**Where the bill lands is a packaging decision, not a cost.** Under headers, a TU that never includes
+`codata.h` pays nothing for it: that is the whole reason the constants are a system of their own
+rather than part of `si`. Under **modules** that guarantee is gone, because `mp-units-systems.cpp`
+includes the codata umbrella, so the whole table is in the `mp_units.systems` BMI and every consumer
+of `import mp_units;` pays for it. Building that interface unit with and without the include:
+
+| `mp_units.systems` BMI | instantiations | fn decls | on disk | build |
+|---|---:|---:|---:|---:|
+| as shipped | 98814 | 66293 | 156 MB | 19.3 s |
+| without `#include <mp-units/systems/codata.h>` | 45907 | 33408 | 83 MB | 9.0 s |
+
+**CODATA is 54% of mp-units' systems module interface** - it doubles the BMI's build time and its size
+on disk for constants most consumers never name. The interface build is paid once per configuration
+rather than per TU, which is the argument for not panicking; the counter-argument is that this is
+precisely the cost the header split was designed to avoid, and it came back the moment the same
+sources were packaged as a module. A separate `mp_units.codata` module unit would restore the split
+under modules; that is a library decision, and this is the number it should be made against.
+
+**The consumer side of the same story** is `constants/codata_expressions`: 21995 instantiations for
+the lean tier plus `si.h` plus twelve expressions (photon energy, de Broglie wavelength, cyclotron
+frequency, Newtonian pull, thermal energy both per particle and per mole, two dimensionless ratios of
+constants, and two quantities expressed *in* a constant as their unit). Against the same includes
+without the expressions that is roughly 6100 instantiations for twelve expressions, ~500 each - an
+order of magnitude above the 3.0/step that `scaling/narrow` charges for reusing warm quantity types,
+because every product of two constants is a derived unit the framework has never seen and every
+conversion out of one is magnitude arithmetic rather than a table lookup. That is the axis this
+category exists to hold.
+
+
+## 25. Red means slower: the basis-aware gate, the entity census, and the price list
+
+The gate had a structural false positive: every `umbrella/` workflow measures raw header inclusion,
+so the library ADDING a unit tripped the same band as the library GETTING SLOWER, and the only remedy
+was rebaselining - which blesses whatever else moved in the same commit. The fix is to change what
+the gated number IS, per workflow, and the gate table now names it in a `basis` column. Configuration
+throughout: clang++-21, `-std=c++23`, libc++, counts from the usual traced compile, everything below
+recorded at `a742af8c4` (v2.5.0-710), the same commit the previous baselines described.
+
+**The census: count definitions from the compiler, not from the source.** Defining a unit, spec or
+constant derives a struct from one of five scaffolding class templates, and clang emits exactly one
+`InstantiateClass` event per distinct specialization of them - verified on six umbrella TUs, events
+== distinct every time - so counting distinct `detail` strings in the trace the suite already parses
+is bit-deterministic and free. It also counts what the compiler PAYS rather than what the source
+spells: `si.h` spells 24 prefix templates and instantiates 673 prefixed units for the symbol matrix,
+and a grep would report the former. `update` derives per-kind prices from workflow pairs whose
+include sets differ in almost nothing but one kind (`RATE_AXES`, solved in order so an impure axis
+subtracts the kinds priced before it), and records them beside the numbers they price.
+
+**The include twin: subtract the workflow's own preamble.** For every workflow with a body,
+`measure_counts` compiles an empty-main TU with the identical include preamble - once per distinct
+include set, 21 twins for 43 workflows - and the gate reads workflow minus twin. A system header
+gaining entities moves both sides equally and cancels, so the `use` basis prices only the code the
+workflow itself writes. The subtraction is exact, and it sharpened the corpus for free: the four
+`text/` workflows now gate on the printing facility ALONE (printf 42, ostream 167, println 1894,
+std::format 2019 instantiations - the shared workload lives in the twin and cancels), and the
+scaling series' use-costs reproduce its slopes to the digit (broad: (31851-1855)/240 = 125.0/step).
+Umbrellas, which ARE their include sets, gate on the `residual` instead: baseline plus census growth
+priced at the recorded rates, equal to the plain total whenever the census did not move. Floors were
+re-derived because the smallest gated number fell from 8269 to 42: instantiations 8, constant
+evaluations and declarations 16 - set where the corpus says movement stops meaning anything (§22
+measured 2-12 constant evaluations of drift on arms that moved nothing else).
+
+**The price list.** Every `check` and single-ref `counts` now opens with the corpus reduced to what
+one thing costs, because that is the question every table below it is evidence for:
+
+| what one thing costs | instantiations |
+|---|---:|
+| include the core framework (defines nothing) | 2556 |
+| define one prefixed unit | 3.2 |
+| define one quantity spec (shallowest chapter) | 49.8 |
+| define one named unit | 62.0 |
+| define one measured constant (repeat adjustment) | 91.9 |
+| compose one more distinct derived unit in user code | 125.0/step |
+| one more line reusing warm quantity types | 3.0/step |
+
+**The ISQ chapters answer §23's open question, and the answer is that specs are not one price.**
+Chapters include their dependency chapters, so each one's own cost is its umbrella minus the deepest
+chapter it includes:
+
+| chapter (over its dependencies) | own specs | inst/spec | const evals/spec | fn decls/spec |
+|---|---:|---:|---:|---:|
+| light_and_radiation (over electromagnetism) | 17 | 34.5 | 139 | 19.0 |
+| space_and_time (over core) | 56 | 49.8 | 181 | 23.1 |
+| information_science (over mechanics) | 13 | 59.2 | 253 | 33.8 |
+| atomic_and_nuclear_physics (over core) | 29 | 59.3 | 216 | 23.6 |
+| thermodynamics (over mechanics) | 32 | 60.4 | 237 | 31.8 |
+| electromagnetism (over mechanics) | 69 | 111.6 | 436 | 50.3 |
+| mechanics (over space_and_time) | 43 | 119.1 | 467 | 57.6 |
+
+Mechanics and electromagnetism charge 2-3x the other chapters PER SPEC, on all three metrics at
+once, and attribution between the space_and_time and mechanics umbrellas names the mechanism: the
+quantity-equation pipeline. A spec that is a plain hierarchy node (`height : length`) costs ~50; a
+spec that carries an equation (`force = mass * acceleration`) additionally runs
+`try_extract_common_base` (+178 across the chapter), the `type_list_map`/`merge_sorted` cluster
+(+172/+144/+127), `expr_simplify` (+109) and `are_ingredients_convertible` (+87) at definition time
+- §17's ingredient-matcher cluster, now with a per-definition price on it. The same diff bills
+`std::__check_pair_construction` +120, `std::tuple_element` +96 and `std::optional` +84 to a TU that
+names none of them: libc++'s pair/optional SFINAE machinery, paid per equation, which a lightweight
+internal struct in that consteval path would avoid.
+
+**The gate attributes its own failures now.** Anything past the advisory band makes `check`
+materialize the baseline's recorded sha and run the `attribute` machinery on the worst movers, so a
+red gate arrives with the entities that moved it. The redesign got a live validation the day it was
+built: the working tree had uncommitted spec additions, the old total-basis gate failed
+`umbrella/isq_umbrella` at +3.17%, and the attribution section correctly showed uniform
+`type_list`/`expr_fractions` machinery growth - the signature of MORE SPECS, not slower ones. Against
+the re-recorded baselines the SAME tree passes: the census-changes section reports
+`isq_light_and_radiation +18 quantity_spec: growth priced at +896 instantiations`, the residual gates
+at -1.06% (the added specs are plain hierarchy nodes, slightly cheaper than the recorded shallow
+rate), the median across use-bases is +0.0%, and the run exits green. One tree, both gates, and only
+the new one tells growth from slowness.
+
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That
@@ -2487,6 +2641,14 @@ is not the number that costs you* — which needs no mp-units background at all.
 ## Open threads
 
 - Re-record baselines at the `v2.6.0` tag once it exists.
+- **A `mp_units.codata` module unit** (§24): the header split keeps the constants off every TU that
+  does not ask for them, and packaging the same sources as a module hands the whole table to every
+  consumer of `import mp_units;` - 54% of the systems BMI, +10.3 s and +73 MB. The measurement is
+  done; the decision is the library's.
+- The `uncertain<T>` representation and `measurement_of` (`mp-units/utility/uncertain.h`) are what the
+  codata uncertainties are *for*, and no workflow uses them. A `generic/uncertain_representation.cpp`
+  next to `custom_representation.cpp` would price a representation type that carries a second value
+  through every operation - the corpus currently measures only representations that are one number.
 - The remaining magnitude cost after §20: with the class fully empty, the codata TU is down to
   4.6 s (gcc) / 7.2 s (clang), and what remains is `multiply_impl`'s head/tail recursion minting a
   specialization per suffix of every product plus NTTP pack construction (§17's cluster, now the
@@ -2505,8 +2667,10 @@ is not the number that costs you* — which needs no mp-units background at all.
   one that would let a level-2 user see what levels 4-6 are charging them.
 - ~~Whether the "lean header" advice still earns its ergonomic cost after the July perf work.~~
   Answered in §23: it does, but only after fixing a 25% per-symbol bug first, and the lean include
-  now carries the symbols most code wants (`si/core.h` 7037 vs `si.h` 9625). What remains open is
-  the same question for `isq.h`, whose domain-targeted sub-headers have never been measured.
+  now carries the symbols most code wants (`si/core.h` 7037 vs `si.h` 9625). ~~What remains open is
+  the same question for `isq.h`, whose domain-targeted sub-headers have never been measured.~~
+  Answered in §25: the seven chapter umbrellas are in the corpus, and a chapter costs 34.5-119.1
+  instantiations per spec depending on how many of its specs carry equations.
 - Single-pass `merge_many` in the value domain (§17): ceiling measured at ~700 instantiations, about
   2.8%, needing a value-key extractor that reproduces `expr_less` semantics. Deliberately not built,
   because the pairwise form is predicted a wash and the `type_list_unique` result is direct evidence for
