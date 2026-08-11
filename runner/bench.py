@@ -1027,10 +1027,16 @@ def price_list_rows(results):
     """The handful of numbers the corpus exists to produce, from one measured results dict - each
     denominated in something a reader can multiply by their own code: an include, an entity, a step.
 
-    Returned as (category, what, value, source) rows - category is one of "include", "define",
-    "use" or "ladder", which is how the compact report splits the list into one table per question
-    while `check` and `counts` keep printing it whole and `report` carries it in its payload."""
+    Returned as dicts - `cat` (include / define / define-bare / use / print / ladder), `what`, a
+    NUMERIC `value` with its `unit`, a non-numeric `note` and the `source` that measured it. The
+    value is numeric because a comparison run has to SUBTRACT these rows: a price list whose cells
+    are pre-formatted strings can be printed but not diffed, and what did this release do to the
+    price of a constant is the question a two-ref run exists to answer."""
     inst = GATED[0][1]
+
+    def row(cat, what, value, source, unit="", note=""):
+        return {"cat": cat, "what": what, "value": value, "unit": unit, "note": note,
+                "source": source}
 
     def val(name):
         v = results.get(name)
@@ -1039,7 +1045,7 @@ def price_list_rows(results):
     rows = []
     core = val("control/core_only")
     if core:
-        rows.append(["include", "the core framework (defines nothing)", str(core), "control/core_only"])
+        rows.append(row("include", "the core framework (defines nothing)", core, "control/core_only"))
     for name in sorted(n for n in results if n.startswith("umbrella/")):
         entry = results[name]
         if not isinstance(entry, dict) or not entry.get("census"):
@@ -1049,9 +1055,9 @@ def price_list_rows(results):
         if not entities or not isinstance(v, (int, float)):
             continue
         dominant = max(entry["census"], key=entry["census"].get)
-        over_core = f" ({(v - core) / entities:.1f}/entity over core)" if core and v > core else ""
-        rows.append(["include", f"{name.removeprefix('umbrella/').removesuffix('_umbrella')} - "
-                     f"{entities} entities, mostly {dominant}", f"{v}{over_core}", name])
+        rows.append(row("include", f"{name.removeprefix('umbrella/').removesuffix('_umbrella')} - "
+                        f"{entities} entities, mostly {dominant}", v, name,
+                        note=f"({(v - core) / entities:.1f}/entity over core)" if core and v > core else ""))
     # "As the system ships one": these rates price an entity WITH its ecosystem - an SI named unit
     # brings its symbol table, a CODATA constant its uncertainty payload. The synthetic define_*
     # slope rows price the bare definition; the difference between the two is the ecosystem.
@@ -1059,8 +1065,8 @@ def price_list_rows(results):
              "quantity_spec": "quantity spec (ISQ)", "named_unit": "named unit (SI)"}
     for kind, rate in entity_rates(results, inst).items():
         lo, hi = next((l, h) for k, l, h in RATE_AXES if k == kind)
-        rows.append(["define", nouns.get(kind, kind), f"{rate:.1f}",
-                     f"{hi.split('/', 1)[1]} minus {lo.split('/', 1)[1]}"])
+        rows.append(row("define", nouns.get(kind, kind), rate,
+                        f"{hi.split('/', 1)[1]} minus {lo.split('/', 1)[1]}"))
     slopes = slope_from(results, inst)
     for cat, shape, label in (
             ("use", "broad", "each distinct derived quantity composed (simple quantities)"),
@@ -1071,25 +1077,56 @@ def price_list_rows(results):
             ("define-bare", "define_specs", "quantity spec (ISQ)"),
             ("define-bare", "define_constants", "measured constant (CODATA)")):
         if shape in slopes:
-            rows.append([cat, label, f"{slopes[shape]:.1f}/step", f"scaling/{shape} slope"])
+            rows.append(row(cat, label, round(slopes[shape], 1), f"scaling/{shape} slope", unit="/step"))
     for facility, wf in (("std::printf", "text/output_printf"), ("operator<<", "text/output_ostream"),
                          ("std::format", "text/output_format"), ("std::println", "text/output_println")):
         if (u := use_cost_of(results, wf)) is not None:
-            rows.append(["print", f"via `{facility}`", f"{u:,}", wf])
+            rows.append(row("print", f"via `{facility}`", u, wf))
 
     ladder = [use_cost_of(results, f"safety/{r}") for r in ("raw_doubles", "simple_quantities",
                                                             "typed_quantities", "affine_quantities")]
     if all(v is not None for v in ladder):
         raw, simple, typed, affine = ladder
-        rows += [["ladder", "write the safety-ladder profile with raw doubles", str(raw),
-                  "safety/raw_doubles"],
-                 ["ladder", "the same at safety levels 1-4 (simple quantities)",
-                  f"{simple} (+{simple - raw})", "safety/simple_quantities"],
-                 ["ladder", "add level 5, quantity safety (typed quantities)",
-                  f"{typed} (+{typed - simple})", "safety/typed_quantities"],
-                 ["ladder", "add level 6, point/delta safety (affine)",
-                  f"{affine} (+{affine - typed})", "safety/affine_quantities"]]
+        rows += [row("ladder", "write the safety-ladder profile with raw doubles", raw,
+                     "safety/raw_doubles"),
+                 row("ladder", "the same at safety levels 1-4 (simple quantities)", simple,
+                     "safety/simple_quantities", note=f"(+{simple - raw})"),
+                 row("ladder", "add level 5, quantity safety (typed quantities)", typed,
+                     "safety/typed_quantities", note=f"(+{typed - simple})"),
+                 row("ladder", "add level 6, point/delta safety (affine)", affine,
+                     "safety/affine_quantities", note=f"(+{affine - typed})")]
     return rows
+
+
+def price_rows(payload_rows_or_none):
+    """Price rows as dicts, whatever shape the payload carries.
+
+    Runs recorded before the numeric schema stored (what, value, source) or (cat, what, value,
+    source) with the value pre-formatted; a comparison against such a run reads the number back out
+    of the text rather than losing the row - `report --previous` is fed artifacts up to weeks old."""
+    out = []
+    for r in payload_rows_or_none or []:
+        if isinstance(r, dict):
+            out.append(r)
+            continue
+        cat, what, value, source = r if len(r) == 4 else ("", *r)
+        text = str(value)
+        m = re.match(r"-?[\d,]+(?:\.\d+)?", text)
+        out.append({"cat": cat, "what": what,
+                    "value": float(m.group().replace(",", "")) if m else None,
+                    "unit": "/step" if "/step" in text else "",
+                    "note": text[m.end():].strip() if m else "", "source": source})
+    return out
+
+
+def fmt_price(r):
+    """A price row's number as the page shows it: no decimals when it is a whole count, one when the
+    measurement is a rate, then the annotation the row carried."""
+    v = r.get("value")
+    if not isinstance(v, (int, float)):
+        return "n/a"
+    shown = f"{v:,.1f}" if (r.get("unit") or float(v) != int(v)) else f"{int(v):,}"
+    return " ".join(x for x in (shown + (r.get("unit") or ""), r.get("note")) if x)
 
 
 def use_cost_of(results, name):
@@ -1137,8 +1174,8 @@ def price_list_lines(results, tc: Toolchain):
     order = {"include": 0, "define": 1, "define-bare": 2, "use": 3, "print": 4, "ladder": 5}
     verbs = {"include": "include ", "define": "define one ", "define-bare": "define one bare ",
              "use": "", "print": "print quantities ", "ladder": ""}
-    shown = [[verbs[cat] + what, value, source]
-             for cat, what, value, source in sorted(rows, key=lambda r: order[r[0]])]
+    shown = [[verbs[r["cat"]] + r["what"], fmt_price(r), r["source"]]
+             for r in sorted(rows, key=lambda r: order[r["cat"]])]
     return [f"### price list - `{config_key(tc)}`", "",
             *markdown_table(["what one thing costs", "instantiations", "measured from"], shown),
             "", PRICE_LIST_NOTE, ""]
@@ -1172,15 +1209,23 @@ def census_growth_lines(details_by_metric, baseline, results):
 
 
 def entity_diff_lines(left, right, label_left, label_right, top, min_delta=1):
-    """Markdown for an entity-level diff of two instantiation tallies, biggest mover first."""
+    """Markdown for an entity-level diff of two instantiation tallies, ranked by CONTRIBUTION to the
+    change: increases first when the total grew, decreases first when it fell.
+
+    Always ranking growth was right for a gate (where the total grew by definition) and wrong for a
+    comparison run: attributing a price that dropped 37% listed the few entities that went UP, which
+    explains nothing about why it dropped."""
+    total = sum(right.values()) - sum(left.values())
+    sign = -1 if total >= 0 else 1
     rows = []
-    for entity in sorted(set(left) | set(right), key=lambda k: -(right.get(k, 0) - left.get(k, 0))):
+    for entity in sorted(set(left) | set(right),
+                         key=lambda k: sign * (right.get(k, 0) - left.get(k, 0))):
         a, b = left.get(entity, 0), right.get(entity, 0)
         if abs(b - a) >= min_delta:
             rows.append([entity, str(a), str(b), f"{b - a:+d}"])
-    total = sum(right.values()) - sum(left.values())
     lines = [f"Total instantiations {sum(left.values())} -> {sum(right.values())} ({total:+d}). Entities "
-             f"below are templates with their arguments collapsed, ranked by how much they moved.", ""]
+             f"below are templates with their arguments collapsed, ranked by how much of that change "
+             f"they account for.", ""]
     if not rows:
         return lines + [f"No entity moved by at least {min_delta} instantiation(s): the two measurements "
                         f"instantiate the same templates the same number of times.", ""]
@@ -1595,6 +1640,32 @@ def cmd_attribute(args):
     print("\n".join(entity_diff_lines(left, right, labels[0], labels[1], args.top, args.min_delta)))
 
 
+def attribute_price_mover(args, tc: Toolchain, repos, refs, source):
+    """Entity-level diff for the workflow behind the biggest price change.
+
+    A comparison run already has both refs materialized, so the "why" of its headline number costs
+    two traced compiles and nobody has to rerun anything by hand. Only the workflow-backed rows can
+    be attributed - a rate derived from a pair of umbrellas names an axis, not a file."""
+    name = source if source in select_workflows(detect_version(repos[refs[-1]]), None, tc.std) else None
+    if not name or not tc.is_clang:
+        return []
+    old_ref, new_ref = refs[0], refs[-1]
+    sels = {r: select_workflows(detect_version(repos[r]), [name], tc.std) for r in (old_ref, new_ref)}
+    src_old, src_new = sels[old_ref].get(name), sels[new_ref].get(name)
+    if src_old is None or src_new is None:
+        return []
+    with tempfile.TemporaryDirectory() as tmp:
+        ctxs = {r: build_modules(repos[r], tc, Path(tmp) / f"bmi-{i}")
+                for i, r in enumerate((old_ref, new_ref))}
+        try:
+            then = trace_entities(repos[old_ref], tc, src_old, ctxs[old_ref], Path(tmp))
+            now = trace_entities(repos[new_ref], tc, src_new, ctxs[new_ref], Path(tmp))
+        except subprocess.CalledProcessError:
+            return []
+    return [f"### why `{name}` moved", "",
+            *entity_diff_lines(then, now, short_ref(old_ref), short_ref(new_ref), top=10)]
+
+
 def cmd_report(args):
     """Measure every metric this toolchain can produce and emit a markdown report plus JSON.
     Counts come from a traced compile, time and memory from an untraced one - tracing inflates
@@ -1641,7 +1712,17 @@ def cmd_report(args):
                "metrics": metrics}
     # The page is what a human reads; the full tables are for the artifact and for diffing. Emitting
     # the page to stdout keeps `report > page.md` the natural CI idiom.
-    print(render_compact([payload]))
+    extra = []
+    if len(refs) > 1 and args.attribute_top:
+        rows = price_rows((payload.get("price_list") or {}).get(refs[-1]))
+        before = {(r["cat"], r["what"]): r for r in price_rows((payload.get("price_list") or {}).get(refs[0]))}
+        moved = sorted(((abs((r["value"] - b["value"]) / b["value"]), r["source"])
+                        for r in rows if (b := before.get((r["cat"], r["what"])))
+                        and isinstance(r["value"], (int, float)) and isinstance(b["value"], (int, float))
+                        and b["value"] and abs(r["value"] - b["value"]) >= 0.05), reverse=True)
+        if moved:
+            extra = attribute_price_mover(args, tc, repos, refs, moved[0][1])
+    print(render_compact([payload], extra_sections=extra))
     if args.full_output:
         full = Path(args.full_output)
         full.parent.mkdir(parents=True, exist_ok=True)
@@ -1681,6 +1762,13 @@ def config_order(key):
     family = family_of(key)
     return ("-modules" in key, FAMILIES.index(family) if family in FAMILIES else len(FAMILIES),
             version_of(key), key)
+
+
+def short_ref(ref):
+    """A ref as a reader can use it: a full sha becomes its first nine characters, everything else
+    stays as typed. `attribute` learned this the same way - a 40-character column header makes a
+    table unreadable, and the page quotes refs in prose as well as in headings."""
+    return ref[:9] if len(ref) >= 20 and all(c in "0123456789abcdef" for c in ref.lower()) else ref
 
 
 def refs_oldest_first(payloads):
@@ -1964,7 +2052,7 @@ def findings(cells, keys, refs, tags=None):
             worst = max(moved.items(), key=lambda kv: kv[1])
             tail = (f"The largest growth is `{worst[0]}` at {worst[1]:+.0%}." if worst[1] > 0.005
                     else "Nothing in the corpus grew.")
-            out.append(f"Compiling the same code against `{new}` instead of `{old}` needs "
+            out.append(f"Compiling the same code against `{short_ref(new)}` instead of `{short_ref(old)}` needs "
                        f"**{abs(median):.0%} {'fewer' if median < 0 else 'more'}** template "
                        f"instantiations for a typical workflow (median across {len(moved)}). The largest "
                        f"improvement is `{best[0]}` at {best[1]:+.0%}. {tail}")
@@ -1981,8 +2069,8 @@ def findings(cells, keys, refs, tags=None):
             dmedian = statistics.median(dmoved.values())
             if abs(dmedian) > 0.005 and abs(dmedian - median) > 0.005:
                 out.append(f"A typical workflow declares **{abs(dmedian):.1%} "
-                           f"{'fewer' if dmedian < 0 else 'more'} functions** against `{new}` than "
-                           f"against `{old}` (median across {len(dmoved)}), while instantiating "
+                           f"{'fewer' if dmedian < 0 else 'more'} functions** against `{short_ref(new)}` than "
+                           f"against `{short_ref(old)}` (median across {len(dmoved)}), while instantiating "
                            f"{abs(median):.1%} {'fewer' if median < 0 else 'more'} templates. Those are "
                            f"different kinds of work and they move independently: a function declared "
                            f"inside a class template is declared again by every specialization of that "
@@ -2121,7 +2209,7 @@ def findings(cells, keys, refs, tags=None):
                 if (key, ref) not in row:
                     absent.setdefault(ref, set()).add(name)
     if absent:
-        per_ref = ", ".join(f"{len(names)} at `{ref}`" for ref, names in
+        per_ref = ", ".join(f"{len(names)} at `{short_ref(ref)}`" for ref, names in
                             sorted(absent.items(), key=lambda kv: refs.index(kv[0]) if kv[0] in refs else 0))
         out.append(f"Some workflows do not exist on every ref measured ({per_ref}) - their `// REQUIRES:` "
                    f"floor is newer than that ref, so they read `n/a` and are excluded from both sides of "
@@ -2214,7 +2302,7 @@ def range_summary(payloads, refs):
             lines.append(row)
     if not lines:
         return None, []
-    md = [f"## What `{old}` -> `{new}` costs, per configuration", ""]
+    md = [f"## What `{short_ref(old)}` -> `{short_ref(new)}` costs, per configuration", ""]
     md += markdown_table(["configuration", "instantiations", "declarations", "broad slope", "wall time"],
                          [[r["key"], *cols] for r, cols in zip(lines, comparison_rows(lines))])
     md += ["", f"Corpus totals over the workflows BOTH refs compile (`bmi/*` excluded"
@@ -2245,14 +2333,19 @@ def range_summary(payloads, refs):
         if worst["inst"][2] < 0:
             findings_out.append(
                 f"Every one of the {len(counted)} configuration(s) that produce counts needs fewer "
-                f"instantiations for `{new}` than for `{old}`, from {worst['inst'][2]:+.1%} on "
-                f"`{worst['key']}` to {best['inst'][2]:+.1%} on `{best['key']}`, so this is the library "
-                f"changing and not one toolchain's quirk.{tail}")
+                f"instantiations for `{short_ref(new)}` than for `{short_ref(old)}`, "
+                # One configuration measured is one number, not a range from itself to itself.
+                + (f"by {best['inst'][2]:+.1%} on `{best['key']}`."
+                   if worst["key"] == best["key"] else
+                   f"from {worst['inst'][2]:+.1%} on `{worst['key']}` to {best['inst'][2]:+.1%} on "
+                   f"`{best['key']}`, so this is the library changing and not one toolchain's quirk.")
+                + tail)
         else:
             findings_out.append(
                 f"The corpus total did not move the same way everywhere: {best['inst'][2]:+.1%} on "
                 f"`{best['key']}` but {worst['inst'][2]:+.1%} on `{worst['key']}`, so a single number for "
-                f"`{old}` -> `{new}` would be wrong for someone - read the row for your configuration."
+                f"`{short_ref(old)}` -> `{short_ref(new)}` would be wrong for someone - read the row "
+                f"for your configuration."
                 f"{tail}")
     return "\n".join(md), findings_out
 
@@ -2374,11 +2467,6 @@ def run_over_run(payloads, previous):
     return "\n".join(md), [finding] if finding else []
 
 
-def price_row_4(row):
-    """Payloads written before categories carry (what, value, source) rows; normalize to 4 fields."""
-    return row if len(row) == 4 else ["", *row]
-
-
 def price_list_section(payloads, refs):
     """One price-list table per configuration that carried one, matched by row label across refs.
 
@@ -2392,11 +2480,12 @@ def price_list_section(payloads, refs):
             continue
         values, order = {}, []
         for ref in cols:
-            for _cat, what, value, _source in map(price_row_4, per_ref[ref]):
+            for r in price_rows(per_ref[ref]):
+                what = r["what"]
                 if what not in values:
                     values[what] = {}
                     order.append(what)
-                values[what][ref] = value
+                values[what][ref] = fmt_price(r)
         header = ["what one thing costs (instantiations)", *(cols if len(cols) > 1 else ["value"])]
         rows = [[what, *[values[what].get(r, "n/a") for r in cols]] for what in order]
         lines += [f"### price list - `{key}`", "", *markdown_table(header, rows), ""]
@@ -2487,7 +2576,75 @@ def config_family_rows(keys):
     return ordered
 
 
-def render_compact(payloads, previous=None):
+def price_diff_section(payload, refs, key):
+    """The price list as a DIFF: what one thing cost on the old ref against the new one.
+
+    This is what a comparison run is for. A single-ref page answers "what does using this cost"; two
+    refs answer "what did these changes do to that cost", and the answer belongs in the same
+    denominations - per include, per entity, per step - because those are what a release note can
+    quote. Rows that did not move are COUNTED, not listed: a release that changed two prices should
+    read as two lines, not as a table where the reader hunts for the difference."""
+    old, new = refs[0], refs[-1]
+    per_ref = payload.get("price_list") or {}
+    if old not in per_ref or new not in per_ref:
+        return [], []
+    before = {(r["cat"], r["source"]): r for r in price_rows(per_ref[old])}
+    after = {(r["cat"], r["source"]): r for r in price_rows(per_ref[new])}
+    order = {"include": 0, "define": 1, "define-bare": 2, "use": 3, "print": 4, "ladder": 5}
+    verbs = {"include": "include ", "define": "define one ", "define-bare": "define one bare ",
+             "use": "", "print": "print quantities ", "ladder": ""}
+    moved, flat, appeared = [], 0, []
+    for k in sorted(set(before) | set(after), key=lambda k: (order.get(k[0], 9), k[1])):
+        a, b = before.get(k), after.get(k)
+        # The label comes from the side that exists, and names the OLD spelling when it changed - an
+        # umbrella whose census moved says so here instead of pretending to be a different row.
+        human = dict(PAGE_INCLUDE_ROWS).get(k[1])
+        label = human or (verbs.get(k[0], "") + (b or a)["what"])
+        if a and b:
+            # An umbrella's label carries its census, so a census move must read as a census move
+            # rather than as two unrelated rows or as a mangled label.
+            ea, eb = (re.search(r"(\d+) entities", r["what"]) for r in (a, b))
+            if ea and eb and ea.group(1) != eb.group(1):
+                label += f" ({ea.group(1)} -> {eb.group(1)} entities)"
+        if a is None or b is None:  # a price the other ref cannot have: a new workflow or a dropped one
+            appeared.append(f"{label} ({'new' if a is None else 'gone'})")
+            continue
+        va, vb = a.get("value"), b.get("value")
+        if not isinstance(va, (int, float)) or not isinstance(vb, (int, float)):
+            continue
+        if abs(vb - va) < 0.05:  # the printed precision: below it, nothing moved
+            flat += 1
+            continue
+        rel = (vb - va) / va if va else None
+        moved.append((abs(rel) if rel is not None else 0,
+                      [label, fmt_price(a).split(" (")[0], fmt_price(b).split(" (")[0],
+                       f"**{rel:+.1%}**" if rel is not None else f"{vb - va:+,.1f}"]))
+    if not moved and not appeared:
+        return [], [f"Not one price moved between `{short_ref(old)}` and `{short_ref(new)}` on "
+                    f"`{key}` - all {flat} of them "
+                    f"are identical, so this release changed what the library COSTS not at all."]
+    rows = [r for _, r in sorted(moved, key=lambda m: -m[0])]
+    lines = [f"## What changed in the price list - `{key}`", "",
+             *markdown_table(["what one thing costs", short_ref(old), short_ref(new), "change"],
+                             rows), ""]
+    tail = f"{flat} price(s) did not move and are not listed."
+    if appeared:
+        tail += (f" {len(appeared)} exist on only one ref (a workflow added or removed): "
+                 + ", ".join(appeared[:4]) + ("..." if len(appeared) > 4 else "") + ".")
+    lines += ["> Every row is the same measurement on both refs, in the same denomination - per "
+              "include, per entity, per step - so a change here is a change in what the library "
+              "charges its users. " + tail, ""]
+    findings_out = []
+    if rows:
+        biggest = rows[0]
+        findings_out.append(f"The biggest price change from `{short_ref(old)}` to `{short_ref(new)}` "
+                            f"is **{biggest[0]}**: "
+                            f"{biggest[1]} -> {biggest[2]} ({biggest[3].strip('*')}). "
+                            f"{len(rows)} price(s) moved, {flat} did not.")
+    return lines, findings_out
+
+
+def render_compact(payloads, previous=None, extra_sections=()):
     """The page: what changed, one row per configuration, the price list split by question, the
     modules interfaces, and the safety ladder - two screens that answer "what does using this cost
     and did it move", with every per-workflow cell left to the full report in the artifact.
@@ -2501,15 +2658,32 @@ def render_compact(payloads, previous=None):
     inst_cells = cells.get("instantiations", {})
     time_cells = cells.get("time_ms", {})
     info = next((p["refs"][newest] for p in payloads if newest in p.get("refs", {})), {}) if newest else {}
-    lines = [f"# Compile cost - mp-units {info.get('mp_units_describe', newest or '?')} "
+    lines = [f"# Compile cost - mp-units {info.get('mp_units_describe', short_ref(newest or '?'))} "
              f"({len(keys)} configuration{'s' if len(keys) != 1 else ''})", ""]
 
+    # The price list speaks for ONE configuration, so it must be the most representative one: the
+    # newest full-corpus plain build that produced counts - how the library is consumed today, on the
+    # best compiler available - not whichever payload happens to sort first (that was clang 17).
+    candidates = [(k, p) for k, p in payload_rows(payloads) if newest in (p.get("price_list") or {})]
+    price_payload = next(
+        (p for _, p in sorted(candidates, reverse=True,
+                              key=lambda kp: (not kp[1].get("subset"),
+                                              ("-modules" not in kp[0] and "-importstd" not in kp[0]),
+                                              version_of(kp[0])))), None)
+    price_key = (price_payload.get("config_key") or price_payload["cxx"]) if price_payload else None
+    # A comparison run's headline IS the price diff, so it is computed before the story it leads.
+    price_diff_lines, price_diff_findings = ([], [])
+    if price_payload and len(refs) > 1:
+        price_diff_lines, price_diff_findings = price_diff_section(price_payload, refs, price_key)
+
     tags = {(p.get("config_key") or p["cxx"]): p.get("machine_tag") for p in payloads}
-    story = comparison_findings + findings(cells, keys, refs, tags)
+    story = price_diff_findings + comparison_findings + findings(cells, keys, refs, tags)
     if story:
         lines += ["## What changed", "", *[f"{i}. {s}" for i, s in enumerate(story, 1)], ""]
     if comparison_md:
         lines += [comparison_md, ""]
+    lines += price_diff_lines
+    lines += list(extra_sections)  # e.g. the entity diff behind the biggest price move
 
     # one row per configuration - full-corpus runs only, since the column is a corpus total
     full_keys = [(p.get("config_key") or p["cxx"]) for p in payloads if not p.get("subset")]
@@ -2536,7 +2710,7 @@ def render_compact(payloads, previous=None):
         # one the absolute picture across the fleet, which is what the page opens with either way.
         counted = len({w for w in inst_cells if not w.startswith(("bmi/", "include/"))})
         lines += [f"## Per configuration - all {counted} workflows"
-                  + (f", values for `{newest}`" if len(refs) > 1 else ""), "",
+                  + (f", values for `{short_ref(newest)}`" if len(refs) > 1 else ""), "",
                   *markdown_table(["configuration", "instantiations", "broad slope /step",
                                    "wall clock"], rows), "",
                   "> **Instantiations** count the templates the compiler stamps out for the whole corpus "
@@ -2553,19 +2727,10 @@ def render_compact(payloads, previous=None):
                   "indented under their compiler; the bars carry the cross-compiler comparison even "
                   "where rows are not adjacent.", ""]
 
-    # the price list, one table per question, from the newest gate-capable payload
-    # The price list speaks for ONE configuration, so it must be the most representative one: the
-    # newest plain build that produced counts - how the library is consumed today, on the best
-    # compiler available - not whichever payload happens to sort first (that was clang 17).
-    candidates = [(k, p) for k, p in payload_rows(payloads) if newest in (p.get("price_list") or {})]
-    price_payload = next(
-        (p for _, p in sorted(candidates, reverse=True,
-                              key=lambda kp: (not kp[1].get("subset"),
-                                              ("-modules" not in kp[0] and "-importstd" not in kp[0]),
-                                              version_of(kp[0])))), None)
+    # the price list itself: levels for the newest ref, one table per question
     if price_payload:
-        key = price_payload.get("config_key") or price_payload["cxx"]  # heading names its source
-        rows4 = [price_row_4(r) for r in price_payload["price_list"][newest]]
+        key = price_key  # heading names its source
+        rows4 = price_rows(price_payload["price_list"][newest])
         price_lines = []
 
         # INCLUDING - a curated ladder of include sets, small to large within each family. The page
@@ -2573,16 +2738,16 @@ def render_compact(payloads, previous=None):
         # the library grows, while the reader needs the shape of the cost, which one shallow chapter
         # against the whole of ISQ shows exactly as the codata tiers do. Every chapter still lives in
         # the artifact's full tables, still gates, and still prices the rates.
-        by_source = {s: (what, value) for _c, what, value, s in rows4 if _c == "include"}
+        by_source = {r["source"]: r for r in rows4 if r["cat"] == "include"}
         incl_rows = []
         for wf, label in PAGE_INCLUDE_ROWS:
             if wf not in by_source:
                 continue
-            what, value = by_source[wf]
-            iv = int(m.group()) if (m := re.match(r"\d+", value)) else None
-            entities = re.search(r"(\d+) entities", what)  # the generic row names the census
+            r = by_source[wf]
+            iv = int(r["value"]) if isinstance(r["value"], (int, float)) else None
+            entities = re.search(r"(\d+) entities", r["what"])  # the generic row names the census
             shown = label + (f" - {entities.group(1)} entities" if entities else "")
-            incl_rows.append([shown, iv, value[len(str(iv)):] if iv is not None else "",
+            incl_rows.append([shown, iv, (" " + r["note"]) if r["note"] else "",
                               time_cells.get(wf, {}).get((key, newest))])
         if incl_rows:
             imax = max((r[1] for r in incl_rows if r[1]), default=0)
@@ -2602,17 +2767,13 @@ def render_compact(payloads, previous=None):
         # DEFINING - one row per entity kind, cheapest first, with both prices side by side: what the
         # system charges for one as it ships it, and what the bare definition costs on its own. The
         # gap between the columns IS the ecosystem, which is the finding the two numbers exist for.
-        shipped = {what: v for c, what, v, _s in rows4 if c == "define"}
-        bare = {what: v for c, what, v, _s in rows4 if c == "define-bare"}
-        def as_float(v):
-            try:
-                return float(str(v).split("/")[0])
-            except ValueError:
-                return None
-        kinds = sorted(set(shipped) | set(bare), key=lambda k: as_float(shipped.get(k)) or 0)
+        shipped = {r["what"]: r for r in rows4 if r["cat"] == "define"}
+        bare = {r["what"]: r for r in rows4 if r["cat"] == "define-bare"}
+        kinds = sorted(set(shipped) | set(bare),
+                       key=lambda k: shipped[k]["value"] if k in shipped else 0)
         if kinds:
-            table = [[k, shipped.get(k, "n/a"),
-                      bare.get(k, "n/a").removesuffix("/step") if k in bare else "-"] for k in kinds]
+            table = [[k, fmt_price(shipped[k]) if k in shipped else "n/a",
+                      f"{bare[k]['value']:,.1f}" if k in bare else "-"] for k in kinds]
             price_lines += [f"### defining entities - `{key}`", "",
                             *markdown_table(["what one definition costs", "as its system ships it",
                                              "the bare definition"], table), "",
@@ -2642,16 +2803,15 @@ def render_compact(payloads, previous=None):
                 ("print", f"printing quantities - `{key}`", "output facility",
                  "> The `text/` family shares one workload header and differs only in the output "
                  "facility, so these differences price the facility alone. Use-cost, as above.")):
-            cat_rows = [r for r in rows4 if r[0] == cat]
+            cat_rows = [r for r in rows4 if r["cat"] == cat]
             if not cat_rows:
                 continue
-            table = [[what, value] for _c, what, value, _s in cat_rows]
+            table = [[r["what"], fmt_price(r)] for r in cat_rows]
             if cat == "use":
-                slopes_here = {s.split("/")[-1].removesuffix(" slope"): v
-                               for _c, _w, v, s in cat_rows if s.endswith(" slope")}
-                b, tb = slopes_here.get("broad"), slopes_here.get("typed_broad")
-                if b and tb:  # the pair exists to be subtracted; do it for the reader
-                    bf, tf = float(b.split("/")[0]), float(tb.split("/")[0])
+                slopes_here = {r["source"].split("/")[-1].removesuffix(" slope"): r["value"]
+                               for r in cat_rows if r["source"].endswith(" slope")}
+                bf, tf = slopes_here.get("broad"), slopes_here.get("typed_broad")
+                if bf and tf:  # the pair exists to be subtracted; do it for the reader
                     idx = next(i for i, r in enumerate(table) if "TYPED" in r[0]) + 1
                     table.insert(idx, ["\u2192 the level-5 tax per derived quantity",
                                        f"**+{tf - bf:.1f}/step, {tf:.1f} / {bf:.1f} = "
@@ -2660,7 +2820,9 @@ def render_compact(payloads, previous=None):
                             *markdown_table([what_col, "instantiations"], table), "", caption, ""]
 
         if price_lines:
-            lines += ["## Price list", "", *price_lines]
+            header = (f"## Price list - levels at `{short_ref(newest)}`" if len(refs) > 1
+                      else "## Price list")
+            lines += [header, "", *price_lines]
 
     # C++20 modules: the interfaces, then what consuming them buys
     lines += modules_compact_section(payloads, refs, cells)
@@ -2693,13 +2855,16 @@ def modules_compact_section(payloads, refs, cells):
         mem, inst = p["metrics"].get("peak_mib", {}), p["metrics"].get("instantiations", {})
         interfaces = [w for w in BMI_ORDER if isinstance(tm.get(w, {}).get(newest), (int, float))]
         if interfaces and not rows_bmi:
+            old_ref = refs[0] if len(refs) > 1 else None
             for w in interfaces:
                 iv = inst.get(w, {}).get(newest)
+                was = inst.get(w, {}).get(old_ref) if old_ref else None
                 rows_bmi.append([w.removeprefix("bmi/"),
                                  f"{tm[w][newest] / 1000:.1f} s",
                                  f"{disk.get(w, {}).get(newest, 0) or 0:.1f} MiB",
                                  f"{mem.get(w, {}).get(newest, 0) or 0:,.0f} MiB",
-                                 f"{iv:,}" if isinstance(iv, int) else "n/a"])
+                                 (f"{iv:,}" if isinstance(iv, int) else "n/a")
+                                 + (f" (was {was:,})" if isinstance(was, int) and was != iv else "")])
             def col(metric, combine=sum):
                 vals = [v for w in interfaces if isinstance((v := metric.get(w, {}).get(newest)),
                                                             (int, float))]
@@ -2768,36 +2933,50 @@ def ladder_compact_section(payloads, refs):
         return []
     plain, mod = pair
 
-    def t(payload, name):
-        v = payload["metrics"].get("time_ms", {}).get(name, {}).get(newest)
+    def t(payload, name, ref=None):
+        v = payload["metrics"].get("time_ms", {}).get(name, {}).get(ref or newest)
         return v if isinstance(v, (int, float)) else None
 
-    def use_inst(payload, name):
+    def use_inst(payload, name, ref=None):
+        ref = ref or newest
         inst = payload["metrics"].get("instantiations", {})
-        twin = (payload.get("twins") or {}).get(newest, {}).get(name)
-        v, tw = inst.get(name, {}).get(newest), inst.get(twin, {}).get(newest) if twin else None
+        twin = (payload.get("twins") or {}).get(ref, {}).get(name)
+        v, tw = inst.get(name, {}).get(ref), inst.get(twin, {}).get(ref) if twin else None
         return v - tw if isinstance(v, int) and isinstance(tw, int) else None
 
-    def twin_t(payload, name):
-        twin = (payload.get("twins") or {}).get(newest, {}).get(name)
-        return t(payload, twin) if twin else None
+    def twin_t(payload, name, ref=None):
+        twin = (payload.get("twins") or {}).get(ref or newest, {}).get(name)
+        return t(payload, twin, ref) if twin else None
 
     def bar_rows(value_of, ch, unit="", decimals=None):
         """One table's rows with bars scaled to the table's own maximum, shared across both
-        columns - the columns carry the same unit, and cross-column length comparison is the point."""
-        values = {(wf, i): value_of(side, wf)
+        columns - the columns carry the same unit, and cross-column length comparison is the point.
+
+        With two refs each cell becomes `old -> new`: the bar tracks the NEW value (the state the
+        reader is in) and the arrow carries what the release did to it."""
+        values = {(wf, i): value_of(side, wf, newest)
                   for _, wf in rungs for i, side in enumerate((plain, mod))}
         vmax = max((v for v in values.values() if isinstance(v, (int, float))), default=0)
-        return [[label, *[(bar(values[(wf, i)], vmax, 10, ch, decimals) + unit
-                           if values[(wf, i)] is not None else "n/a")
-                          for i in (0, 1)]] for label, wf in rungs]
+        rows = []
+        for label, wf in rungs:
+            cells = []
+            for i, side in enumerate((plain, mod)):
+                now = values[(wf, i)]
+                shown = (bar(now, vmax, 10, ch, decimals) + unit) if now is not None else "n/a"
+                if len(refs) > 1:
+                    was = value_of(side, wf, refs[0])
+                    if isinstance(was, (int, float)) and isinstance(now, (int, float)) and was != now:
+                        shown += f" (was {was:,.0f})"
+                cells.append(shown)
+            rows.append([label, *cells])
+        return rows
 
-    def use_t(payload, name):
+    def use_t(payload, name, ref=None):
         """Wall clock of the code the user wrote: the whole TU minus its inclusion twin. A difference
         of two best-of-K measurements, so a few milliseconds here is the noise floor, not a signal -
         but it keeps this table in the same unit as the two around it, and gives the raw-doubles rung
         a nonzero baseline that ratios can actually be taken against."""
-        whole, twin = t(payload, name), twin_t(payload, name)
+        whole, twin = t(payload, name, ref), twin_t(payload, name, ref)
         return max(0, whole - twin) if whole is not None and twin is not None else None
 
     incl = bar_rows(twin_t, "▒", " ms", decimals=0)
@@ -2806,7 +2985,7 @@ def ladder_compact_section(payloads, refs):
     # The counts stay beside the times: they are what the gate reads and the only exactly comparable
     # column, while the time is what the user waits for.
     for row, (_label, wf) in zip(use, rungs):
-        row.append(" -> ".join(f"{v:,}" if (v := use_inst(side, wf)) is not None else "n/a"
+        row.append(" -> ".join(f"{v:,}" if (v := use_inst(side, wf, newest)) is not None else "n/a"
                                for side in (plain, mod)))
     if all(row[1] == "n/a" for row in incl + total):
         return []
@@ -3026,6 +3205,9 @@ def main():
     r.add_argument("--full-output", metavar="MD",
                    help="write the complete per-workflow tables as markdown (the artifact copy; "
                         "stdout carries the readable page)")
+    r.add_argument("--attribute-top", type=int, default=1, metavar="N",
+                   help="on a two-ref run, diff instantiation events by entity for the workflow "
+                        "behind the biggest price change (default 1; 0 disables)")
     r.add_argument("--machine-tag", default="",
                    help="opaque label marking runs whose wall clocks may be compared with each "
                         "other; hostnames cannot do this (every CI runner reports the same name "

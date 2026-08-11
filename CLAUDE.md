@@ -65,6 +65,21 @@ payload pair sharing a `--machine-tag`. No Mermaid anywhere: bar-tables carry se
 per row, keep the number beside its bar, need no legend and cannot break with a renderer update.
 Every table's caption states what the metric IS and how it was MEASURED, at the point of use.
 
+A run measuring TWO REFS answers a different question - not "what does this cost" but "what did
+these changes do to that cost" - so the page reshapes rather than gaining a column. Its headline is
+the PRICE DIFF: `## What changed in the price list` puts every price the run measured on both refs
+side by side (`define one measured constant 91.9 -> 88.1 (-4.1%)`), ranked by how much it moved,
+with unmoved rows COUNTED not listed and rows existing on only one ref named as added/removed. This
+is why `price_list_rows` returns NUMERIC values in a dict (`value`/`unit`/`note`) rather than
+pre-formatted strings: a price list of strings can be printed but not subtracted, and old payloads
+are read back through `price_rows()`, which recovers the number from the text. The biggest mover is
+ATTRIBUTED automatically (`--attribute-top`, default 1): a comparison run already has both refs as
+worktrees, so the entity diff behind its headline costs two traced compiles and nobody reruns
+anything by hand. Under the diff, the level tables stay (`## Price list - levels at <ref>`), the
+ladder's cells gain `(was N)`, and the modules interface table shows the BMI's own evolution - which
+is where a systems-module split would appear. Wall time in a range run is trustworthy in a way it
+never is across arms: both refs are measured in ONE session, interleaved rep-major on one machine.
+
 WALL-CLOCK IDENTITY IS EXPLICIT, NEVER INFERRED: every GitHub runner reports the same generic
 hostname while the actual CPUs differ by vendor and model (one run's fleet spanned Xeon 8573C,
 EPYC 7763 and EPYC 9V74 under one name), so cross-arm time deltas are noise - the fleet's
