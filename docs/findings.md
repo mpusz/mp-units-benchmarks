@@ -2779,6 +2779,32 @@ its own attribution. Either way, the mechanism is one more argument for splittin
 consumer.
 
 
+## 30. Attribute a price on the basis the price was measured
+
+The A/B page's first real question came from its own output: why did `print quantities via
+`std::format`` go 1,625 -> 2,019 (+24.2%) from v2.5.0 to 2.6, when everything else got cheaper? The
+attribution said the opposite of the price - `text/output_format`'s TOTAL instantiations FELL from
+17,738 to 12,974 - and both numbers were right, which is the finding.
+
+That workflow's price is a USE-COST: the workflow minus an empty-main TU with its exact includes. The
+twin fell 16,113 -> 10,955 (the SI/magnitude work of §25-§29), the workflow fell 17,738 -> 12,974,
+and the difference between those two falls is a RISE of 394 in what the four `std::format` calls
+themselves instantiate. Attributed on the use basis, the +394 decomposes as: `std::formatter` +81
+(164 -> 245), then magnitude and canonical-unit machinery appearing at the CALL site where it used to
+run at include time (`type_list_merge_many_sorted_impl` +28, `get_canonical_unit_impl` +21,
+`operator*` +17, `type_list_map_impl` +16, `mag_less` +11, `unit_magnitude` +10), plus libc++'s
+compile-time format-string validation (`__compile_time_validate_argument` +14, `__format_spec::__parser`
++13) - and `unit_symbol_impl` -19, `dimension_symbol_impl` -19 going the other way.
+
+So formatting a quantity in 2.6 is CHEAPER for a whole TU (-27%) while the share attributable to the
+format calls themselves is DEARER (+24%), because work moved out of the headers and into the call
+site. Both statements describe the same release honestly, and which one a reader gets depends
+entirely on the basis - which is why the tool now attributes a price on the basis that price was
+measured (workflow minus twin on each ref, then diffed), and says which basis it used. Before the
+fix, the page could show a +24% price above a table of -1,000s: an explanation pointing the opposite
+way from the thing it explains is worse than no explanation.
+
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That

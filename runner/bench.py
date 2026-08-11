@@ -1589,14 +1589,15 @@ UNRENDERED = ("symbol_bytes",)
 REPORTED = tuple(m for m in METRICS if m[0] not in UNRENDERED)
 
 
-def trace_entities(repo: Path, tc: Toolchain, source: Path, ctx: BuildContext, workdir: Path):
+def trace_entities(repo: Path, tc: Toolchain, source: Path, ctx: BuildContext, workdir: Path,
+                   quote_dir=None):
     """Instantiation events grouped by the entity that was instantiated, from one traced compile.
 
     `counts` answers how many; this answers WHICH, which is what turns "3% slower" into a name.
     Template arguments are collapsed - `quantity<metre, double>` and `quantity<second, int>` are one
     entity - because the interesting unit is the template, not each specialization of it."""
     out = workdir / "attr.o"
-    run(compile_cmd(tc, repo, out, source, trace=True, ctx=ctx), cwd=ctx.cwd)
+    run(compile_cmd(tc, repo, out, source, trace=True, ctx=ctx, quote_dir=quote_dir), cwd=ctx.cwd)
     events = json.loads((workdir / "attr.json").read_text())["traceEvents"]
     tally = {}
     for e in events:
@@ -1641,29 +1642,47 @@ def cmd_attribute(args):
 
 
 def attribute_price_mover(args, tc: Toolchain, repos, refs, source):
-    """Entity-level diff for the workflow behind the biggest price change.
+    """Entity-level diff for the workflow behind the biggest price change, ON THE BASIS THAT PRICE
+    WAS MEASURED.
 
-    A comparison run already has both refs materialized, so the "why" of its headline number costs
-    two traced compiles and nobody has to rerun anything by hand. Only the workflow-backed rows can
-    be attributed - a rate derived from a pair of umbrellas names an axis, not a file."""
-    name = source if source in select_workflows(detect_version(repos[refs[-1]]), None, tc.std) else None
-    if not name or not tc.is_clang:
+    A comparison run already has both refs materialized, so the "why" of its headline costs a few
+    traced compiles and nobody reruns anything by hand. The basis matters more than the cost: a
+    use-cost price is the workflow MINUS its include twin, and attributing totals underneath such a
+    price can point the other way entirely - `text/output_format`'s price rose 24% between v2.5.0 and
+    2.6 while its total FELL by 4,764, because magnitude and canonical-unit work moved out of the
+    headers and into the call site. So a workflow with a twin is attributed as (workflow - twin) on
+    each ref and those two are diffed; an umbrella, whose price IS its total, keeps the plain diff."""
+    if not tc.is_clang:
         return []
     old_ref, new_ref = refs[0], refs[-1]
-    sels = {r: select_workflows(detect_version(repos[r]), [name], tc.std) for r in (old_ref, new_ref)}
-    src_old, src_new = sels[old_ref].get(name), sels[new_ref].get(name)
-    if src_old is None or src_new is None:
+    sels = {r: select_workflows(detect_version(repos[r]), [source], tc.std) for r in (old_ref, new_ref)}
+    if any(sels[r].get(source) is None for r in (old_ref, new_ref)):
         return []
+    tallies, use_basis = {}, False
     with tempfile.TemporaryDirectory() as tmp:
-        ctxs = {r: build_modules(repos[r], tc, Path(tmp) / f"bmi-{i}")
-                for i, r in enumerate((old_ref, new_ref))}
-        try:
-            then = trace_entities(repos[old_ref], tc, src_old, ctxs[old_ref], Path(tmp))
-            now = trace_entities(repos[new_ref], tc, src_new, ctxs[new_ref], Path(tmp))
-        except subprocess.CalledProcessError:
-            return []
-    return [f"### why `{name}` moved", "",
-            *entity_diff_lines(then, now, short_ref(old_ref), short_ref(new_ref), top=10)]
+        tmp = Path(tmp)
+        for i, ref in enumerate((old_ref, new_ref)):
+            ctx = build_modules(repos[ref], tc, tmp / f"bmi-{i}")
+            src = sels[ref][source]
+            by_wf, twins = twin_sources({source: src})
+            try:
+                whole = trace_entities(repos[ref], tc, src, ctx, tmp)
+                if source in by_wf:  # a use-cost price: subtract this ref's own twin
+                    text, quote = twins[by_wf[source]]
+                    twin_src = tmp / f"twin-{i}.cpp"
+                    twin_src.write_text(text)
+                    twin = trace_entities(repos[ref], tc, twin_src, ctx, tmp, quote_dir=quote)
+                    use_basis = True
+                    whole = {k: whole.get(k, 0) - twin.get(k, 0)
+                             for k in {*whole, *twin} if whole.get(k, 0) != twin.get(k, 0)}
+            except subprocess.CalledProcessError:
+                return []
+            tallies[ref] = whole
+    basis = "use-cost (the workflow minus its include twin, as the price is measured)" if use_basis \
+        else "total instantiations (this price IS the total)"
+    return [f"### why `{source}` moved", "", f"Attributed on its {basis}.", "",
+            *entity_diff_lines(tallies[old_ref], tallies[new_ref],
+                               short_ref(old_ref), short_ref(new_ref), top=10)]
 
 
 def cmd_report(args):
@@ -2021,7 +2040,7 @@ def pct(old, new):
         else (new - old) / old
 
 
-def findings(cells, keys, refs, tags=None):
+def findings(cells, keys, refs, tags=None, named_extremes=False):
     """The few sentences worth reading, ranked. Everything else is in the tables below them.
 
     Written for someone who has never used the library: each item names the effect and what follows
@@ -2052,10 +2071,14 @@ def findings(cells, keys, refs, tags=None):
             worst = max(moved.items(), key=lambda kv: kv[1])
             tail = (f"The largest growth is `{worst[0]}` at {worst[1]:+.0%}." if worst[1] > 0.005
                     else "Nothing in the corpus grew.")
+            # The price diff, when there is one, has already named the extremes: repeating them here
+            # made two of five findings say the same thing about the same workflow.
+            extremes = "" if named_extremes else (f" The largest improvement is `{best[0]}` at "
+                                                 f"{best[1]:+.0%}. {tail}")
             out.append(f"Compiling the same code against `{short_ref(new)}` instead of `{short_ref(old)}` needs "
                        f"**{abs(median):.0%} {'fewer' if median < 0 else 'more'}** template "
-                       f"instantiations for a typical workflow (median across {len(moved)}). The largest "
-                       f"improvement is `{best[0]}` at {best[1]:+.0%}. {tail}")
+                       f"instantiations for a typical workflow (median across {len(moved)})."
+                       + extremes)
 
         # 2. the finding the instantiation count is structurally unable to make. Reported only when the
         # two disagree: a declaration-side change (a hidden friend leaving a class template, which is
@@ -2259,10 +2282,12 @@ def comparison_rows(cell_pairs):
     Declarations are a column here and not only in the tables below, because this is the one table a
     reader is guaranteed to see: a change that moves declarations and nothing else would otherwise be
     summarized as "nothing moved" directly above a report full of cells saying it did."""
-    return [[f"{r['inst'][0]} -> {r['inst'][1]} ({r['inst'][2]:+.1%})" if "inst" in r else "n/a",
-             f"{r['decls'][0]} -> {r['decls'][1]} ({r['decls'][2]:+.1%})" if "decls" in r else "n/a",
+    return [[f"{r['inst'][0]:,} -> {r['inst'][1]:,} ({r['inst'][2]:+.1%})" if "inst" in r else "n/a",
+             f"{r['decls'][0]:,} -> {r['decls'][1]:,} ({r['decls'][2]:+.1%})" if "decls" in r else "n/a",
              f"{r['slope'][0]:.1f} -> {r['slope'][1]:.1f} ({r['slope'][2]:+.1%})" if "slope" in r else "n/a",
-             (f"{r['time'][0]} -> {r['time'][1]} ms ({r['time'][2]:+.1%})"
+             # Seconds, like every other corpus-total column on the page: a five-digit millisecond
+             # figure asks the reader to divide before they can compare it with anything.
+             (f"{r['time'][0] / 1000:,.0f} -> {r['time'][1] / 1000:,.0f} s ({r['time'][2]:+.1%})"
               + ("" if r.get("same_cpu", True) else ", other CPU") if "time" in r else "n/a")]
             for r in cell_pairs]
 
@@ -2627,7 +2652,8 @@ def price_diff_section(payload, refs, key):
     lines = [f"## What changed in the price list - `{key}`", "",
              *markdown_table(["what one thing costs", short_ref(old), short_ref(new), "change"],
                              rows), ""]
-    tail = f"{flat} price(s) did not move and are not listed."
+    tail = (f"{flat} price(s) did not move and are not listed." if flat
+            else "Every price the two refs share moved.")
     if appeared:
         tail += (f" {len(appeared)} exist on only one ref (a workflow added or removed): "
                  + ", ".join(appeared[:4]) + ("..." if len(appeared) > 4 else "") + ".")
@@ -2677,7 +2703,8 @@ def render_compact(payloads, previous=None, extra_sections=()):
         price_diff_lines, price_diff_findings = price_diff_section(price_payload, refs, price_key)
 
     tags = {(p.get("config_key") or p["cxx"]): p.get("machine_tag") for p in payloads}
-    story = price_diff_findings + comparison_findings + findings(cells, keys, refs, tags)
+    story = price_diff_findings + comparison_findings + findings(
+        cells, keys, refs, tags, named_extremes=bool(price_diff_findings))
     if story:
         lines += ["## What changed", "", *[f"{i}. {s}" for i, s in enumerate(story, 1)], ""]
     if comparison_md:
