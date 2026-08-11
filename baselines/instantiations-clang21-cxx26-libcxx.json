@@ -18,6 +18,7 @@
     "include/adopted_values+cassert+chrono+format+iostream+isq+math+numbers+si+string",
     "include/adopted_values+cstdio+mechanics+si",
     "include/adopted_values+cstdio+si",
+    "include/algorithm+array+chrono+compare+concepts+cstddef+exception+format+framework+functional+hacks+initializer_list+iostream+iterator+limits+math+numbers+numeric+ostream+ranges+si+space_and_time+string+string_view+utility+vector+yard_pound",
     "include/angular+cstdio+math+si+space_and_time",
     "include/cartesian_vector+cstdio+mechanics+si+space_and_time",
     "include/codata2022_essential+cstdio+numbers+si",
@@ -37,6 +38,8 @@
     "include/cstdio+si+space_and_time-741f",
     "include/cstdio+si+usc",
     "include/cstdio+si+usc-59dc",
+    "include/cstdio+spec_workload",
+    "include/cstdio+typed_workload",
     "include/define_workload",
     "include/format+output_workload+print",
     "include/iostream+ostream+output_workload",
@@ -52,6 +55,7 @@
     "parity/kinetic_energy",
     "parity/unit_conversions",
     "parity/value_conversions",
+    "real_life/glide_computer",
     "real_life/storage_tank",
     "safety/affine_quantities",
     "safety/raw_doubles",
@@ -72,6 +76,12 @@
     "scaling/narrow_016",
     "scaling/narrow_064",
     "scaling/narrow_256",
+    "scaling/specs_broad_016",
+    "scaling/specs_broad_064",
+    "scaling/specs_broad_256",
+    "scaling/typed_broad_016",
+    "scaling/typed_broad_064",
+    "scaling/typed_broad_256",
     "systems/user_defined_units",
     "text/output_format",
     "text/output_format_advanced",
@@ -97,19 +107,19 @@
       "named_constant": 88.94,
       "prefixed_unit": 3.1,
       "quantity_spec": 45.71,
-      "named_unit": 58.9
+      "named_unit": 57.05
     },
     "constant evaluations": {
       "named_constant": 416.15,
       "prefixed_unit": 12.85,
       "quantity_spec": 167.77,
-      "named_unit": 269.16
+      "named_unit": 256.67
     },
     "function declarations": {
       "named_constant": 55.99,
       "prefixed_unit": -0.12,
       "quantity_spec": 18.79,
-      "named_unit": 29.04
+      "named_unit": 26.75
     },
     "emitted code (bytes)": {
       "named_constant": 0.0,
@@ -656,6 +666,40 @@
       "decls_total": 223531,
       "function_decls": 9647,
       "types_total": 463626
+    },
+    "include/cstdio+spec_workload": {
+      "InstantiateClass": 1583,
+      "InstantiateFunction": 996,
+      "EvaluateAsConstantExpr": 8335,
+      "census": {
+        "quantity_spec": 8,
+        "named_unit": 3,
+        "named_constant": 1
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 106012,
+      "function_decls": 6299,
+      "types_total": 202771
+    },
+    "include/cstdio+typed_workload": {
+      "InstantiateClass": 7108,
+      "InstantiateFunction": 4242,
+      "EvaluateAsConstantExpr": 44558,
+      "census": {
+        "quantity_spec": 57,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 952,
+      "code_bytes": 51,
+      "symbol_bytes": 901,
+      "decls_total": 220416,
+      "function_decls": 9639,
+      "types_total": 463071
     },
     "include/define_workload": {
       "InstantiateClass": 6497,
@@ -1331,6 +1375,114 @@
       "types_total": 676194,
       "twin": "include/cstdio+scaling_workload+utility"
     },
+    "scaling/specs_broad_016": {
+      "InstantiateClass": 2095,
+      "InstantiateFunction": 1372,
+      "EvaluateAsConstantExpr": 11428,
+      "census": {
+        "quantity_spec": 8,
+        "named_unit": 3,
+        "named_constant": 1
+      },
+      "object_bytes": 1240,
+      "code_bytes": 77,
+      "symbol_bytes": 1163,
+      "decls_total": 115027,
+      "function_decls": 6649,
+      "types_total": 226215,
+      "twin": "include/cstdio+spec_workload"
+    },
+    "scaling/specs_broad_064": {
+      "InstantiateClass": 3115,
+      "InstantiateFunction": 2105,
+      "EvaluateAsConstantExpr": 17805,
+      "census": {
+        "quantity_spec": 8,
+        "named_unit": 3,
+        "named_constant": 1
+      },
+      "object_bytes": 1240,
+      "code_bytes": 77,
+      "symbol_bytes": 1163,
+      "decls_total": 133535,
+      "function_decls": 7322,
+      "types_total": 274560,
+      "twin": "include/cstdio+spec_workload"
+    },
+    "scaling/specs_broad_256": {
+      "InstantiateClass": 8932,
+      "InstantiateFunction": 5945,
+      "EvaluateAsConstantExpr": 41220,
+      "census": {
+        "quantity_spec": 8,
+        "named_unit": 3,
+        "named_constant": 1
+      },
+      "object_bytes": 1240,
+      "code_bytes": 77,
+      "symbol_bytes": 1163,
+      "decls_total": 234073,
+      "function_decls": 10778,
+      "types_total": 533921,
+      "twin": "include/cstdio+spec_workload"
+    },
+    "scaling/typed_broad_016": {
+      "InstantiateClass": 9457,
+      "InstantiateFunction": 6627,
+      "EvaluateAsConstantExpr": 64298,
+      "census": {
+        "quantity_spec": 57,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 1392,
+      "code_bytes": 87,
+      "symbol_bytes": 1305,
+      "decls_total": 279853,
+      "function_decls": 12144,
+      "types_total": 610591,
+      "twin": "include/cstdio+typed_workload"
+    },
+    "scaling/typed_broad_064": {
+      "InstantiateClass": 12866,
+      "InstantiateFunction": 10302,
+      "EvaluateAsConstantExpr": 95253,
+      "census": {
+        "quantity_spec": 57,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 1392,
+      "code_bytes": 87,
+      "symbol_bytes": 1305,
+      "decls_total": 372682,
+      "function_decls": 15945,
+      "types_total": 846222,
+      "twin": "include/cstdio+typed_workload"
+    },
+    "scaling/typed_broad_256": {
+      "InstantiateClass": 43456,
+      "InstantiateFunction": 40555,
+      "EvaluateAsConstantExpr": 331400,
+      "census": {
+        "quantity_spec": 57,
+        "named_unit": 44,
+        "named_constant": 11,
+        "prefixed_unit": 673,
+        "point_origin": 3
+      },
+      "object_bytes": 1392,
+      "code_bytes": 87,
+      "symbol_bytes": 1305,
+      "decls_total": 1336831,
+      "function_decls": 47272,
+      "types_total": 2732591,
+      "twin": "include/cstdio+typed_workload"
+    },
     "systems/user_defined_units": {
       "InstantiateClass": 9376,
       "InstantiateFunction": 6367,
@@ -1662,6 +1814,23 @@
       "decls_total": 196746,
       "function_decls": 8542,
       "types_total": 407806
+    },
+    "umbrella/si_units_umbrella": {
+      "InstantiateClass": 3549,
+      "InstantiateFunction": 2688,
+      "EvaluateAsConstantExpr": 23521,
+      "census": {
+        "quantity_spec": 30,
+        "named_unit": 44,
+        "named_constant": 1,
+        "prefixed_unit": 5,
+        "point_origin": 2
+      },
+      "object_bytes": 960,
+      "code_bytes": 51,
+      "symbol_bytes": 909,
+      "decls_total": 152531,
+      "function_decls": 7968
     }
   }
 }

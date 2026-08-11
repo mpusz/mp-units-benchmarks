@@ -842,7 +842,10 @@ SLOPE_GATED = (("instantiations", "instantiations"), ("function declarations", "
 RATE_AXES = (("named_constant", "umbrella/codata_2022_umbrella", "umbrella/codata_umbrella"),
              ("prefixed_unit", "umbrella/si_lean_umbrella", "umbrella/si_umbrella"),
              ("quantity_spec", "control/core_only", "umbrella/isq_space_and_time_umbrella"),
-             ("named_unit", "control/core_only", "umbrella/si_lean_umbrella"))
+             # si/units.h is the definitions alone - no symbols, no prefix matrix - so this axis
+             # prices the named unit itself; the symbol tax shows up as si_units -> si_lean in the
+             # price list's include rows rather than contaminating the rate.
+             ("named_unit", "control/core_only", "umbrella/si_units_umbrella"))
 
 
 def entity_rates(results, extract):
@@ -927,7 +930,8 @@ def gated_deltas(baseline, results, extract, rates):
 # define_* shapes the marginal cost of DEFINING entities. The define shapes are immune to library
 # growth by construction (their entities live in the workflow), so their slopes can carry the
 # tightest bands the counts' determinism allows and are never rebaselined for growth.
-SCALING_SHAPES = ("narrow", "broad", "define_units", "define_specs", "define_constants")
+SCALING_SHAPES = ("narrow", "broad", "typed_broad", "specs_broad",
+                  "define_units", "define_specs", "define_constants")
 
 
 def slope_from(entries, extract):
@@ -1029,7 +1033,9 @@ def price_list_rows(results):
         rows.append([nouns.get(kind, f"define one {kind}"), f"{rate:g}",
                      f"{hi.split('/', 1)[1]} minus {lo.split('/', 1)[1]}"])
     slopes = slope_from(results, inst)
-    for shape, label in (("broad", "compose one more DISTINCT derived unit in user code"),
+    for shape, label in (("broad", "compose one more DISTINCT derived quantity (simple)"),
+                         ("typed_broad", "the same with TYPED quantities (adds level-5 checking)"),
+                         ("specs_broad", "a bare spec expression, no quantities (constraint algebra)"),
                          ("narrow", "one more line reusing warm quantity types"),
                          ("define_units", "define one bare named unit (synthetic, no symbol table)"),
                          ("define_specs", "define one leaf quantity spec (synthetic, no equation)"),

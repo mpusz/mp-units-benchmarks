@@ -2686,6 +2686,34 @@ reader could not extract "each TU compiles ~1.7 s faster" from a column of perce
 percentage stays for scale; the milliseconds are the finding.
 
 
+## 28. The level-5 tax, measured twice - and what a spec expression costs alone
+
+Configuration as usual (clang-21, c++23, libc++, clean `a742af8c4`), from two new scaling shapes.
+
+**`scaling/typed_broad` mirrors `broad` line for line** - the same eight bases, the same
+(a, b, exponent) triple per index, the same arithmetic - with exactly one difference: every
+reference carries its quantity spec (`isq::length[si::metre] / isq::time[si::second]` instead of
+`m / s`), so each step derives a distinct STRONG quantity. The slopes: 125.0 instantiations per
+derived quantity with simple quantities, **307.4 with typed ones - the level-5 abstraction tax is
++182.4 per derived quantity (2.46x)**, with constant evaluations (+614/step) and declarations
+(+102/step) moving proportionally. The safety ladder measured the same abstraction on a whole
+program - simple 2,042 -> typed 5,042 use-instantiations, **2.47x** - so two fully independent
+measurements (a synthetic slope, a real program's twin-subtracted total) agree to the second digit.
+This is the quotable line of the safety-cost story: typed quantities cost ~2.5x per derived
+quantity, and whether that is cheap or dear depends on the level-5 errors they catch.
+
+**`scaling/specs_broad` prices the constraint algebra alone**: one distinct spec expression per
+step (`base_a * pow<e>(base_b)` over the seven ISQ base quantities), checked with
+`implicitly_convertible` the way a `QuantityOf` constraint would, no quantities involved:
+**51.3 instantiations per expression**. Of the +182 typed tax, ~51 is the equation pipeline itself;
+the remainder is typed-reference and conversion machinery - the next decomposition target.
+
+Housekeeping from the same round: `umbrella/si_units_umbrella` (si/units.h - definitions, no
+symbols, no prefix matrix) gives the named-unit rate a pure axis and prices the SYMBOL TAX as an
+include row (si_units -> si_lean); `types_total` is retired outright (rank 0.997 with
+`decls_total`, no consumer - a metric nobody reads is storage, not measurement).
+
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That
