@@ -442,12 +442,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          prev_run=$(gh api "repos/${{ github.repository }}/actions/workflows/ci-compile-cost.yml/runs?status=success&per_page=10" \
-            --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }})][0].id" 2>/dev/null) || exit 0
-          [ -n "$prev_run" ] && [ "$prev_run" != "null" ] || exit 0
-          echo "previous successful run: $prev_run"
-          gh run download "$prev_run" --name compile-cost-report --dir previous 2>/dev/null || exit 0
-          ls previous/report-*.json 2>/dev/null | head -20
+          # Any COMPLETED run that produced the artifact will do: a failing gate makes the run red
+          # while the measurements it uploaded are exactly as valid, and requiring success aged this
+          # comparison out to five days and nine commits during a period of red gates.
+          for prev_run in $(gh api "repos/${{ github.repository }}/actions/workflows/ci-compile-cost.yml/runs?status=completed&per_page=15" \
+            --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }}) | .id] | .[]" 2>/dev/null); do
+            if gh run download "$prev_run" --name compile-cost-report --dir previous 2>/dev/null; then
+              echo "comparing against run $prev_run"
+              ls previous/report-*.json 2>/dev/null | head -20
+              exit 0
+            fi
+          done
+          echo "no previous run carries a compile-cost-report artifact"
       - name: Post the combined table
         id: post
         shell: bash

@@ -2174,7 +2174,8 @@ def comparison_rows(cell_pairs):
     return [[f"{r['inst'][0]} -> {r['inst'][1]} ({r['inst'][2]:+.1%})" if "inst" in r else "n/a",
              f"{r['decls'][0]} -> {r['decls'][1]} ({r['decls'][2]:+.1%})" if "decls" in r else "n/a",
              f"{r['slope'][0]:.1f} -> {r['slope'][1]:.1f} ({r['slope'][2]:+.1%})" if "slope" in r else "n/a",
-             f"{r['time'][0]} -> {r['time'][1]} ms ({r['time'][2]:+.1%})" if "time" in r else "n/a"]
+             (f"{r['time'][0]} -> {r['time'][1]} ms ({r['time'][2]:+.1%})"
+              + ("" if r.get("same_cpu", True) else ", other CPU") if "time" in r else "n/a")]
             for r in cell_pairs]
 
 
@@ -2285,7 +2286,10 @@ def run_over_run(payloads, previous):
                # `6111211`, and the column read as a tree change while every count said otherwise.
                "same_tree": bool(then_info.get("mp_units_sha")) and
                             then_info.get("mp_units_sha") == now_info.get("mp_units_sha"),
-               "sha": (now_info.get("mp_units_sha") or "")[:7]}
+               "sha": (now_info.get("mp_units_sha") or "")[:7],
+               # Two runs land on whatever runners GitHub had free: comparing wall clock across
+               # different CPU models is the mistake this suite exists to prevent, so the row says so.
+               "same_cpu": bool(p.get("cpu")) and p.get("cpu") == q.get("cpu")}
         for metric, name in SUMMARY_METRICS:
             got = corpus_pair(q, ro, p, rn, metric)
             if got and got[0]:
@@ -2328,8 +2332,9 @@ def run_over_run(payloads, previous):
            "`n/a` in a deterministic column means the configuration produces no counts (any GCC), not "
            "that a measurement is missing. The slope is instantiations per step; `declarations` counts "
            "function declarations, which move without any instantiation when a function is declared in "
-           "fewer places. Wall time compares different runner sessions, so treat its column "
-           "as direction only - the deterministic columns are the finding."
+           "fewer places. Wall time compares different runner sessions - and where the CPU model itself "
+           "differed between the two runs the cell says so, because that comparison is not a "
+           "measurement at all; the deterministic columns are the finding."
            + (f" {unmatched} workflow(s) were measured by only one of the two runs and are excluded from "
               f"every column." if unmatched else "")
            + (f" {len(skipped)} configuration(s) have nothing to compare against - "
@@ -2529,8 +2534,9 @@ def render_compact(payloads, previous=None):
                 for label, t, s, w in per_config]
         # A range run keeps this table too - the comparison section above carries the deltas, this
         # one the absolute picture across the fleet, which is what the page opens with either way.
-        lines += ["## Per configuration"
-                  + (f" - values for `{newest}`" if len(refs) > 1 else ""), "",
+        counted = len({w for w in inst_cells if not w.startswith(("bmi/", "include/"))})
+        lines += [f"## Per configuration - all {counted} workflows"
+                  + (f", values for `{newest}`" if len(refs) > 1 else ""), "",
                   *markdown_table(["configuration", "instantiations", "broad slope /step",
                                    "wall clock"], rows), "",
                   "> **Instantiations** count the templates the compiler stamps out for the whole corpus "
