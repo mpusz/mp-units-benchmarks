@@ -328,10 +328,40 @@ def workflow_preamble(src: Path):
 
 def twin_name(preamble: str):
     """Row name for an include set: the included headers' stems, so `include/cstdio+si` reads as
-    what it is. Distinct preambles that collide on the name get a digest suffix in measure_counts."""
+    what it is. Distinct preambles that collide on the name get a digest suffix in twin_sources."""
     headers = re.findall(r'#\s*include\s*[<"]([^>"]+)[>"]', preamble)
     stems = sorted({Path(h).stem for h in headers if h != "mp-units/compat_macros.h"})
     return "include/" + "+".join(stems)
+
+
+def twin_sources(selection):
+    """The include twins a selection needs: one empty-main TU per distinct include set.
+
+    Returns ({workflow: twin row name}, {twin row name: (source text, quote dir)}). A workflow whose
+    body is nothing but an empty main (umbrella/, control/) IS its include set and gets no twin - the
+    subtraction would leave nothing by construction. Twin identity is the preamble's DIRECTIVES, not
+    its text: two workflows of one family differ in their leading comments and share every include,
+    and measuring that set twice is the same number twice. Shared by `measure_counts` (traced twins
+    give the use-cost basis) and `measure_time` (untraced twins give the inclusion wall time the
+    safety ladder and the price list's include rows are read in)."""
+    by_workflow, sources, idents = {}, {}, {}
+    for name, src in selection.items():
+        if src is None:
+            continue
+        preamble, body = workflow_preamble(src)
+        if re.sub(r"\s+", "", body) == "intmain(){}":
+            continue
+        directives = "\n".join(line.strip() for line in preamble.splitlines()
+                               if line.strip().startswith(("#", "import "))) + "\n"
+        ident = (directives, str(src.parent))
+        if ident not in idents:
+            key = twin_name(directives)
+            if key in sources:  # same stems, different directives or directory
+                key += "-" + hashlib.sha1("|".join(ident).encode()).hexdigest()[:4]
+            idents[ident] = key
+            sources[key] = (directives + "\nint main() {}\n", src.parent)
+        by_workflow[name] = idents[ident]
+    return by_workflow, sources
 
 
 def build_modules(repo: Path, tc: Toolchain, workdir: Path, trace=False):
@@ -457,36 +487,18 @@ def measure_counts(repo: Path, tc: Toolchain, patterns=None):
         ctx = build_modules(repo, tc, Path(tmp) / "bmi", trace=True)
         for step in ctx.steps:
             results[step["name"]] = step.get("counts")
-        twins = {}  # (preamble text, source dir) -> the include/ row it was measured under
-
-        def twin_row(src: Path):
-            """Measure this workflow's include set once, as an empty-main twin TU, and return the
-            row it lives under - or None when the workflow IS its include set (umbrella/, control/),
-            where the subtraction would leave nothing by construction. Identity is the preamble's
-            DIRECTIVES, not its text: two workflows of one family differ in their leading comments
-            and share every include, and measuring that set twice is the same number twice."""
-            preamble, body = workflow_preamble(src)
-            if re.sub(r"\s+", "", body) == "intmain(){}":
-                return None
-            directives = "\n".join(line.strip() for line in preamble.splitlines()
-                                   if line.strip().startswith(("#", "import "))) + "\n"
-            ident = (directives, str(src.parent))
-            if ident not in twins:
-                key = twin_name(directives)
-                if key in results:  # same stems, different directives or directory
-                    key += "-" + hashlib.sha1("|".join(ident).encode()).hexdigest()[:4]
-                twin_src = Path(tmp) / "twin.cpp"
-                twin_src.write_text(directives + "\nint main() {}\n")
-                try:
-                    results[key] = measure_one(tc, repo, twin_src, ctx, Path(tmp), quote_dir=src.parent)
-                except subprocess.CalledProcessError as exc:
-                    print(f"::error::{key} (include twin of {src.name}) failed to compile: "
-                          f"{exc.stderr.splitlines()[:1]}")
-                    results[key] = "FAIL"
-                twins[ident] = key
-            return twins[ident]
-
-        for name, src in select_workflows(version, patterns, tc.std).items():
+        selection = select_workflows(version, patterns, tc.std)
+        by_workflow, twin_specs = twin_sources(selection)
+        for key, (text, quote_dir) in twin_specs.items():
+            twin_src = Path(tmp) / "twin.cpp"
+            twin_src.write_text(text)
+            try:
+                results[key] = measure_one(tc, repo, twin_src, ctx, Path(tmp), quote_dir=quote_dir)
+            except subprocess.CalledProcessError as exc:
+                print(f"::error::{key} (an include twin) failed to compile: "
+                      f"{exc.stderr.splitlines()[:1]}")
+                results[key] = "FAIL"
+        for name, src in selection.items():
             if src is None:
                 results[name] = None
                 continue
@@ -496,8 +508,8 @@ def measure_counts(repo: Path, tc: Toolchain, patterns=None):
                 print(f"::error::{name} failed to compile: {exc.stderr.splitlines()[:1]}")
                 results[name] = "FAIL"
                 continue
-            if (twin := twin_row(src)) is not None:
-                counts["twin"] = twin
+            if name in by_workflow:
+                counts["twin"] = by_workflow[name]
             results[name] = counts
     return results
 
@@ -510,9 +522,12 @@ def measure_counts(repo: Path, tc: Toolchain, patterns=None):
 # EvaluateAsConstantExpr by single digits out of hundreds of thousands (findings.md §22) - every other
 # metric here is blind to it. `Total bytes` is deliberately not parsed: across the same arms it moved by
 # ±0.03% with no consistent sign, because fewer declarations are offset by the added base subobject.
+# `types_total` is RETIRED, not merely unrendered: it ranked 0.997 with `decls_total`, moved the
+# same direction with smaller magnitude on every arm that moved anything, and no design decision in
+# the library adds types without adding declarations - a metric with no consumer is storage, not
+# measurement. Old baselines still carry it; comparisons skip a metric absent from either side.
 STATS_FIELDS = (("decls_total", re.compile(r"^\s*(\d+) decls total\.", re.M)),
-                ("function_decls", re.compile(r"^\s*(\d+) Function decls,", re.M)),
-                ("types_total", re.compile(r"^\s*(\d+) types total\.", re.M)))
+                ("function_decls", re.compile(r"^\s*(\d+) Function decls,", re.M)))
 
 
 def ast_stats(stderr: str) -> dict:
@@ -596,24 +611,48 @@ def measure_time(repos, tc: Toolchain, reps, patterns=None, pin=None, samples=No
         for ref, ctx in contexts.items():
             for s in ctx.steps:  # the BMI build is measured once; it is not a per-rep cost
                 best[ref][s["name"]] = {k: v for k, v in s.items() if k != "name"}
+        # The include twins are timed like workflows: the price list's inclusion rows and the safety
+        # ladder read wall time, and only an untraced compile of the twin itself provides it. They
+        # are excluded from every corpus total (see corpus_pair) - a twin is a component of the
+        # workflows beside it, and summing both counts the includes twice.
+        twin_files = {}
+        for ref in repos:
+            per_ref = {}
+            for key, (text, quote_dir) in twin_sources(selections[ref])[1].items():
+                f = Path(tmp) / f"twin-{hashlib.sha1((ref + key).encode()).hexdigest()[:12]}.cpp"
+                f.write_text(text)
+                per_ref[key] = (f, quote_dir)
+            twin_files[ref] = per_ref
+        names = sorted({*names, *(k for per_ref in twin_files.values() for k in per_ref)})
         names = [*sorted(n for r in best.values() for n in r), *names]
+
+        def source_for(ref, name):
+            if name.startswith("include/"):
+                return twin_files[ref].get(name)
+            src = selections[ref].get(name)
+            return None if src is None else (src, None)
+
         for name in [n for n in names if not n.startswith("bmi/")]:
             # warmup + applicability
             for ref, repo in repos.items():
-                src = selections[ref].get(name)
-                if src is None:
+                found = source_for(ref, name)
+                if found is None:
                     best[ref][name] = None
                     continue
+                src, quote_dir = found
                 try:
-                    run(compile_cmd(tc, repo, out, src, ctx=contexts[ref]), cwd=contexts[ref].cwd)
+                    run(compile_cmd(tc, repo, out, src, ctx=contexts[ref], quote_dir=quote_dir),
+                        cwd=contexts[ref].cwd)
                 except subprocess.CalledProcessError:
                     best[ref][name] = "FAIL"
             for _ in range(reps):
                 for ref, repo in repos.items():
-                    src = selections[ref].get(name)
-                    if src is None or best[ref].get(name) == "FAIL":
+                    found = source_for(ref, name)
+                    if found is None or best[ref].get(name) == "FAIL":
                         continue
-                    got = compile_once(compile_cmd(tc, repo, out, src, ctx=contexts[ref]),
+                    src, quote_dir = found
+                    got = compile_once(compile_cmd(tc, repo, out, src, ctx=contexts[ref],
+                                                   quote_dir=quote_dir),
                                        cwd=contexts[ref].cwd, pin=pin)
                     if samples is not None:
                         samples.setdefault(ref, {}).setdefault(name, []).append(got["ms"])
@@ -634,11 +673,10 @@ def print_table(columns, rows, cell):
 
 
 def gate_summary_line(text, kind="notice"):
+    """A GitHub annotation. It is NOT mirrored into the step summary: the verdict block carries the
+    same facts there in order, and the mirror used to land the conclusions BELOW three hundred rows
+    of evidence tables - the reader met the tables before the reason they were red."""
     print(f"::{kind}::{text}")
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a") as f:
-            f.write(text + "\n\n")
 
 
 def total(entry):
@@ -674,12 +712,12 @@ def cmd_counts(args):
     if len(refs) == 1:
         results = measured[refs[0]]
         print_table(["inst_class", "inst_func", "const_eval", "entities", "code_B", "syms_B",
-                     "fn_decls", "decls", "types"],
+                     "fn_decls", "decls"],
                     [(n, *([sum(v.get("census", {}).values()) or None if k == "entities" else v.get(k)
                             for k in ("InstantiateClass", "InstantiateFunction", "EvaluateAsConstantExpr",
                                       "entities", "code_bytes", "symbol_bytes",
-                                      "function_decls", "decls_total", "types_total")]
-                           if isinstance(v, dict) else [v] * 9))
+                                      "function_decls", "decls_total")]
+                           if isinstance(v, dict) else [v] * 8))
                      for n, v in sorted(results.items())],
                     lambda v: "n/a" if v is None else str(v))
         if price := price_list_lines(results, tc):
@@ -985,20 +1023,13 @@ def assert_same_config(recorded, tc: Toolchain, where):
                      f"counts are only comparable within one configuration")
 
 
-def emit_block(lines):
-    text = "\n".join(lines)
-    print(text)
-    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(summary, "a") as f:
-            f.write(text + "\n")
-
-
 def price_list_rows(results):
     """The handful of numbers the corpus exists to produce, from one measured results dict - each
     denominated in something a reader can multiply by their own code: an include, an entity, a step.
 
-    Returned as (what, value, source) rows so `check` and `counts` can print them and `report` can
-    carry them in its payload for `summary` to merge across configurations."""
+    Returned as (category, what, value, source) rows - category is one of "include", "define",
+    "use" or "ladder", which is how the compact report splits the list into one table per question
+    while `check` and `counts` keep printing it whole and `report` carries it in its payload."""
     inst = GATED[0][1]
 
     def val(name):
@@ -1008,7 +1039,7 @@ def price_list_rows(results):
     rows = []
     core = val("control/core_only")
     if core:
-        rows.append(["include the core framework (defines nothing)", str(core), "control/core_only"])
+        rows.append(["include", "the core framework (defines nothing)", str(core), "control/core_only"])
     for name in sorted(n for n in results if n.startswith("umbrella/")):
         entry = results[name]
         if not isinstance(entry, dict) or not entry.get("census"):
@@ -1019,50 +1050,76 @@ def price_list_rows(results):
             continue
         dominant = max(entry["census"], key=entry["census"].get)
         over_core = f" ({(v - core) / entities:.1f}/entity over core)" if core and v > core else ""
-        rows.append([f"include {name.removeprefix('umbrella/').removesuffix('_umbrella')} - "
+        rows.append(["include", f"{name.removeprefix('umbrella/').removesuffix('_umbrella')} - "
                      f"{entities} entities, mostly {dominant}", f"{v}{over_core}", name])
     # "As the system ships one": these rates price an entity WITH its ecosystem - an SI named unit
     # brings its symbol table, a CODATA constant its uncertainty payload. The synthetic define_*
-    # slope rows below price the bare definition; the difference between the two is the ecosystem.
-    nouns = {"named_constant": "define one measured constant, as CODATA ships one",
-             "prefixed_unit": "define one prefixed unit",
-             "quantity_spec": "define one quantity spec, as ISQ ships one",
-             "named_unit": "define one named unit, as SI ships one"}
+    # slope rows price the bare definition; the difference between the two is the ecosystem.
+    nouns = {"named_constant": "measured constant (CODATA)", "prefixed_unit": "prefixed unit",
+             "quantity_spec": "quantity spec (ISQ)", "named_unit": "named unit (SI)"}
     for kind, rate in entity_rates(results, inst).items():
         lo, hi = next((l, h) for k, l, h in RATE_AXES if k == kind)
-        rows.append([nouns.get(kind, f"define one {kind}"), f"{rate:g}",
+        rows.append(["define", nouns.get(kind, kind), f"{rate:.1f}",
                      f"{hi.split('/', 1)[1]} minus {lo.split('/', 1)[1]}"])
     slopes = slope_from(results, inst)
-    for shape, label in (("broad", "compose one more DISTINCT derived quantity (simple)"),
-                         ("typed_broad", "the same with TYPED quantities (adds level-5 checking)"),
-                         ("specs_broad", "a bare spec expression, no quantities (constraint algebra)"),
-                         ("narrow", "one more line reusing warm quantity types"),
-                         ("define_units", "define one bare named unit (synthetic, no symbol table)"),
-                         ("define_specs", "define one leaf quantity spec (synthetic, no equation)"),
-                         ("define_constants", "define one bare constant (synthetic, no uncertainty)")):
+    for cat, shape, label in (
+            ("use", "broad", "each distinct derived quantity composed (simple quantities)"),
+            ("use", "typed_broad", "the same with TYPED quantities (adds level-5 checking)"),
+            ("use", "specs_broad", "a bare spec expression, no quantities (constraint algebra)"),
+            ("use", "narrow", "each further line using already-instantiated quantity types"),
+            ("define-bare", "define_units", "named unit (SI)"),
+            ("define-bare", "define_specs", "quantity spec (ISQ)"),
+            ("define-bare", "define_constants", "measured constant (CODATA)")):
         if shape in slopes:
-            rows.append([label, f"{slopes[shape]:.1f}/step", f"scaling/{shape} slope"])
+            rows.append([cat, label, f"{slopes[shape]:.1f}/step", f"scaling/{shape} slope"])
+    for facility, wf in (("std::printf", "text/output_printf"), ("operator<<", "text/output_ostream"),
+                         ("std::format", "text/output_format"), ("std::println", "text/output_println")):
+        if (u := use_cost_of(results, wf)) is not None:
+            rows.append(["print", f"via `{facility}`", f"{u:,}", wf])
 
-    def use_cost(name):
-        entry = results.get(name)
-        twin = results.get(entry.get("twin", "")) if isinstance(entry, dict) else None
-        v, t = (inst(entry) if isinstance(entry, dict) else None,
-                inst(twin) if isinstance(twin, dict) else None)
-        return v - t if isinstance(v, int) and isinstance(t, int) else None
-
-    ladder = [use_cost(f"safety/{r}") for r in ("raw_doubles", "simple_quantities",
-                                                "typed_quantities", "affine_quantities")]
+    ladder = [use_cost_of(results, f"safety/{r}") for r in ("raw_doubles", "simple_quantities",
+                                                            "typed_quantities", "affine_quantities")]
     if all(v is not None for v in ladder):
         raw, simple, typed, affine = ladder
-        rows += [["write the safety-ladder profile with raw doubles", str(raw), "safety/raw_doubles"],
-                 [f"the same at safety levels 1-4 (simple quantities)", f"{simple} (+{simple - raw})",
-                  "safety/simple_quantities"],
-                 ["add level 5, quantity safety (typed quantities)", f"{typed} (+{typed - simple})",
-                  "safety/typed_quantities"],
-                 ["add level 6, point/delta safety (affine)", f"{affine} (+{affine - typed})",
-                  "safety/affine_quantities"]]
+        rows += [["ladder", "write the safety-ladder profile with raw doubles", str(raw),
+                  "safety/raw_doubles"],
+                 ["ladder", "the same at safety levels 1-4 (simple quantities)",
+                  f"{simple} (+{simple - raw})", "safety/simple_quantities"],
+                 ["ladder", "add level 5, quantity safety (typed quantities)",
+                  f"{typed} (+{typed - simple})", "safety/typed_quantities"],
+                 ["ladder", "add level 6, point/delta safety (affine)",
+                  f"{affine} (+{affine - typed})", "safety/affine_quantities"]]
     return rows
 
+
+def use_cost_of(results, name):
+    """A workflow's instantiations over its own include twin, from one measured results dict."""
+    inst = GATED[0][1]
+    entry = results.get(name)
+    twin = results.get(entry.get("twin", "")) if isinstance(entry, dict) else None
+    v, t = (inst(entry) if isinstance(entry, dict) else None,
+            inst(twin) if isinstance(twin, dict) else None)
+    return v - t if isinstance(v, int) and isinstance(t, int) else None
+
+
+# The include sets the PAGE shows, in reading order: the framework alone, then SI from definitions
+# to the full umbrella, then one shallow ISQ chapter against the whole of ISQ, then the CODATA tiers.
+# Representative by design - the corpus measures every ISQ chapter and gains more as the library
+# grows, and listing all of them turned this table into the thing the page exists to replace.
+# ...and how each one is NAMED for a reader: the header a user would write, never the workflow's file
+# name - `si_lean`, `isq_space_and_time` and friends are this suite's internal labels, and a page that
+# prints them asks its reader to learn the corpus before reading the numbers.
+PAGE_INCLUDE_ROWS = (("control/core_only", "the core framework alone (`framework.h`)"),
+                     ("umbrella/si_units_umbrella", "SI unit definitions (`si/units.h`)"),
+                     ("umbrella/si_lean_umbrella", "lean SI (`si/core.h`)"),
+                     ("umbrella/si_umbrella", "full SI (`si.h`)"),
+                     ("umbrella/isq_space_and_time_umbrella",
+                      "one ISQ chapter (`isq/space_and_time.h`)"),
+                     ("umbrella/isq_umbrella", "full ISQ (`isq.h`)"),
+                     ("umbrella/codata_lean_umbrella",
+                      "essential CODATA constants (`codata/codata2022_essential.h`)"),
+                     ("umbrella/codata_2022_umbrella", "one CODATA adjustment (`codata/codata2022.h`)"),
+                     ("umbrella/codata_umbrella", "all CODATA adjustments (`codata.h`)"))
 
 PRICE_LIST_NOTE = ("Chapter and system rows include everything their header pulls in, so a chapter's own "
                    "cost is its row minus the chapters it includes (mechanics includes space_and_time). "
@@ -1072,12 +1129,18 @@ PRICE_LIST_NOTE = ("Chapter and system rows include everything their header pull
 
 
 def price_list_lines(results, tc: Toolchain):
-    """The price list as markdown, for `check` and single-ref `counts` output."""
+    """The price list as markdown, for `check` and single-ref `counts` output - one table, rows
+    grouped by category in include -> define -> use -> ladder order."""
     rows = price_list_rows(results)
     if not rows:
         return []
+    order = {"include": 0, "define": 1, "define-bare": 2, "use": 3, "print": 4, "ladder": 5}
+    verbs = {"include": "include ", "define": "define one ", "define-bare": "define one bare ",
+             "use": "", "print": "print quantities ", "ladder": ""}
+    shown = [[verbs[cat] + what, value, source]
+             for cat, what, value, source in sorted(rows, key=lambda r: order[r[0]])]
     return [f"### price list - `{config_key(tc)}`", "",
-            *markdown_table(["what one thing costs", "instantiations", "measured from"], rows),
+            *markdown_table(["what one thing costs", "instantiations", "measured from"], shown),
             "", PRICE_LIST_NOTE, ""]
 
 
@@ -1137,13 +1200,21 @@ def name_the_offenders(args, tc: Toolchain, repo: Path, recorded, offenders):
     commit is not reachable (shallow clone)."""
     sha = recorded.get("mp_units_sha")
     if not sha or not offenders:
-        return
+        return []
     try:
         base_repo = checkout(repo, sha, Path(args.worktree_cache).resolve())
     except (subprocess.CalledProcessError, FileNotFoundError):
-        gate_summary_line(f"cannot attribute the movement: baseline commit {sha[:9]} is not reachable "
-                          f"in {repo} - fetch it (or deepen the clone) to get named offenders", "warning")
-        return
+        # CI checks out mp-units shallow, so the baseline commit is usually absent - but GitHub
+        # serves arbitrary commits by sha, so one targeted fetch usually repairs it in seconds.
+        try:
+            run(["git", "-C", str(repo), "fetch", "--depth", "1", "origin", sha])
+            base_repo = checkout(repo, sha, Path(args.worktree_cache).resolve())
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            gate_summary_line(f"cannot attribute the movement: baseline commit {sha[:9]} is not "
+                              f"reachable in {repo} and fetching it failed - deepen the clone to get "
+                              f"named offenders", "warning")
+            return [f"(attribution skipped: baseline commit `{sha[:9]}` is not reachable in this "
+                    f"clone and fetching it failed)", ""]
     selections = {r: select_workflows(detect_version(r), None, tc.std) for r in (base_repo, repo)}
     lines = ["### what got slower, by entity", "",
              f"Instantiation events grouped by entity, baseline tree (`{sha[:9]}`) against the checked "
@@ -1163,8 +1234,7 @@ def name_the_offenders(args, tc: Toolchain, repo: Path, recorded, offenders):
                 continue
             lines += [f"#### {name}", "", *entity_diff_lines(then, now, "baseline", "current", top=10)]
             named += 1
-    if named:
-        emit_block(lines)
+    return lines if named else []
 
 
 def gate_slope_table(slopes, band, tc: Toolchain):
@@ -1182,18 +1252,14 @@ def gate_slope_table(slopes, band, tc: Toolchain):
               "quantity types, `broad` composes a new derived unit per step, and the `define_*` shapes "
               "define one entity per step - immune to library growth by construction, since their "
               "entities live in the workflow itself.", ""]
-    text = "\n".join(lines)
-    print(text)
-    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(summary, "a") as f:
-            f.write(text + "\n")
+    return lines
 
 
 def gate_summary_table(details, median, args, tc: Toolchain, label="instantiations"):
     """Every workflow with its measured value, its limit and the headroom left - so the distance to
     the bands is visible by observation, not inferred from a single pass/fail line."""
     if not details:
-        return
+        return []
     rows = []
     for name, d in sorted(details.items()):
         delta = d["rel"] * 100
@@ -1217,21 +1283,22 @@ def gate_summary_table(details, median, args, tc: Toolchain, label="instantiatio
                    f"{args.median_alarm:g}% alarm ({args.median_alarm - median * 100:+.2f}pp headroom)"
                    if median is not None else
                    f"gated at the same {args.slack:g}% band as instantiations; the median alarm "
-                   f"applies to instantiations only"),
-              "", "`basis` is what the numbers on that row ARE, chosen so that red means slower rather "
-              "than bigger: `use` is the workflow minus its own include twin (a system header gaining "
-              "entities moves both sides equally and cancels), `residual` compares an umbrella against "
-              "its baseline plus census growth priced at the recorded per-entity rates (equal to the "
-              "plain total whenever the census did not move), and `total` is the raw number, used only "
-              "where nothing better exists.",
-              "", "`headroom` is how much further a workflow could grow before it fails: negative means "
-              "it already has. A re-record resets every headroom to the full band, which is why "
-              "`bench.py update --workflows <filters>` exists - it moves only what you name.", ""]
-    text = "\n".join(lines)
-    print(text)
-    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(summary, "a") as f:
-            f.write(text + "\n")
+                   f"applies to instantiations only"), ""]
+    return lines
+
+
+# Printed ONCE under the evidence tables, not once per metric - four copies of the same two
+# paragraphs were a third of the old output's length.
+EVIDENCE_LEGEND = [
+    "`basis` is what the numbers on each row ARE, chosen so that red means slower rather "
+    "than bigger: `use` is the workflow minus its own include twin (a system header gaining "
+    "entities moves both sides equally and cancels), `residual` compares an umbrella against "
+    "its baseline plus census growth priced at the recorded per-entity rates (equal to the "
+    "plain total whenever the census did not move), and `total` is the raw number, used only "
+    "where nothing better exists.",
+    "", "`headroom` is how much further a workflow could grow before it fails: negative means "
+    "it already has. A re-record resets every headroom to the full band, which is why "
+    "`bench.py update --workflows <filters>` exists - it moves only what you name.", ""]
 
 
 def cmd_check(args):
@@ -1252,10 +1319,6 @@ def cmd_check(args):
                   for label, extract, _ in GATED}
     floors = {label: floor for label, _, floor in GATED}
     details = per_metric["instantiations"]
-    if price := price_list_lines(measured, tc):
-        emit_block(price)
-    if census_notes := census_growth_lines(per_metric, baseline, measured):
-        emit_block(census_notes)
 
     def past(d, label, band):
         """Both the percentage band and the metric's absolute floor have to be exceeded."""
@@ -1294,24 +1357,20 @@ def cmd_check(args):
              "entity_rates": rates_by_metric,
              "workflows": details,
              "metrics": {label: m for label, m in per_metric.items()}}, indent=2) + "\n")
-    for label, m in per_metric.items():
-        if m:
-            gate_summary_table(m, median if label == "instantiations" else None, args, tc, label)
-    if slopes:
-        gate_slope_table(slopes, slope_band, tc)
-    # One annotation, not one per workflow. Fifty-two identical ::error:: lines bury the finding they are
-    # reporting, and the per-metric table above already carries every delta with its headroom - so the
-    # annotation's job is only to name the worst case and say what to do about it.
+    failed = bool(regressions) or bool(slope_regressions) or median > alarm
+    units = dict(SLOPE_GATED)
+
+    # GitHub ANNOTATIONS first - one per finding, never one per workflow (fifty-two identical
+    # ::error:: lines bury the finding they report). Their prose is repeated in the verdict block
+    # below, which is what the step summary shows; the annotations exist for the checks UI.
     if regressions:
         worst = max(regressions.items(), key=lambda kv: kv[1]["rel"])
-        name, d = worst
         by_metric = collections.Counter(v["metric"] for v in regressions.values())
         spread = ", ".join(f"{n} {m}" for m, n in by_metric.most_common())
         gate_summary_line(
             f"{len(regressions)} regression(s) past the {args.slack:g}% band ({spread}); worst is "
-            f"{name} {d['baseline']} -> {d['current']} ({d['rel']:+.1%}). See the table above for all of "
-            f"them; if intentional, run bench.py update and commit the new baselines in this PR", "error")
-    units = dict(SLOPE_GATED)
+            f"{worst[0]} {worst[1]['baseline']} -> {worst[1]['current']} ({worst[1]['rel']:+.1%}). "
+            f"If intentional, run bench.py update and commit the new baselines in this PR", "error")
     for (label, shape), d in slope_regressions.items():
         gate_summary_line(
             f"marginal cost regression: the {shape} slope went {d['baseline']:.1f} -> {d['current']:.1f} "
@@ -1335,9 +1394,39 @@ def cmd_check(args):
             f"{len(improvements)} workflow(s) improved past the {args.tighten_notice:g}% notice band; best "
             f"is {best[0]} ({best[1]['rel']:+.1%}) - baselines can be tightened, run bench.py update in a "
             f"follow-up PR", "warning")
-    # Anything that moved past the advisory band gets NAMED, not just measured: attribution against
-    # the tree the baselines were recorded from, so the finding arrives with the failure instead of
-    # waiting for someone to rerun `attribute` by hand.
+    if not failed:
+        gate_summary_line(f"compile-cost gate OK (median instantiation delta {median:+.1%})"
+                          + (f"; {len(improvements)} workflow(s) improved - consider tightening baselines"
+                             if improvements else ""), "notice")
+
+    # The VERDICT block: what happened and why, before any evidence. The CI page used to open with
+    # three hundred rows of tables and state the conclusion underneath them - a reader met the
+    # evidence before the finding it was evidence for.
+    verdict = [f"## compile-cost gate: {'FAILED' if failed else 'OK'} - `{config_key(tc)}`", ""]
+    moved_rows = [[key, d.get("basis", "total"), f"{d['baseline']} -> {d['current']}",
+                   f"{d['rel']:+.2%}", "FAILS"]
+                  for key, d in sorted(regressions.items(), key=lambda kv: -kv[1]["rel"])]
+    moved_rows += [[f"scaling/{shape} slope [{label}]", "slope",
+                    f"{d['baseline']:.1f} -> {d['current']:.1f} per step", f"{d['rel']:+.2%}", "FAILS"]
+                   for (label, shape), d in sorted(slope_regressions.items(), key=lambda kv: -kv[1]["rel"])]
+    shown = len(moved_rows)
+    moved_rows += [[key, d.get("basis", "total"), f"{d['baseline']} -> {d['current']}",
+                    f"{d['rel']:+.2%}", "advisory"]
+                   for key, d in sorted(advisory.items(), key=lambda kv: -kv[1]["rel"])[:15 - min(shown, 15)]]
+    if moved_rows:
+        verdict += markdown_table(["what moved", "basis", "value", "delta", ""], moved_rows) + [""]
+    verdict += [f"- median across non-umbrella workflows (gated basis): **{median:+.2%}** against the "
+                f"{args.median_alarm:g}% alarm.",
+                f"- {len(regressions)} regression(s) past the {args.slack:g}% band, "
+                f"{len(slope_regressions)} slope regression(s) past {slope_band:.0%}, "
+                f"{len(advisory)} advisory, {len(improvements)} improved past the "
+                f"{args.tighten_notice:g}% tighten notice."
+                + (" If the growth is intentional, run `bench.py update` and commit the new baselines."
+                   if failed else ""), ""]
+
+    # Anything past the advisory band gets NAMED, not just measured: attribution against the tree
+    # the baselines were recorded from, so the finding arrives with the failure instead of waiting
+    # for someone to rerun `attribute` by hand.
     movers = {}
     for key, d in {**regressions, **advisory}.items():
         wf = key.rsplit(" [", 1)[0]
@@ -1346,16 +1435,38 @@ def cmd_check(args):
         sizes = [n for n in baseline if re.fullmatch(rf"scaling/{shape}_\d+", n)]
         if sizes:  # the largest workflow of the shape carries most of the slope
             movers[max(sizes, key=lambda n: int(n.rsplit("_", 1)[1]))] = d["rel"]
-    if movers and args.attribute_top:
-        name_the_offenders(args, tc, repo, recorded,
-                           sorted(movers, key=movers.get, reverse=True)[:args.attribute_top])
-    if not regressions and not slope_regressions and median <= alarm:
-        msg = f"compile-cost gate OK (median instantiation delta {median:+.1%})"
-        if improvements:
-            msg += f"; {len(improvements)} workflow(s) improved - consider tightening baselines"
-        gate_summary_line(msg, "notice")
-        return 0
-    return 1
+    named = name_the_offenders(args, tc, repo, recorded,
+                               sorted(movers, key=movers.get, reverse=True)[:args.attribute_top]) \
+        if movers and args.attribute_top else []
+
+    # Emission order: verdict, the names, what growth was priced at, the price list, the slopes -
+    # then the full per-workflow evidence, collapsed (a <details> block in the summary, a foldable
+    # ::group:: in the raw log), because its job is to be checkable, not to be scrolled past.
+    visible = [*verdict, *named, *census_growth_lines(per_metric, baseline, measured),
+               *price_list_lines(measured, tc),
+               *(gate_slope_table(slopes, slope_band, tc) if slopes else [])]
+    evidence = []
+    for label, m in per_metric.items():
+        if m:
+            evidence += gate_summary_table(m, median if label == "instantiations" else None, args, tc, label)
+    if evidence:
+        evidence += EVIDENCE_LEGEND
+    print("\n".join(visible))
+    if evidence:
+        print("::group::per-workflow evidence (value vs baseline on the gated basis, with headroom)")
+        print("\n".join(evidence))
+        print("::endgroup::")
+    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(summary, "a") as f:
+            f.write("\n".join(visible) + "\n")
+            if evidence:
+                # A 270-row table is consulted by diff tools, never by scrolling: the page points at
+                # the artifact and the raw log keeps a foldable copy for spot checks.
+                f.write("Per-workflow evidence - every metric's value vs baseline on the gated basis, "
+                        "with the headroom to its band - is in `results/report.json` in this run's "
+                        "artifact; the raw log of this step carries the same tables in a collapsed "
+                        "group.\n")
+    return 1 if failed else 0
 
 
 def cmd_update(args):
@@ -1411,7 +1522,6 @@ METRICS = (("instantiations", "template instantiations (InstantiateClass + Insta
            ("function_decls", "function declarations (what a declaration-only change moves, and nothing "
                               "else does)"),
            ("decls_total", "declarations in the AST (every kind, for context under the row above)"),
-           ("types_total", "types in the AST"),
            ("code_bytes", "emitted code (bytes reaching the binary - what the optimizer's time tracks)"),
            ("symbol_bytes", "symbol metadata (bytes of mangled names and relocations - linker input)"),
            ("time_ms", "wall time (ms, best of K - only trustworthy on a quiet machine)"),
@@ -1430,7 +1540,7 @@ METRICS = (("instantiations", "template instantiations (InstantiateClass + Insta
 # arms that move declarations at all - the hidden-friend conversions and the CRTP fallback - it moved in
 # the same direction and by less. A type is created by declaring something; the library has no design
 # decision that adds types without declarations, so the row would repeat the one above it.
-UNRENDERED = ("symbol_bytes", "types_total")
+UNRENDERED = ("symbol_bytes",)
 REPORTED = tuple(m for m in METRICS if m[0] not in UNRENDERED)
 
 
@@ -1496,14 +1606,14 @@ def cmd_report(args):
     counts = {ref: measure_counts(r, tc, args.workflows) if tc.is_clang else {}
               for ref, r in repos.items()}
     metrics = {metric: {} for metric, _ in METRICS}
+    twins = {ref: {name: entry["twin"] for name, entry in counts[ref].items()
+                   if isinstance(entry, dict) and "twin" in entry} for ref in refs}
     for ref in refs:
         for name, entry in sorted(counts[ref].items()):
-            if name.startswith("include/"):
-                continue  # the twins feed the gate's use basis; as report rows they are noise
             metrics["instantiations"].setdefault(name, {})[ref] = "FAIL" if entry == "FAIL" else total(entry)
             if isinstance(entry, dict):
                 metrics["const_evals"].setdefault(name, {})[ref] = entry.get("EvaluateAsConstantExpr")
-                for key in ("code_bytes", "symbol_bytes", "function_decls", "decls_total", "types_total"):
+                for key in ("code_bytes", "symbol_bytes", "function_decls", "decls_total"):
                     metrics[key].setdefault(name, {})[ref] = entry.get(key)
         for name, entry in sorted(timed[ref].items()):
             # None means the workflow does not apply to this ref (version floor); "FAIL" means it
@@ -1516,17 +1626,32 @@ def cmd_report(args):
     payload = {"cxx": args.cxx, "cxx_version": tc.version(), "std": tc.std, "reps": args.reps,
                "stdlib": tc.standard_library, "config_label": tc.label, "config_key": config_key(tc),
                "host": platform.node(), "cpu": cpu_model(), "extra_flags": tc.extra,
+               # Hostnames cannot identify a machine (see same_machine); only runs that share this
+               # explicitly-passed tag may have their wall clocks compared against each other.
+               "machine_tag": args.machine_tag,
+               # A filtered run measures a different corpus: its totals may not sit beside a full
+               # run's in any table, though its same-machine PAIRS remain the point of measuring it.
+               "subset": bool(args.workflows),
                "refs": {ref: {"mp_units_version": ".".join(map(str, detect_version(repos[ref]))),
                               **git_provenance(repos[ref])} for ref in refs},
-               # The corpus reduced to its answers, carried per ref so `summary` can lead with it.
+               # The corpus reduced to its answers, carried per ref so `summary` can lead with it,
+               # plus each workflow's include-twin row so use-costs stay derivable from the payload.
                "price_list": {ref: rows for ref in refs if (rows := price_list_rows(counts[ref] or {}))},
+               "twins": twins,
                "metrics": metrics}
-    print(render_report([payload]))
+    # The page is what a human reads; the full tables are for the artifact and for diffing. Emitting
+    # the page to stdout keeps `report > page.md` the natural CI idiom.
+    print(render_compact([payload]))
+    if args.full_output:
+        full = Path(args.full_output)
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(render_report([payload]) + "\n")
+        print(f"full tables written to {full}", file=sys.stderr)
     if args.output:
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(payload, indent=2) + "\n")
-        print(f"\nreport written to {out}", file=sys.stderr)
+        print(f"report written to {out}", file=sys.stderr)
 
 
 FAMILIES = ("clang", "gcc")
@@ -1808,7 +1933,7 @@ def pct(old, new):
         else (new - old) / old
 
 
-def findings(cells, keys, refs):
+def findings(cells, keys, refs, tags=None):
     """The few sentences worth reading, ranked. Everything else is in the tables below them.
 
     Written for someone who has never used the library: each item names the effect and what follows
@@ -1819,7 +1944,7 @@ def findings(cells, keys, refs):
     memory = cells.get("peak_mib", {})
     plain = sorted([k for k in keys if "-modules" not in k and "-importstd" not in k],
                    key=lambda k: (version_of(k), k))
-    workflows = sorted(w for w in inst if not w.startswith("bmi/"))
+    workflows = sorted(w for w in inst if not w.startswith(("bmi/", "include/")))
 
     # 1. anything that did not build at all
     broken = sorted({f"{w} ({k})" for metric in cells.values() for w, row in metric.items()
@@ -1917,13 +2042,29 @@ def findings(cells, keys, refs):
         build = combine_totals("time_ms", time, [i for i in BMI_ORDER if i in time], col, ref)
         disk = combine_totals("mib_on_disk", cells.get("mib_on_disk", {}),
                               [i for i in BMI_ORDER if i in cells.get("mib_on_disk", {})], col, ref)
-        if t and m:
+        # A wall-clock claim needs both arms on ONE machine (see same_machine): the fleet's arms each
+        # get their own runner, and comparing those produced a "modules are faster" belief that
+        # dissolved under a controlled measurement. Without a shared tag this speaks in
+        # instantiations only, which are exact everywhere.
+        i = [pct(inst[w].get((base, ref)), inst[w].get((col, ref))) for w in workflows if w in inst]
+        i = [x for x in i if x is not None]
+        tagged = (tags or {}).get(col) and (tags or {}).get(col) == (tags or {}).get(base)
+        once = (f", after building the module interfaces once: {build / 1000:.0f} s"
+                f"{f' and {disk:.0f} MiB on disk' if disk else ''}." if build else ".")
+        if t and m and tagged:
             out.append(f"Consuming the library as C++20 modules (`{col}`) compiles each file "
                        f"**{abs(statistics.median(t)):.0%} {'faster' if statistics.median(t) < 0 else 'slower'}** "
                        f"and uses **{abs(statistics.median(m)):.0%} "
-                       f"{'more' if statistics.median(m) > 0 else 'less'} memory**"
-                       + (f", after building the module interfaces once: {build / 1000:.0f} s"
-                          f"{f' and {disk:.0f} MiB on disk' if disk else ''}." if build else "."))
+                       f"{'more' if statistics.median(m) > 0 else 'less'} memory** on one machine"
+                       + once)
+        elif i:
+            out.append(f"Consuming the library as C++20 modules (`{col}`) needs "
+                       f"**{abs(statistics.median(i)):.0%} "
+                       f"{'fewer' if statistics.median(i) < 0 else 'more'} instantiations** per file"
+                       + once
+                       + " Its wall clock is not reported here: this run measured the two arms on "
+                         "different machines, and that comparison is noise (a control workflow using "
+                         "no mp-units at all has measured 40% apart across runners).")
         break  # one such statement is enough; the section below has the rest
 
     # 6. how much of any improvement is really the compiler - only across keys of the same SHAPE, so a
@@ -1977,7 +2118,7 @@ def corpus_pair(then_payload, then_ref, now_payload, now_ref, metric):
     one total and read as the library moving. On this run the difference was not cosmetic: summing each
     side's own set said -6.7% where the intersection says -19.0%. Returns (then, now, entries dropped)."""
     then_per, now_per = then_payload["metrics"].get(metric, {}), now_payload["metrics"].get(metric, {})
-    names = {n for n in set(then_per) | set(now_per) if not n.startswith("bmi/")}
+    names = {n for n in set(then_per) | set(now_per) if not n.startswith(("bmi/", "include/"))}
     pairs = [(then_per.get(n, {}).get(then_ref), now_per.get(n, {}).get(now_ref)) for n in names]
     both = [(a, b) for a, b in pairs if isinstance(a, (int, float)) and isinstance(b, (int, float))]
     if not both:
@@ -2209,6 +2350,11 @@ def run_over_run(payloads, previous):
     return "\n".join(md), [finding] if finding else []
 
 
+def price_row_4(row):
+    """Payloads written before categories carry (what, value, source) rows; normalize to 4 fields."""
+    return row if len(row) == 4 else ["", *row]
+
+
 def price_list_section(payloads, refs):
     """One price-list table per configuration that carried one, matched by row label across refs.
 
@@ -2222,7 +2368,7 @@ def price_list_section(payloads, refs):
             continue
         values, order = {}, []
         for ref in cols:
-            for what, value, _source in per_ref[ref]:
+            for _cat, what, value, _source in map(price_row_4, per_ref[ref]):
                 if what not in values:
                     values[what] = {}
                     order.append(what)
@@ -2235,7 +2381,10 @@ def price_list_section(payloads, refs):
     return lines
 
 
-def render_report(payloads, previous=None):
+def prepare(payloads, previous=None):
+    """The shared reduction both renderers start from: refs oldest-first, one key per payload, the
+    (metric, workflow, (key, ref)) -> value cell store, the provenance notes, and the comparison
+    section (range for a two-ref run, previous-run control for a single-ref one)."""
     refs = refs_oldest_first(payloads)
     # A run that measured a range answers for that range. Comparing its newest ref against the previous
     # run's newest would compare master with master, report "nothing moved", and lead a report whose
@@ -2263,6 +2412,408 @@ def render_report(payloads, previous=None):
         info = next(p["refs"][ref] for p in payloads if ref in p["refs"])
         notes.append(f"- `{ref}` - mp-units {info['mp_units_version']}"
                      f" ({info.get('mp_units_describe', 'unknown tree')})")
+    return refs, keys, cells, notes, comparison_md, comparison_findings
+
+
+def bar(value, vmax, width=10, ch="█", decimals=None):
+    """A magnitude as repeated blocks in a code span, the number beside it. Only full-width glyphs:
+    the partial-width ones (and the light-shade track) render ragged in enough fonts that review
+    screenshots showed ghosting. Zero-length bars render as no bar at all.
+
+    `decimals` pins the precision, which a column of numbers needs: letting each cell choose printed
+    `125` next to `119.8` and `7 s` next to `12.5 s`, and a column whose decimal point wanders is
+    read one cell at a time."""
+    if not isinstance(value, (int, float)) or not isinstance(vmax, (int, float)) or vmax <= 0:
+        return fmt_value(value)
+    if decimals is not None:
+        shown = f"{value:,.{decimals}f}"
+    else:
+        shown = f"{value:,}" if isinstance(value, int) or value == int(value) else f"{value:,.1f}"
+        shown = shown.removesuffix(".0") if "." in shown else shown
+    # At least one block for anything nonzero: a bare number in a column of bars reads as a missing
+    # measurement, when what it means is "too small to draw at this scale".
+    n = max(1, round(width * value / vmax)) if value > 0 else 0
+    return f"`{ch * n}` {shown}".strip() if n else shown
+
+
+def same_machine(p, q):
+    """Whether two payloads' wall clocks may be compared. Hostnames cannot decide this: every
+    GitHub runner reports the same generic name while the actual CPUs differ by model and vendor
+    (one run's fleet spanned Xeon 8573C, EPYC 7763 and EPYC 9V74 under a single hostname). Only an
+    explicit shared `--machine-tag`, set by a job that runs both measurements on one VM, counts."""
+    return bool(p.get("machine_tag")) and p.get("machine_tag") == q.get("machine_tag")
+
+
+def config_family_rows(keys):
+    """Configuration keys grouped for the per-configuration table: plain builds sorted by family and
+    version, each followed by its own -importstd/-modules variants, indented."""
+    plain = sorted([k for k in keys if "-modules" not in k and "-importstd" not in k], key=config_order)
+    ordered = []
+    for base in plain:
+        ordered.append((base, base))
+        stem = base
+        for suffix in ("-importstd", "-modules-importstd", "-modules"):
+            variant = stem + suffix if stem + suffix in keys else None
+            if variant and variant not in [k for k, _ in ordered]:
+                label = "&nbsp;&nbsp;└ " + ("import std" if suffix == "-importstd" else "modules")
+                ordered.append((variant, label))
+    for k in sorted(keys, key=config_order):  # variants whose plain build was not measured
+        if k not in [key for key, _ in ordered]:
+            ordered.append((k, k))
+    return ordered
+
+
+def render_compact(payloads, previous=None):
+    """The page: what changed, one row per configuration, the price list split by question, the
+    modules interfaces, and the safety ladder - two screens that answer "what does using this cost
+    and did it move", with every per-workflow cell left to the full report in the artifact.
+
+    Every caption states what its metric IS and how it was measured, because the page is read by
+    people who were not in the room. Wall-clock rows are compared only within one machine: the
+    per-configuration table's time bars are softened (each row is its own runner), the ladder
+    renders only when a headers payload and a modules payload share a host."""
+    refs, keys, cells, notes, comparison_md, comparison_findings = prepare(payloads, previous)
+    newest = refs[-1] if refs else None
+    inst_cells = cells.get("instantiations", {})
+    time_cells = cells.get("time_ms", {})
+    info = next((p["refs"][newest] for p in payloads if newest in p.get("refs", {})), {}) if newest else {}
+    lines = [f"# Compile cost - mp-units {info.get('mp_units_describe', newest or '?')} "
+             f"({len(keys)} configuration{'s' if len(keys) != 1 else ''})", ""]
+
+    tags = {(p.get("config_key") or p["cxx"]): p.get("machine_tag") for p in payloads}
+    story = comparison_findings + findings(cells, keys, refs, tags)
+    if story:
+        lines += ["## What changed", "", *[f"{i}. {s}" for i, s in enumerate(story, 1)], ""]
+    if comparison_md:
+        lines += [comparison_md, ""]
+
+    # one row per configuration - full-corpus runs only, since the column is a corpus total
+    full_keys = [(p.get("config_key") or p["cxx"]) for p in payloads if not p.get("subset")]
+    per_config = []
+    for key, label in config_family_rows(full_keys):
+        tot = sum(v for w, row in inst_cells.items() if not w.startswith(("bmi/", "include/"))
+                  and isinstance((v := row.get((key, newest))), int))
+        slopes = scaling_fit(inst_cells, key, newest)
+        slope = slopes.get("broad", (None,))[0]
+        wall = sum(v for w, row in time_cells.items() if not w.startswith(("bmi/", "include/"))
+                   and isinstance((v := row.get((key, newest))), (int, float)))
+        per_config.append((label, tot or None, slope, wall or None))
+    if per_config:
+        one_machine = len({p.get("machine_tag") for p in payloads if not p.get("subset")}) == 1 \
+            and all(p.get("machine_tag") for p in payloads if not p.get("subset"))
+        imax = max((t for _, t, _, _ in per_config if t), default=0)
+        smax = max((s for _, _, s, _ in per_config if s), default=0)
+        wmax = max((w for _, _, _, w in per_config if w), default=0)
+        rows = [[label, bar(t, imax) if t else "n/a",
+                 bar(s, smax, 12, decimals=1) if s else "n/a",
+                 bar(w / 1000, wmax / 1000, 10, "▒", decimals=0) + " s" if w else "n/a"]
+                for label, t, s, w in per_config]
+        # A range run keeps this table too - the comparison section above carries the deltas, this
+        # one the absolute picture across the fleet, which is what the page opens with either way.
+        lines += ["## Per configuration"
+                  + (f" - values for `{newest}`" if len(refs) > 1 else ""), "",
+                  *markdown_table(["configuration", "instantiations", "broad slope /step",
+                                   "wall clock"], rows), "",
+                  "> **Instantiations** count the templates the compiler stamps out for the whole corpus "
+                  "(`InstantiateClass` + `InstantiateFunction` from clang's `-ftime-trace`) - "
+                  "bit-deterministic for a pinned compiler, so any two rows are exactly comparable. The "
+                  "**broad slope** comes from the `scaling/` series as (cost at 256 steps - cost at 16 "
+                  "steps) / 240: what one more distinct derived unit costs in user code. **Wall clock** "
+                  "is an untraced compile of the whole corpus, best-of-K; "
+                  + ("every arm here shares one machine, so its bars are a fair comparison too"
+                     if one_machine else
+                     "each configuration runs on its own CI machine, so its softer bars say "
+                     "direction, not magnitude")
+                  + ". Variants are "
+                  "indented under their compiler; the bars carry the cross-compiler comparison even "
+                  "where rows are not adjacent.", ""]
+
+    # the price list, one table per question, from the newest gate-capable payload
+    # The price list speaks for ONE configuration, so it must be the most representative one: the
+    # newest plain build that produced counts - how the library is consumed today, on the best
+    # compiler available - not whichever payload happens to sort first (that was clang 17).
+    candidates = [(k, p) for k, p in payload_rows(payloads) if newest in (p.get("price_list") or {})]
+    price_payload = next(
+        (p for _, p in sorted(candidates, reverse=True,
+                              key=lambda kp: (("-modules" not in kp[0] and "-importstd" not in kp[0]),
+                                              version_of(kp[0])))), None)
+    if price_payload:
+        key = price_payload.get("config_key") or price_payload["cxx"]  # heading names its source
+        rows4 = [price_row_4(r) for r in price_payload["price_list"][newest]]
+        price_lines = []
+
+        # INCLUDING - a curated ladder of include sets, small to large within each family. The page
+        # deliberately does not list every ISQ chapter: the corpus measures nine and gains more as
+        # the library grows, while the reader needs the shape of the cost, which one shallow chapter
+        # against the whole of ISQ shows exactly as the codata tiers do. Every chapter still lives in
+        # the artifact's full tables, still gates, and still prices the rates.
+        by_source = {s: (what, value) for _c, what, value, s in rows4 if _c == "include"}
+        incl_rows = []
+        for wf, label in PAGE_INCLUDE_ROWS:
+            if wf not in by_source:
+                continue
+            what, value = by_source[wf]
+            iv = int(m.group()) if (m := re.match(r"\d+", value)) else None
+            entities = re.search(r"(\d+) entities", what)  # the generic row names the census
+            shown = label + (f" - {entities.group(1)} entities" if entities else "")
+            incl_rows.append([shown, iv, value[len(str(iv)):] if iv is not None else "",
+                              time_cells.get(wf, {}).get((key, newest))])
+        if incl_rows:
+            imax = max((r[1] for r in incl_rows if r[1]), default=0)
+            mmax = max((r[3] for r in incl_rows if isinstance(r[3], (int, float))), default=0)
+            table = [[what, bar(iv, imax) + tail if iv else "n/a",
+                      bar(ms / 1000, mmax / 1000, 10, "\u2592", decimals=1) + " s"
+                      if isinstance(ms, (int, float)) else "n/a"]
+                     for what, iv, tail, ms in incl_rows]
+            price_lines += [f"### including headers - `{key}`", "",
+                            *markdown_table(["what a TU pays before its first line of code",
+                                             "instantiations", "wall clock"], table), "",
+                            "> One traced compile of an empty-main TU per include set - the constant "
+                            "cost a file pays whatever its size, both columns from one machine. The "
+                            "chapters and tiers shown are representative; every measured include set "
+                            "is in the run artifact's full tables.", ""]
+
+        # DEFINING - one row per entity kind, cheapest first, with both prices side by side: what the
+        # system charges for one as it ships it, and what the bare definition costs on its own. The
+        # gap between the columns IS the ecosystem, which is the finding the two numbers exist for.
+        shipped = {what: v for c, what, v, _s in rows4 if c == "define"}
+        bare = {what: v for c, what, v, _s in rows4 if c == "define-bare"}
+        def as_float(v):
+            try:
+                return float(str(v).split("/")[0])
+            except ValueError:
+                return None
+        kinds = sorted(set(shipped) | set(bare), key=lambda k: as_float(shipped.get(k)) or 0)
+        if kinds:
+            table = [[k, shipped.get(k, "n/a"),
+                      bare.get(k, "n/a").removesuffix("/step") if k in bare else "-"] for k in kinds]
+            price_lines += [f"### defining entities - `{key}`", "",
+                            *markdown_table(["what one definition costs", "as its system ships it",
+                                             "the bare definition"], table), "",
+                            "> Marginal prices, not averages of mixed kinds: the shipped rate comes "
+                            "from a pair of umbrella rows whose entity censuses differ in (almost) "
+                            "only that kind, with previously-priced kinds subtracted; the bare price "
+                            "is a `scaling/define_*` slope, where the entity is defined in the "
+                            "workflow itself. The difference between the columns is the ecosystem an "
+                            "entity arrives with - symbol tables, kind resolution, equations, "
+                            "uncertainty payloads. The quantity spec's **0.0 is real, not a gap**: "
+                            "under the deducing-this API a leaf spec derives from "
+                            "`quantity_spec<parent>`, so every sibling leaf shares that one "
+                            "specialization and the next one instantiates nothing new - it still "
+                            "costs declarations and one constant evaluation, which the gate watches "
+                            "separately.", ""]
+
+        # WRITING - composing quantities, then printing them: two different questions that shared one
+        # table until a reader asked why they were together.
+        for cat, title, what_col, caption in (
+                ("use", f"composing quantities - `{key}`",
+                 "what user code costs, over the headers it includes",
+                 "> Every row is a workflow MINUS an empty-main twin with its exact includes, so the "
+                 "header cost cancels and only the written code remains. The first two rows are the "
+                 "SAME computation mirrored line for line, differing only in whether references "
+                 "carry a quantity spec - so their ratio is the price of safety level 5 per distinct "
+                 "derived quantity."),
+                ("print", f"printing quantities - `{key}`", "output facility",
+                 "> The `text/` family shares one workload header and differs only in the output "
+                 "facility, so these differences price the facility alone. Use-cost, as above.")):
+            cat_rows = [r for r in rows4 if r[0] == cat]
+            if not cat_rows:
+                continue
+            table = [[what, value] for _c, what, value, _s in cat_rows]
+            if cat == "use":
+                slopes_here = {s.split("/")[-1].removesuffix(" slope"): v
+                               for _c, _w, v, s in cat_rows if s.endswith(" slope")}
+                b, tb = slopes_here.get("broad"), slopes_here.get("typed_broad")
+                if b and tb:  # the pair exists to be subtracted; do it for the reader
+                    bf, tf = float(b.split("/")[0]), float(tb.split("/")[0])
+                    idx = next(i for i, r in enumerate(table) if "TYPED" in r[0]) + 1
+                    table.insert(idx, ["\u2192 the level-5 tax per derived quantity",
+                                       f"**+{tf - bf:.1f}/step, {tf:.1f} / {bf:.1f} = "
+                                       f"{tf / bf:.2f}\u00d7**"])
+            price_lines += [f"### {title}", "",
+                            *markdown_table([what_col, "instantiations"], table), "", caption, ""]
+
+        if price_lines:
+            lines += ["## Price list", "", *price_lines]
+
+    # C++20 modules: the interfaces, then what consuming them buys
+    lines += modules_compact_section(payloads, refs, cells)
+    lines += ladder_compact_section(payloads, refs)
+
+    lines += ["---", "",
+              "**Full data:** this run's `compile-cost-report` artifact carries this page as markdown, "
+              "the complete per-workflow x per-metric x per-configuration tables, and one JSON per "
+              "arm for machine diffing. This page is the summary of that artifact, never a substitute "
+              "for it.", "",
+              "<details><summary>How this was measured</summary>", "", *notes, "", "</details>"]
+    return "\n".join(lines)
+
+
+def modules_compact_section(payloads, refs, cells):
+    """The per-interface breakdown (the abstraction lives in `mp_units.systems`), then per compiler
+    what consuming the module buys - instantiations trusted, wall clock cross-runner-guarded."""
+    newest = refs[-1] if refs else None
+    rows_bmi, per_compiler = [], []
+    # One breakdown table, from the NEWEST modules arm: the interfaces evolve with the compiler, and
+    # the reader wants today's numbers, not the oldest supported toolchain's.
+    subsets = {(q.get("config_key") or q["cxx"]) for q in payloads if q.get("subset")}
+    modules_keys = sorted((k for k, _ in payload_rows(payloads) if "-modules" in k),
+                          key=lambda k: (k not in subsets, version_of(k), k), reverse=True)
+    for key, p in sorted(payload_rows(payloads),
+                         key=lambda kp: modules_keys.index(kp[0]) if kp[0] in modules_keys else 99):
+        if "-modules" not in key:
+            continue
+        tm, disk = p["metrics"].get("time_ms", {}), p["metrics"].get("mib_on_disk", {})
+        mem, inst = p["metrics"].get("peak_mib", {}), p["metrics"].get("instantiations", {})
+        interfaces = [w for w in BMI_ORDER if isinstance(tm.get(w, {}).get(newest), (int, float))]
+        if interfaces and not rows_bmi:
+            for w in interfaces:
+                iv = inst.get(w, {}).get(newest)
+                rows_bmi.append([w.removeprefix("bmi/"),
+                                 f"{tm[w][newest] / 1000:.1f} s",
+                                 f"{disk.get(w, {}).get(newest, 0) or 0:.1f} MiB",
+                                 f"{mem.get(w, {}).get(newest, 0) or 0:,.0f} MiB",
+                                 f"{iv:,}" if isinstance(iv, int) else "n/a"])
+            def col(metric, combine=sum):
+                vals = [v for w in interfaces if isinstance((v := metric.get(w, {}).get(newest)),
+                                                            (int, float))]
+                return combine(vals) if vals else None
+            rows_bmi.append(["**total**", f"**{(col(tm) or 0) / 1000:.1f} s**",
+                             f"**{col(disk) or 0:.1f} MiB**",
+                             f"peak **{col(mem, max) or 0:,.0f} MiB**", f"**{col(inst) or 0:,}**"])
+            bmi_key = key
+        # Against the PLAIN build of the same compiler - headers, no `import std` - never against an
+        # intermediate configuration: "modules are worth X" has to mean X against how the library is
+        # consumed today. `counterparts` strips both tokens, which is also what makes the A/B job's
+        # pair (`...-ab` vs `...-modules-importstd-ab`) resolve at all.
+        plain_key = counterparts([key], [k for k, _ in payload_rows(payloads)]).get(key)
+        plain = next((q for k2, q in payload_rows(payloads) if k2 == plain_key), None)
+        if plain is None:
+            continue
+        def corpus(payload, metric):
+            per = payload["metrics"].get(metric, {})
+            vals = [v for w, row in per.items() if not w.startswith(("bmi/", "include/"))
+                    and isinstance((v := row.get(newest)), (int, float))]
+            return sum(vals) if vals else None
+        mi, hi = corpus(p, "instantiations"), corpus(plain, "instantiations")
+        mt, ht = corpus(p, "time_ms"), corpus(plain, "time_ms")
+        build = sum(v for w in BMI_ORDER if isinstance((v := tm.get(w, {}).get(newest)), (int, float)))
+        wall = (f"{(mt - ht) / ht:+.0%}" + ("" if same_machine(p, plain) else " (different runners)")
+                if mt and ht else "n/a")
+        per_compiler.append([key, f"{build / 1000:.1f} s" if build else "n/a",
+                             f"**{(mi - hi) / hi:+.1%}**" if mi and hi else "n/a", wall])
+    per_compiler.sort(key=lambda r: config_order(r[0]))
+    out = []
+    if rows_bmi:
+        out += [f"## C++20 modules", "", f"### module interfaces - `{bmi_key}`", "",
+                *markdown_table(["interface", "build", "on disk", "peak memory", "instantiations"],
+                                rows_bmi), "",
+                "> Each interface is built once per configuration; `mp_units.systems` is where the "
+                "abstraction lives - it includes every system umbrella (the full CODATA tables among "
+                "them), which is most of the build time, the disk footprint, the peak memory and the "
+                "instantiations of the whole set.", ""]
+    if per_compiler:
+        out += [*markdown_table(["compiler", "interface build (once)",
+                                 "consumer instantiations vs headers", "consumer wall clock"],
+                                per_compiler), "",
+                "> Consumer instantiations are deterministic and exactly comparable; a consumer "
+                "wall-clock delta is only meaningful when both arms ran on one machine, and is "
+                "labelled when they did not.", ""]
+    return out
+
+
+def ladder_compact_section(payloads, refs):
+    """The safety ladder, time-first, three questions - rendered only from payload pairs that share
+    a HOST, because its wall-clock columns compare headers against `import mp_units;` and a
+    cross-runner comparison of those is exactly the mistake this suite exists to prevent."""
+    newest = refs[-1] if refs else None
+    rungs = (("raw doubles", "safety/raw_doubles"), ("levels 1-4", "safety/simple_quantities"),
+             ("+ level 5", "safety/typed_quantities"), ("+ level 6", "safety/affine_quantities"))
+    pair = None
+    for key, p in payload_rows(payloads):
+        if "-modules" in key:
+            continue
+        mod = next((q for k2, q in payload_rows(payloads) if "-modules" in k2
+                    and same_machine(p, q)), None)
+        if mod and all(w in p["metrics"].get("time_ms", {}) for _, w in rungs):
+            pair = (p, mod)
+            break
+    if not pair:
+        return []
+    plain, mod = pair
+
+    def t(payload, name):
+        v = payload["metrics"].get("time_ms", {}).get(name, {}).get(newest)
+        return v if isinstance(v, (int, float)) else None
+
+    def use_inst(payload, name):
+        inst = payload["metrics"].get("instantiations", {})
+        twin = (payload.get("twins") or {}).get(newest, {}).get(name)
+        v, tw = inst.get(name, {}).get(newest), inst.get(twin, {}).get(newest) if twin else None
+        return v - tw if isinstance(v, int) and isinstance(tw, int) else None
+
+    def twin_t(payload, name):
+        twin = (payload.get("twins") or {}).get(newest, {}).get(name)
+        return t(payload, twin) if twin else None
+
+    def bar_rows(value_of, ch, unit="", decimals=None):
+        """One table's rows with bars scaled to the table's own maximum, shared across both
+        columns - the columns carry the same unit, and cross-column length comparison is the point."""
+        values = {(wf, i): value_of(side, wf)
+                  for _, wf in rungs for i, side in enumerate((plain, mod))}
+        vmax = max((v for v in values.values() if isinstance(v, (int, float))), default=0)
+        return [[label, *[(bar(values[(wf, i)], vmax, 10, ch, decimals) + unit
+                           if values[(wf, i)] is not None else "n/a")
+                          for i in (0, 1)]] for label, wf in rungs]
+
+    def use_t(payload, name):
+        """Wall clock of the code the user wrote: the whole TU minus its inclusion twin. A difference
+        of two best-of-K measurements, so a few milliseconds here is the noise floor, not a signal -
+        but it keeps this table in the same unit as the two around it, and gives the raw-doubles rung
+        a nonzero baseline that ratios can actually be taken against."""
+        whole, twin = t(payload, name), twin_t(payload, name)
+        return max(0, whole - twin) if whole is not None and twin is not None else None
+
+    incl = bar_rows(twin_t, "▒", " ms", decimals=0)
+    use = bar_rows(use_t, "▒", " ms", decimals=0)
+    total = bar_rows(t, "▒", " ms", decimals=0)
+    # The counts stay beside the times: they are what the gate reads and the only exactly comparable
+    # column, while the time is what the user waits for.
+    for row, (_label, wf) in zip(use, rungs):
+        row.append(" -> ".join(f"{v:,}" if (v := use_inst(side, wf)) is not None else "n/a"
+                               for side in (plain, mod)))
+    if all(row[1] == "n/a" for row in incl + total):
+        return []
+    return ["## The safety ladder", "",
+            "One small engineering computation, written four times with identical std includes and "
+            "identical printed output - only the safety level differs. Both columns of every table "
+            f"were measured on ONE machine (`{plain.get('host', '?')}`), which is what makes the "
+            "headers-vs-import comparison fair.", "",
+            "### 1. getting the library into the TU", "",
+            *markdown_table(["rung", "headers", "import mp_units;"], incl), "",
+            "> An empty-main TU with each rung's exact includes, untraced, best-of-K: the constant "
+            "cost paid whatever the file's size.", "",
+            "### 2. the code the user writes", "",
+            *markdown_table(["rung", "headers", "import mp_units;",
+                             "instantiations (headers -> import)"], use), "",
+            "> Each rung MINUS its inclusion twin: the wall clock of the code the user wrote, in the "
+            "same unit as the tables around it, with the deterministic counts beside it. Those "
+            "counts are exactly comparable and are what the gate reads; the times are differences of "
+            "two best-of-K measurements, so single-digit milliseconds there are the noise floor. The "
+            "raw-doubles rung instantiates exactly 0 templates - a TU computing with `double` has "
+            "none - so read the library rungs' counts as ABSOLUTE additions rather than as a ratio "
+            "against zero; between two library rungs a ratio is meaningful again, which is what the "
+            "level-5 tax in the price list is.", "",
+            "### 3. what the user actually waits for", "",
+            *markdown_table(["rung", "whole TU (headers)", "whole TU (import)"], total), "",
+            "> The whole translation unit, compiled as a user would compile it. Wall clock and "
+            "instantiations answer different questions - a modules consumer can instantiate almost "
+            "nothing and still pay seconds of lazy BMI deserialization at the first use of a name - "
+            "which is why this section shows both, from one machine.", ""]
+
+
+def render_report(payloads, previous=None):
+    refs, keys, cells, notes, comparison_md, comparison_findings = prepare(payloads, previous)
 
     module_keys = [k for k in keys if "-modules" in k]
     header_keys = [k for k in keys if "-modules" not in k]
@@ -2340,7 +2891,8 @@ def render_report(payloads, previous=None):
               "- **FAIL** - the workflow applies to that ref but did not compile."]
     if len(refs) == 2:
         legend.insert(0, f"- Cells read `{refs[0]} -> {refs[1]} (change)`, oldest library version first.")
-    story = comparison_findings + findings(cells, keys, refs)
+    tags = {(p.get("config_key") or p["cxx"]): p.get("machine_tag") for p in payloads}
+    story = comparison_findings + findings(cells, keys, refs, tags)
     if story:
         story = ["## What changed", "", *[f"{i}. {s}" for i, s in enumerate(story, 1)], ""]
     comparison = [comparison_md, ""] if comparison_md else []
@@ -2357,11 +2909,19 @@ def render_report(payloads, previous=None):
 
 
 def cmd_summary(args):
-    """Render one combined report from several `report --output` files (e.g. one per compiler)."""
+    """Render the combined PAGE from several `report --output` files (e.g. one per compiler): the
+    two-screen summary goes to stdout and the job summary, the full per-workflow tables only where
+    `--full-output` says - a page nobody can read is not a report, and the full tables' consumers
+    are diff tools and `attribute`, which read the artifact."""
     payloads = [json.loads(Path(f).read_text()) for f in args.reports]
     previous = [json.loads(Path(f).read_text()) for f in (args.previous or [])]
-    text = render_report(payloads, previous or None)
+    text = render_compact(payloads, previous or None)
     print(text)
+    if args.full_output:
+        full = Path(args.full_output)
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(render_report(payloads, previous or None) + "\n")
+        print(f"full tables written to {full}", file=sys.stderr)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a") as f:
@@ -2431,11 +2991,20 @@ def main():
     g.add_argument("--worktree-cache", default=str(ROOT / ".worktrees"),
                    help="where to materialize the baseline commit for attribution")
 
-    r = sub.add_parser("report", help="all metrics this compiler can produce, as markdown + JSON")
+    r = sub.add_parser("report", help="all metrics this compiler can produce: the two-screen page "
+                                      "on stdout, JSON + full tables via flags")
     r.add_argument("refs", nargs="*", help="git refs to measure (default: WORKTREE)")
     r.add_argument("--reps", type=int, default=3)
     r.add_argument("--workflows", nargs="*")
     r.add_argument("--output", help="write the JSON payload (feed several of these to `summary`)")
+    r.add_argument("--full-output", metavar="MD",
+                   help="write the complete per-workflow tables as markdown (the artifact copy; "
+                        "stdout carries the readable page)")
+    r.add_argument("--machine-tag", default="",
+                   help="opaque label marking runs whose wall clocks may be compared with each "
+                        "other; hostnames cannot do this (every CI runner reports the same name "
+                        "over different CPUs), so same-machine sections render only across reports "
+                        "sharing a tag")
     r.add_argument("--worktree-cache", default=str(ROOT / ".worktrees"))
 
     sub.add_parser("key", help="print the baseline file this configuration resolves to")
@@ -2447,8 +3016,11 @@ def main():
     a.add_argument("--min-delta", type=int, default=1, help="ignore entities moving less than this")
     a.add_argument("--worktree-cache", default=str(ROOT / ".worktrees"))
 
-    s = sub.add_parser("summary", help="merge report JSONs into one markdown report (+ job summary)")
+    s = sub.add_parser("summary", help="merge report JSONs into the two-screen page (+ job summary)")
     s.add_argument("reports", nargs="+", help="JSON files written by `report --output`")
+    s.add_argument("--full-output", metavar="MD",
+                   help="write the complete per-workflow tables as markdown (the artifact copy; "
+                        "stdout carries the readable page)")
     s.add_argument("--previous", nargs="*", metavar="JSON",
                    help="the previous run's report JSONs: adds a 'Since the previous run' section "
                         "comparing corpus totals and the scaling slope per configuration, so the "

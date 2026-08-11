@@ -2714,6 +2714,51 @@ include row (si_units -> si_lean); `types_total` is retired outright (rank 0.997
 `decls_total`, no consumer - a metric nobody reads is storage, not measurement).
 
 
+## 29. The page, the tag, and the hostname that lied
+
+**The fleet summary was 1,417 lines, 1,241 table rows, 37 sections** - and its owner called it
+"human unreadable", which the numbers confirm: nobody scrolls twelve thousand cells. The redesign
+(nine review rounds on a live mock built from a real run's data) rests on one rule: THE PAGE
+ANSWERS QUESTIONS, THE ARTIFACT HOLDS DATA. `report`/`summary` now emit a two-screen page - what
+changed, one bar-table row per configuration, the price list split by question, the per-interface
+modules breakdown, the safety ladder - and the full tables ship only in the artifact
+(`--full-output`), beside the page markdown and the per-arm JSONs. The same run renders as 67
+page lines against 1,396 full ones. Presentation decisions that survived review: Unicode
+bar-tables everywhere and NO Mermaid (several measurements per row, the number beside its bar, no
+legend, no renderer risk; full-width glyphs only - `▍▋▎` ghost in enough fonts to have failed a
+screenshot review); wall-clock bars in a softer shade because withholding a comparison readers
+will make anyway is not honesty; every caption says what the metric IS and how it was MEASURED.
+
+**Hostnames cannot identify machines, and the fleet's own control row proves the damage**: every
+GitHub runner reports one generic hostname while one run's arms spanned Xeon 8573C, EPYC 7763 and
+EPYC 9V74 - and `safety/raw_doubles`, identical work with no mp-units at all, measured 32 ms on
+the headers arm and 23 ms on the modules arm. A ~40% machine disparity under a single name is why
+cross-arm wall-clock deltas are noise, why the suite's "compare down a column, never across" rule
+now has an enforcement mechanism - `same_machine()` accepts only payloads sharing an explicit
+`--machine-tag` - and why CI gained a `modules-ab` job that measures headers and `import
+mp_units;` back to back on ONE VM.
+
+**The modules wall-clock story, stated exactly as far as it is verified.** On one pinned
+workstation, across a six-configuration isolation matrix ({c++23, c++26} x {headers, modules,
+modules+import std}), quantity-USING consumers compile 1.3-1.8 s SLOWER under `import mp_units;`
+despite -87% instantiations; the trace attributes 3.8 s of a 4.4 s compile to `Load External
+Specializations` (3.2 s for `kind_of`, 2.9 s for `detail::operator*`) - lazy BMI loading bills
+the first USE of a template with deserializing its whole specialization table from the
+~97k-instantiation monolithic systems BMI, and a tmpfs test excludes I/O. Empty-main consumers
+stay ~30 ms: the import is free, the names are not. Splitting the safety ladder's wall clock into
+inclusion and use puts a number on that sentence: on the simple-quantities rung the inclusion twin
+costs 2,069 ms with headers against 33 ms as a module (a 60x win), while the code the user wrote
+costs 304 ms with headers against 4,738 ms as a module - a 15x LOSS that swallows the win whole.
+The entire tax lives in the use phase, which is also why an empty-main modules consumer looks free
+and a real one does not. NOT yet publication-grade: the earlier
+"CI shows modules faster" impression dissolved into the cross-runner noise above, so the
+`modules-ab` job is the native-hardware confirmation this finding waits for, and the separate
+observation that use-instantiations SHRINK under modules (simple rung 2,042 -> 1,324) still needs
+its own attribution. Either way, the mechanism is one more argument for splitting
+`mp_units.systems` (§24): a smaller BMI means smaller per-template specialization tables for every
+consumer.
+
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That

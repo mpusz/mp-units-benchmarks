@@ -158,6 +158,14 @@ jobs:
             --report results/report.json \
             --slack ${{ env.SLACK }} --slope-slack ${{ env.SLOPE_SLACK }} \
             --median-alarm ${{ env.MEDIAN_ALARM }} --tighten-notice ${{ env.TIGHTEN_NOTICE }}
+      - uses: actions/upload-artifact@v7
+        # The gate page points here for its per-workflow evidence: the summary carries the verdict,
+        # the movers and the attribution, and this JSON carries every metric's value vs baseline.
+        if: steps.guard.outputs.measure == 'true'
+        with:
+          name: gate-report-${{ matrix.id }}
+          path: results/report.json
+          retention-days: 30
       - name: Decide whether the baselines can be tightened
         id: decide
         if: steps.guard.outputs.measure == 'true'
@@ -396,10 +404,53 @@ jobs:
           name: measurements-${{ matrix.id }}
           path: results/report-${{ matrix.id }}.json
 
+  modules-ab:
+    # Wall clocks may only be compared within ONE machine: the fleet's arms each get their own
+    # runner, and those report a single generic hostname over wildly different CPUs (one run
+    # spanned Xeon 8573C, EPYC 7763 and EPYC 9V74), so a cross-arm time delta is noise. This job
+    # measures headers and `import mp_units;` back to back on one VM and tags both payloads with a
+    # shared --machine-tag - the only thing that licenses the summary's same-machine sections (the
+    # safety ladder, the modules consumer wall clock).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check out mp-units at ${{ env.MP_UNITS_REF }}
+        uses: actions/checkout@v5
+        with:
+          repository: mpusz/mp-units
+          ref: ${{ env.MP_UNITS_REF }}
+          path: mp-units
+          fetch-depth: 1
+      - name: Install clang
+        shell: bash
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh "${{ env.GATE_CLANG }}"
+          sudo apt install -y libc++-${{ env.GATE_CLANG }}-dev libc++abi-${{ env.GATE_CLANG }}-dev \
+            libunwind-${{ env.GATE_CLANG }}-dev
+      - name: Measure headers and modules on one machine
+        shell: bash
+        run: |
+          TAG="ab-${{ github.run_id }}"
+          COMMON=(--repo mp-units --cxx "clang++-${GATE_CLANG}" --std c++26 --config-label ab)
+          ARGS=(report "${MP_UNITS_REF}" --reps 2 --machine-tag "$TAG"
+                --workflows safety/ scaling/ umbrella/ control/ text/)
+          # Plain headers against the FULL modules configuration - `--modules --import-std`, the same
+          # one the fleet measures and the one a user adopting modules would actually write, so the
+          # std module's own interface cost appears in the breakdown instead of being invisible.
+          runner/bench.py "${COMMON[@]}" "${ARGS[@]}" --output results/report-ab-headers.json
+          runner/bench.py "${COMMON[@]}" --modules --import-std "${ARGS[@]}" \
+            --output results/report-ab-modules.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: measurements-ab
+          path: results/report-ab-*.json
+
   report:
     # Aggregates the fleet. `always()` so an experimental arm that died still leaves a table for the
     # arms that succeeded.
-    needs: measure
+    needs: [measure, modules-ab]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -438,11 +489,13 @@ jobs:
           previous=(previous/report-*.json)
           prev_args=()
           [ ${#previous[@]} -gt 0 ] && prev_args=(--previous "${previous[@]}")
-          # The same markdown that lands in the job summary, kept as a file: a summary cannot be
-          # downloaded, diffed against last week's, or pasted into a talk.
+          # The PAGE lands in the job summary and ships in the artifact; the full per-workflow
+          # tables ship beside it as -full.md - a summary cannot be downloaded, diffed against last
+          # week's, or pasted into a talk, and a 1400-line table cannot be read on a page.
           name="compile-cost-$(echo "${MP_UNITS_REF}" | tr '/' '-')"
           [ -n "$COMPARE_REF" ] && name="$name-vs-$(echo "${COMPARE_REF}" | tr '/' '-')"
-          runner/bench.py summary "${reports[@]}" "${prev_args[@]}" > "results/$name.md"
+          runner/bench.py summary "${reports[@]}" "${prev_args[@]}" \
+            --full-output "results/$name-full.md" > "results/$name.md"
           echo "produced=true" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         if: steps.post.outputs.produced == 'true'

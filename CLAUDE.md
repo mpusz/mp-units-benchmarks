@@ -39,8 +39,10 @@ runner/bench.py $R check                                    # two-sided gate (ex
 runner/bench.py $R check --report results/report.json       # + machine-readable deltas
 runner/bench.py $R update                                   # re-record every entry
 runner/bench.py $R update --workflows isq/ affine           # re-record only these
-runner/bench.py $R report WORKTREE v2.5.0 --output r.json   # counts+time+memory, markdown + JSON
-runner/bench.py summary r1.json r2.json                     # merge reports (also -> STEP_SUMMARY)
+runner/bench.py $R report WORKTREE v2.5.0 --output r.json   # the PAGE on stdout, JSON via --output
+runner/bench.py $R report --full-output full.md             # + the complete per-workflow tables
+runner/bench.py $R report --machine-tag ab-1                # license same-machine wall comparisons
+runner/bench.py summary r1.json r2.json --full-output f.md  # merge reports (also -> STEP_SUMMARY)
 runner/bench.py $R attribute v2.5.0 master --workflows isq/kind_safe_interfaces   # why it moved
 runner/bench.py $R attribute --workflows scaling/broad_016 scaling/broad_256      # slope, by entity
 runner/bench.py --std c++26 --cxx g++-16 $R report          # any compiler/standard
@@ -48,16 +50,36 @@ runner/bench.py $R --std c++26 --import-std counts          # `import std;` inst
 runner/bench.py $R --std c++26 --modules --import-std report   # consume mp-units as C++20 modules
 ```
 
-Every report opens with a `## What changed` section: at most a handful of ranked, plain-language
+`report` and `summary` emit the PAGE on stdout - two screens that answer "what does using this cost
+and did it move" - and the complete per-workflow tables ONLY via `--full-output` (the artifact
+copy). This split exists because the full fleet rendering measured 1,417 lines / 1,241 table rows,
+which no human reads: the page is what gets read, the artifact (page markdown + full tables + one
+JSON per arm) is what gets diffed, quoted and computed on. The page's sections, in order: `## What
+changed` (see below), the per-configuration comparison table, ONE row per configuration with
+UNICODE BARS (`` `████` `` for deterministic counts, softer `` `▒▒` `` for wall clock; full-width
+glyphs only - partial-width blocks and the light-shade track render ragged in enough fonts to have
+failed review), the `## Price list` split into one table per question (including headers / defining
+entities / writing code), `## C++20 modules` (the per-interface breakdown first, because
+`mp_units.systems` IS the cost of modules), and `## The safety ladder`, which renders ONLY from a
+payload pair sharing a `--machine-tag`. No Mermaid anywhere: bar-tables carry several measurements
+per row, keep the number beside its bar, need no legend and cannot break with a renderer update.
+Every table's caption states what the metric IS and how it was MEASURED, at the point of use.
+
+WALL-CLOCK IDENTITY IS EXPLICIT, NEVER INFERRED: every GitHub runner reports the same generic
+hostname while the actual CPUs differ by vendor and model (one run's fleet spanned Xeon 8573C,
+EPYC 7763 and EPYC 9V74 under one name), so cross-arm time deltas are noise - the fleet's
+`raw_doubles` control row measured a 40% machine disparity on identical work. Only payloads sharing
+an explicitly passed `--machine-tag` (set by a job that ran both measurements on one VM, like CI's
+`modules-ab`) may have wall clocks compared; `same_machine()` is the single arbiter.
+
+`## What changed` holds at most a handful of ranked, plain-language
 findings (compile failures first, then the corpus-wide movement, then the declaration count moving
 by something the instantiation count does not explain - emitted ONLY when the two disagree, since
 that is the whole reason the metric exists - then constant-vs-marginal cost
 diverging, then a wall-clock noise warning derived from the `bmi/std` control row, then what modules
 buy, then how much of an improvement is really the compiler, then how many `n/a` cells exist and
-why), followed by a `How to read this` block that defines instantiations, declarations, constant vs
-marginal cost,
-and which metrics are trustworthy - because these summaries get shared with people who do not know
-the library. All the tables live in a collapsed `<details>` beneath. NEVER put a number in a finding
+why) - because these summaries get shared with people who do not know
+the library. NEVER put a number in a finding
 without saying what follows from it. A finding that names a tradeoff must compute where it flips: an
 intercept that improved while the slope worsened is reported as the CROSSOVER (how many distinct unit
 types a file needs before the change stops paying, against the largest workflow measured), because
@@ -193,8 +215,10 @@ isq/kind_safe_interfaces moved instantiations +2.2% while `decls_total` moved +3
 `decls_total` can see - a non-function member added to a widely-specialized class template - it sees at
 1/23rd the resolution (one member alias on `quantity` is 238 declarations out of 310759, i.e. 0.08%), so
 no band would ever catch it. It IS rendered, as the whole-AST context under the gated row.
-`types_total` is UNRENDERED with `symbol_bytes`: rank 0.997 with `decls_total`, same direction and
-smaller magnitude on both arms, and no design decision in the library adds types without declarations. Wall time is quiet-machine-only (rank correlation with counts is just
+`types_total` is RETIRED outright (no longer parsed or stored): rank 0.997 with `decls_total`, same
+direction and smaller magnitude on both arms, no design decision in the library adds types without
+declarations - a metric with no consumer is storage, not measurement. Old baselines still carry it
+and comparisons skip a metric absent from either side. Wall time is quiet-machine-only (rank correlation with counts is just
 0.69) - and `time` now prints each arm's own repeat-to-repeat spread beside the between-arm delta,
 plus a verdict when the delta is smaller than the spread, because a 2% difference is meaningless on a
 host whose repeats vary by 20%. `--pin CPU` binds each compile with taskset, which halved the spread
@@ -343,19 +367,29 @@ the gate table names which one it used in its `basis` column:
   baseline's recorded `mp_units_sha` as a worktree and runs the `attribute` machinery on the worst
   `--attribute-top` (default 3) workflows, so a red gate arrives with the entities that moved it
   (`### what got slower, by entity`) instead of a bare percentage. Costs two traced compiles per
-  named workflow, paid only when something moved; degrades to a warning on a shallow clone.
-- Every `check` (and single-ref `counts`) opens with the PRICE LIST - the corpus reduced to what one
-  thing costs: the core-framework intercept, each umbrella with its census and per-entity average
-  over core, the per-kind definition rates, and the scaling slopes. That table is the result; the
-  per-workflow cells below are the evidence.
+  named workflow, paid only when something moved. On a shallow clone (CI) it first tries
+  `git fetch --depth 1 origin <sha>` - GitHub serves arbitrary commits - and only failing that
+  degrades to a warning.
+- `check` emits CONCLUSION-FIRST, because CI's first output used to be three hundred rows of
+  evidence with the verdict underneath: a `## compile-cost gate: FAILED/OK` block opens with a
+  "what moved" table (regressions, slope regressions, worst advisories - name, basis, values,
+  delta), then the attribution, the census changes, the PRICE LIST (the corpus reduced to what one
+  thing costs) and the slope table; the full per-workflow tables come LAST and collapsed - a
+  `<details>` block in the step summary, a `::group::` fold in the raw log. The one-per-finding
+  `::error::`/`::warning::` annotations carry the same facts for the checks UI and are deliberately
+  NOT mirrored into the summary, which is what used to dump the conclusions under the tables.
+  Single-ref `counts` keeps the price list at the end of its own output.
 - Marginal cost per step from the `scaling/` series > `--slope-slack` (default `--slack`) -> error. This is
   the band that distinguishes "the library grew a feature" from "the library got slower": a feature lifts
   every total a little, only a real regression lifts the slope. Keep it TIGHTER than `--slack`, because
   totals must stay loose enough for the library to gain features. Gating totals alone also under-reacts:
   the slope is ~62% of `scaling/broad_256`'s total, so a +2% slope move shows there as +1.2% and a 2%
   totals band misses it entirely. `SLOPE_GATED` names which metrics get this treatment and the noun each
-  is counted in: instantiations (125.0/step on `broad`, 3.0 on `narrow`; on the definition side 1.0 per
-  bare named unit, 0.0 per leaf spec and 28.6 per bare constant) and DECLARATIONS (74.2 and 1.0).
+  is counted in: instantiations (125.0/step on `broad`, 307.4 on `typed_broad` - the same computation
+  with typed references, so the difference IS the level-5 tax per derived quantity - 51.3 on
+  `specs_broad` (bare spec expressions, the constraint-algebra component), 3.0 on `narrow`; on the
+  definition side 1.0 per bare named unit, 0.0 per leaf spec and 28.6 per bare constant) and
+  DECLARATIONS (74.2 and 1.0).
   Declarations are there because the slope is the only form of the metric a purely additive library change
   cannot move at all - a new class or function costs a workflow the same at 16 unit types as at 256, so it
   lifts the intercept and leaves the per-step cost alone. A ZERO slope is a number to protect, not a gap:
@@ -391,11 +425,18 @@ the gate table names which one it used in its `basis` column:
   and g++-14/15, plus g++-16 as `experimental: true` -> `continue-on-error` - all at `-std=c++26`,
   each uploading a `report --output` artifact. That set is mp-units' supported compilers that can do
   c++26; clang 16 (spells it c++2c), gcc 12/13 (no c++26, and gcc 13 has no `<print>`), clang 19
-  (unsupported by mp-units) and clang 22 (currently fails to compile the library) are out. `report`: `needs: measure`, `if: always()`, downloads the arm
-  artifacts, posts `bench.py summary` into `GITHUB_STEP_SUMMARY` AND uploads the same markdown plus
-  the per-arm JSON as the `compile-cost-report` artifact - a job summary cannot be downloaded,
-  diffed against last week's, or pasted into a talk. The markdown file is named after the refs it
-  measured.
+  (unsupported by mp-units) and clang 22 (currently fails to compile the library) are out. The gate
+  jobs also always upload their `results/report.json` (`gate-report-<std>`): the gate page points at
+  it for per-workflow evidence instead of carrying 270 collapsed rows. `modules-ab`: ONE runner
+  measuring headers and `--modules` back to back with a shared `--machine-tag` (and `--config-label
+  ab`), because that tag is the only thing that licenses same-machine wall-clock sections - the
+  safety ladder and the modules consumer time - and hostnames provably cannot (same name, three CPU
+  models in one fleet). `report`: `needs: [measure, modules-ab]`, `if: always()`, downloads the arm
+  artifacts, posts the `bench.py summary` PAGE into `GITHUB_STEP_SUMMARY` AND uploads that same page
+  plus the `--full-output` per-workflow tables plus the per-arm JSON as the `compile-cost-report`
+  artifact - a job summary cannot be downloaded,
+  diffed against last week's, or pasted into a talk, and a 1,400-line table cannot be read on a
+  page. The markdown files are named after the refs they measured.
 - Dispatch inputs: `ref` and optional `compare_ref` (measured by every arm alongside the first).
 - Bands are CLI flags (`--slack`, `--median-alarm`, `--tighten-notice`, `--advisory-slack`, all
   percents), NOT constants: the same baseline file is read strictly here and loosely there.
