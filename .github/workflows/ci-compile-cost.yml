@@ -239,33 +239,6 @@ jobs:
           name: tighten-${{ matrix.id }}
           path: tighten/
           retention-days: 3
-      - name: Explain the regression
-        # A failure should arrive with its cause attached. The baselines record the sha they were
-        # measured from, so the offending workflows can be attributed against that exact tree
-        # instead of someone repeating the comparison by hand afterwards.
-        if: steps.check.outcome == 'failure'
-        shell: bash
-        run: |
-          BASELINE_FILE="$(runner/bench.py --cxx clang++-${GATE_CLANG} --std ${{ matrix.std }} key)"
-          BASE_SHA="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('mp_units_sha',''))" "$BASELINE_FILE")"
-          REGRESSED="$(python3 -c "import json; print(' '.join(json.load(open('results/report.json'))['regressions'][:3]))")"
-          if [ -z "$BASE_SHA" ] || [ -z "$REGRESSED" ]; then
-            echo "no baseline sha or no named regression - nothing to attribute" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          # The checkout is shallow; the baseline's tree has to be fetched before it can be measured.
-          git -C mp-units fetch -q --depth=1 origin "$BASE_SHA" 2>/dev/null || git -C mp-units fetch -q --unshallow
-          {
-            echo "## Why it grew"
-            echo
-            echo "Attributed against the tree the baselines were recorded from (\`${BASE_SHA:0:9}\`)."
-            for wf in $REGRESSED; do
-              echo
-              runner/bench.py --repo mp-units --cxx clang++-${GATE_CLANG} --std ${{ matrix.std }} \
-                attribute "$BASE_SHA" "${MP_UNITS_REF}" --workflows "$wf" --top 12 || \
-                echo "attribution failed for $wf"
-            done
-          } >> "$GITHUB_STEP_SUMMARY"
       - name: Fail on regression
         if: steps.check.outcome == 'failure'
         run: |

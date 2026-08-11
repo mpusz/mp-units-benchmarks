@@ -2052,10 +2052,29 @@ def findings(cells, keys, refs, tags=None):
         once = (f", after building the module interfaces once: {build / 1000:.0f} s"
                 f"{f' and {disk:.0f} MiB on disk' if disk else ''}." if build else ".")
         if t and m and tagged:
-            out.append(f"Consuming the library as C++20 modules (`{col}`) compiles each file "
-                       f"**{abs(statistics.median(t)):.0%} {'faster' if statistics.median(t) < 0 else 'slower'}** "
-                       f"and uses **{abs(statistics.median(m)):.0%} "
-                       f"{'more' if statistics.median(m) > 0 else 'less'} memory** on one machine"
+            # A MEDIAN would lie here, and did: modules replace one cost with another, so the corpus
+            # splits in two - inclusion-dominated TUs get much faster, use-dominated ones get slower -
+            # and the middle of a bimodal set describes neither half. Report the split and the total.
+            wins = sum(1 for x in t if x < -0.05)
+            losses = sum(1 for x in t if x > 0.05)
+            # Name and values in ONE tuple: filtering a values list and zipping it against an
+            # unfiltered name list is how a report ends up crediting the wrong workflow.
+            wall = [(w, a, b) for w in workflows if w in time
+                    for a, b in [(time[w].get((base, ref)), time[w].get((col, ref)))]
+                    if isinstance(a, (int, float)) and isinstance(b, (int, float))]
+            ha, ma = sum(a for _, a, _ in wall), sum(b for _, _, b in wall)
+            net = (ma - ha) / ha if ha else None
+            worst = max(((b - a, w) for w, a, b in wall), default=(0, ""))
+            best = min(((b - a, w) for w, a, b in wall), default=(0, ""))
+            out.append(f"Consuming the library as C++20 modules (`{col}`) trades one cost for another, "
+                       f"measured on one machine: **{wins} of {len(t)} workflows compile faster and "
+                       f"{losses} compile slower**"
+                       + (f", netting **{abs(net):.0%} {'less' if net < 0 else 'more'} wall clock "
+                          f"across them" if net is not None else "")
+                       + (f"** - biggest win `{best[1]}` at {best[0] / 1000:+.1f} s, biggest loss "
+                          f"`{worst[1]}` at {worst[0] / 1000:+.1f} s, because an import removes the "
+                          f"cost of PARSING the library and adds the cost of deserializing each name "
+                          f"a TU actually USES" if best[1] and worst[1] else "**")
                        + once)
         elif i:
             out.append(f"Consuming the library as C++20 modules (`{col}`) needs "

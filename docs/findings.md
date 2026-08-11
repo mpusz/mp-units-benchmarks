@@ -2738,7 +2738,27 @@ now has an enforcement mechanism - `same_machine()` accepts only payloads sharin
 `--machine-tag` - and why CI gained a `modules-ab` job that measures headers and `import
 mp_units;` back to back on ONE VM.
 
-**The modules wall-clock story, stated exactly as far as it is verified.** On one pinned
+**The modules wall-clock story, settled on native hardware (2026-08-11).** The `modules-ab` job did
+what it was built for - headers and `import mp_units;` back to back on ONE GitHub runner (EPYC 7763,
+shared `--machine-tag`) - and the answer is that BOTH earlier framings were too simple. The corpus
+splits almost exactly in half: **23 of 45 workflows compile faster under modules, 22 compile
+slower**, netting **-20.6%** wall clock over the measured subset. The split is not random, it is the
+mechanism: inclusion-dominated TUs win enormously (`umbrella/codata_umbrella` 18.6 s -> 33 ms,
+`isq_umbrella` 6.6 s -> 32 ms - an empty main that only includes headers stops parsing them
+altogether), while use-dominated TUs lose (`scaling/typed_broad_256` +5.1 s,
+`define_constants_256` +4.0 s, `specs_broad_256` +3.6 s - each first USE of a name deserializes that
+template's specialization table). The safety ladder, which is real user code, sits on the losing
+side and reproduces the workstation result: levels 1-4 pay 3,997 ms with headers against 5,920 ms as
+a module, with the whole gap in the use phase (591 ms -> 5,888 ms) while inclusion collapses
+(3,406 ms -> 32 ms). So: **modules do not make a units library uniformly faster or slower - they
+replace the cost of PARSING the library with the cost of DESERIALIZING what you use**, and which way
+a given TU lands depends on its ratio of includes to distinct instantiations. Mateusz's instinct that
+modules are faster was right corpus-wide; my "modules are slower" was right for use-heavy code; the
+old cross-runner CI numbers were noise either way. One reporting lesson came with it: the page had
+summarized this with a MEDIAN, which for a bimodal distribution describes neither half - it now
+reports the split, the net, and the extremes on both sides.
+
+**The earlier workstation measurement, for the record.** On one pinned
 workstation, across a six-configuration isolation matrix ({c++23, c++26} x {headers, modules,
 modules+import std}), quantity-USING consumers compile 1.3-1.8 s SLOWER under `import mp_units;`
 despite -87% instantiations; the trace attributes 3.8 s of a 4.4 s compile to `Load External
