@@ -2560,7 +2560,8 @@ def render_compact(payloads, previous=None):
     candidates = [(k, p) for k, p in payload_rows(payloads) if newest in (p.get("price_list") or {})]
     price_payload = next(
         (p for _, p in sorted(candidates, reverse=True,
-                              key=lambda kp: (("-modules" not in kp[0] and "-importstd" not in kp[0]),
+                              key=lambda kp: (not kp[1].get("subset"),
+                                              ("-modules" not in kp[0] and "-importstd" not in kp[0]),
                                               version_of(kp[0])))), None)
     if price_payload:
         key = price_payload.get("config_key") or price_payload["cxx"]  # heading names its source

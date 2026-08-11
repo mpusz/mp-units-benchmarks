@@ -407,8 +407,23 @@ jobs:
         run: |
           TAG="ab-${{ github.run_id }}"
           COMMON=(--repo mp-units --cxx "clang++-${GATE_CLANG}" --std c++26 --config-label ab)
-          ARGS=(report "${MP_UNITS_REF}" --reps 2 --machine-tag "$TAG"
-                --workflows safety/ scaling/ umbrella/ control/ text/)
+          # A DELIBERATELY BALANCED DOZEN, not the whole corpus: this job's numbers feed the safety
+          # ladder and the same-machine modules rows, and nothing else reads them (the price list and
+          # the interface breakdown come from the full-corpus arms). Measuring 45 workflows twice at
+          # best-of-2 - three compiles each - cost 36 minutes, most of it re-proving what the fleet
+          # already measures. What must stay is the ladder's four rungs and a balance between
+          # include-dominated and use-dominated workflows, because the finding this pair exists to
+          # make is that modules win on the former and lose on the latter: a set weighted either way
+          # would decide that split by selection instead of by measurement.
+          ARGS=(report "${MP_UNITS_REF}" --reps 2 --machine-tag "$TAG" --workflows
+                safety/                     # the ladder: all four rungs
+                control/core_only           # the framework intercept
+                umbrella/si_umbrella umbrella/isq_umbrella umbrella/codata_umbrella
+                                            # include-dominated, spanning small to very large
+                scaling/broad_256 scaling/typed_broad_256 scaling/define_constants_256
+                                            # use-dominated: unit composition, typed composition,
+                                            # constant definitions
+                text/output_format)         # a formatting-heavy TU, a code shape of its own
           # Plain headers against the FULL modules configuration - `--modules --import-std`, the same
           # one the fleet measures and the one a user adopting modules would actually write, so the
           # std module's own interface cost appears in the breakdown instead of being invisible.
