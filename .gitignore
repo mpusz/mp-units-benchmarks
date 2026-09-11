@@ -5,3 +5,6 @@ __pycache__/
 .claude/
 gcm.cache/
 *.pcm
+
+# personal, machine-specific agent notes (never committed: references a private repo)
+/CLAUDE.local.md
