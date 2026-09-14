@@ -366,9 +366,21 @@ the gate table names which one it used in its `basis` column:
   read that census column as "number of specs the chapter defines". Rates are recorded by `update`
   into the baseline file (`entity_rates`, per metric) from
   the `RATE_AXES` pairs - workflow pairs whose include sets differ in almost nothing but one kind
-  (codata_2022 -> codata for constants, si_lean -> si for prefixed units, core -> space_and_time for
-  specs, core -> si_lean for named units, in that order because later axes subtract kinds priced by
-  earlier ones; an axis with a significant unpriced side kind is skipped rather than mispriced).
+  (codata_2022 -> codata for constants, si_lean -> si for prefixed units, isq_atomic -> si_units for
+  named units, space_and_time -> isq for specs, in that order because later axes subtract kinds priced
+  by earlier ones; an axis with a significant unpriced side kind is skipped rather than mispriced).
+  Named units come BEFORE specs, and neither starts from `core`: si/units.h drags in ~30 ISQ specs to
+  name its units against, so derived from core the named_unit rate was a RESIDUAL of the spec rate -
+  raising the latter from 49 to 97 drove the former to -2.92 on c++20. isq_atomic carries that same
+  spec population with only the core's 3 units, so the pair cancels the specs instead of pricing them.
+  On c++20 it stays impure (no deducing-this, so leaf specs do not collapse and the censuses differ by
+  31) and is skipped rather than mispriced - which is the rule working, not a gap. The
+  spec axis starts from a CHAPTER, never from `core`, and that is not a detail: growth adds specs on
+  top of an ISQ population that is already large, where each new spec meets the constraint algebra of
+  every spec already defined. Priced from an empty core the rate is 48.3 (space_and_time is the
+  cheapest chapter in the corpus; electromagnetism is 93.0), while the marginal cost of the rest of
+  ISQ on top of space_and_time is 97.0 - so a core-based axis charged a purely additive ISQ chapter
+  at half price and the gate went red on growth it was built to absorb.
   With an unchanged census the residual IS the plain total, so no sensitivity is lost on the common
   run; every census move is itemized under `### census changes` with what it was priced at.
 - `total` (control/ by design; any entry whose baseline predates twins and censuses): the raw

@@ -894,11 +894,26 @@ SLOPE_GATED = (("instantiations", "instantiations"), ("function declarations", "
 # noise against the axis kind (a couple of point origins against hundreds of constants).
 RATE_AXES = (("named_constant", "umbrella/codata_2022_umbrella", "umbrella/codata_umbrella"),
              ("prefixed_unit", "umbrella/si_lean_umbrella", "umbrella/si_umbrella"),
-             ("quantity_spec", "control/core_only", "umbrella/isq_space_and_time_umbrella"),
              # si/units.h is the definitions alone - no symbols, no prefix matrix - so this axis
              # prices the named unit itself; the symbol tax shows up as si_units -> si_lean in the
-             # price list's include rows rather than contaminating the rate.
-             ("named_unit", "control/core_only", "umbrella/si_units_umbrella"))
+             # price list's include rows rather than contaminating the rate. The low side is NOT
+             # `core`: including si/units.h drags in ~30 ISQ specs to name the units against, and
+             # from core those specs are an unpriced side kind worth more than the units being
+             # measured. isq_atomic_and_nuclear_physics carries exactly that spec population and
+             # only the core's 3 units, so the pair cancels them and leaves the units alone. It is
+             # also why this axis comes BEFORE quantity_spec now: derived from core it was a
+             # residual of the spec rate, so raising that rate drove this one negative.
+             ("named_unit", "umbrella/isq_atomic_and_nuclear_physics_umbrella",
+              "umbrella/si_units_umbrella"),
+             # Not `core -> space_and_time`. That prices the FIRST specs a TU ever sees, starting
+             # from a core that defines none, and space_and_time is the cheapest chapter in the
+             # corpus - 48.3 instantiations per spec against 93.0 for electromagnetism and 87.0
+             # for ISQ as a whole. Growth does not look like that: it adds specs on top of an ISQ
+             # population that is already large, where the constraint algebra runs each new spec
+             # against every spec already defined. This nested pair measures that marginal cost
+             # (97.0), and both sides carry identical named_unit and named_constant counts, so
+             # nothing but the kind being priced moves across it.
+             ("quantity_spec", "umbrella/isq_space_and_time_umbrella", "umbrella/isq_umbrella"))
 
 
 def entity_rates(results, extract):
