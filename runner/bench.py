@@ -941,7 +941,21 @@ def entity_rates(results, extract):
         if any(k not in rates and abs(d) > max(2, 0.05 * steps) for k, d in dc.items()):
             continue
         priced = sum(rates.get(k, 0) * d for k, d in dc.items())
-        rates[kind] = round((vhi - vlo - priced) / steps, 2)
+        rate = round((vhi - vlo - priced) / steps, 2)
+        # A negative rate says defining an entity makes the TU cheaper, which is never true: it means
+        # the subtraction of an already-priced side kind swallowed the axis. Recording it is worse than
+        # recording nothing, because the residual then EXPECTS growth to reduce the count and gates the
+        # difference - growth reads as regression and shrinkage as improvement, both backwards. An
+        # unpriced kind only inflates the residual, which is conservative. Seen for real on 2026-09-14:
+        # moving the quantity_spec axis to a larger population drove named_unit to -2.92 on c++20,
+        # because si/units.h drags ~30 ISQ specs in and that axis was derived from `core`.
+        if rate < 0:
+            print(f"WARNING: {kind} rate from {lo_name} -> {hi_name} came out {rate}, which cannot be "
+                  f"true; the axis is contaminated by an already-priced side kind. Not recording it - "
+                  f"census growth in {kind} will be left unpriced (conservative) until the axis is "
+                  f"fixed.", file=sys.stderr)
+            continue
+        rates[kind] = rate
     return rates
 
 
