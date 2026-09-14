@@ -305,15 +305,22 @@ extra flags attached (`--extra-flags=-DFOO=1`): argparse reads a detached `-D...
   cost - never move it to `<mp-units/systems/codata.h>`, which would bury the former in the latter.
 - `report`/`summary` derive a `## Marginal cost of user code` section from the series: slope (per
   step) and intercept per shape, per configuration, with the delta in comparison mode. That is where
-  a slope regression becomes visible - v2.5.0 -> master improved every intercept ~9% while the broad
-  slope went 118.7 -> 130.3 per step (+9.8%), which is why `scaling/broad_256` shows only -0.2% while
-  every other workflow reports ~-20%. The gate covers the slope numerically: at the 1% band on
-  broad_256, a further regression of >=1.4 instantiations per step trips it.
+  a slope regression becomes visible, and the worked example is now CLOSED: v2.5.0 -> master improved
+  every intercept ~9% while the broad slope went 118.7 -> 130.3 per step (+9.8%), so `scaling/broad_256`
+  showed only -0.2% where every other workflow reported ~-20% - a unit-heavy TU getting nothing from the
+  release. Bisected to `e061bf0ef` (`disable_real`/`NotQuantity` -> `disable_representation`, +2.79 per
+  step: `RepresentationBaseline` leads with `!disable_representation<T>`, evaluated per overload
+  candidate for `mag * unit`, so each new unit type is a fresh instantiation) and fixed by `a7c9754a7`
+  (compiler builtins in `SymbolicConstant`). Measured 2026-09-14 at `8abd57958`: 119.51/step at c++26
+  against v2.5.0's 118.7, i.e. +0.7%. Both earlier leads were wrong - `490d18b64` is worth +1.60, not
+  +4.0, and `703235d1d` +0.31. The gate covers the slope numerically: at the 1% band on broad_256, a
+  further regression of >=1.4 instantiations per step trips it.
 - `scaling/` is a SERIES, not a set of independent workflows: `<shape>_<steps>.cpp` at 16/64/256 over
   `scaling_workload.h`. Read sizes against each other - the difference divided by the difference in
   steps is the marginal cost of user code, which is the only way to separate it from the constant
   cost of inclusion. `narrow` keeps five quantity types warm (3.0 instantiations/step), `broad` COMPOSES a distinct
-  derived unit per step - `base_a * pow<e>(base_b)` - at 130.3/step; never "fix" broad to reuse
+  derived unit per step - `base_a * pow<e>(base_b)` - at 119.5/step on c++26 (124.8 on c++23, 130.1 on
+  c++20 - the slope is standard-dependent, so always say which); never "fix" broad to reuse
   units, that erases the axis it exists to measure. It must not scale magnitudes either (an earlier
   `mag<I+1> * unit` made each step a new magnitude, so ~12% of its slope was prime factorization
   rather than unit diversity - a user reaches for `m / s`, not a new scaling factor). The
