@@ -278,6 +278,21 @@ def compile_cmd(tc: Toolchain, repo, out, src, trace=False, ctx: BuildContext = 
 
 
 def trace_counts(trace: Path):
+    """Count the individual instantiation events, which is why every traced compile passes
+    `-ftime-trace-granularity=0`.
+
+    Two things about that flag look like they could be dropped and cannot. The default granularity
+    is 500us and `-ftime-trace` omits every scope shorter than it, so a default trace keeps only the
+    instantiations that happened to be slow on that machine: measured on a synthetic TU with 1500
+    distinct instantiations, the default trace carried 1 InstantiateClass event and the granularity-0
+    trace carried 1500. That is machine noise wearing the name of a deterministic metric.
+
+    The trace's own `Total InstantiateClass` summary entry is granularity-independent and therefore
+    looks like a way to drop the flag and the 30x larger trace it produces (41.6 MB against 1.4 MB on
+    isq/custom_hierarchy). It is not the same number: on that TU the events count 13,600 and the
+    summary says 3,956, a ratio consistent with the summary counting only the outermost request in a
+    nested chain. Instantiating A<B<C>> is one total and three events, and the cost is three.
+    """
     data = json.loads(trace.read_text())
     counts = {"InstantiateClass": 0, "InstantiateFunction": 0}
     for e in data["traceEvents"]:
@@ -1021,6 +1036,19 @@ def assert_same_config(recorded, tc: Toolchain, where):
         if was is not None and was != current:
             sys.exit(f"{where} was recorded with {field}={was!r}, this run uses {current!r}; "
                      f"counts are only comparable within one configuration")
+    # The point release, which `cxx` cannot see. `clang++-21` is a major version, and mp-units CI
+    # installs it with `llvm.sh 21`, so whatever 21.x the LLVM apt repository currently serves. A
+    # frontend or libc++ point release moves instantiation counts, and without this the run would
+    # compare them against a baseline recorded on a different compiler and attribute the difference
+    # to the library. Deliberately NOT fatal: a point release is not a reason to block an unrelated
+    # pull request, and the loud line plus a re-record is the proportionate response. Baselines
+    # recorded before this field existed carry no version and say nothing.
+    was = recorded.get("cxx_version")
+    if was is not None and was != (current := tc.version()):
+        print(f"WARNING: {where} was recorded with {was!r}, this run uses {current!r}. Counts move "
+              f"with the compiler, so part of any delta below may be the toolchain rather than the "
+              f"library. Re-record with `bench.py update` if the new compiler is the one you want.",
+              file=sys.stderr)
 
 
 def price_list_rows(results):
@@ -1389,7 +1417,8 @@ def cmd_check(args):
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text(json.dumps(
             {"mp_units_version": ".".join(map(str, detect_version(repo))), **git_provenance(repo),
-             "cxx": args.cxx, "std": tc.std, "baseline_key": baseline_file.stem.split("instantiations-")[-1],
+             "cxx": args.cxx, "cxx_version": tc.version(),
+             "std": tc.std, "baseline_key": baseline_file.stem.split("instantiations-")[-1],
              "bands": {"slack": args.slack, "median_alarm": args.median_alarm,
                        "tighten_notice": args.tighten_notice, "advisory_slack": args.advisory_slack,
                        "slope_slack": args.slope_slack if args.slope_slack is not None else args.slack},
@@ -1541,7 +1570,8 @@ def cmd_update(args):
     results = dict(sorted({**(previous if args.workflows else preserved), **recorded}.items()))
     carried = sorted(n for n in results if n not in recorded)
     data = {"mp_units_version": ".".join(map(str, detect_version(repo))), **git_provenance(repo),
-            "cxx": args.cxx, "std": tc.std, "stdlib": tc.standard_library,
+            "cxx": args.cxx, "cxx_version": tc.version(), "std": tc.std,
+            "stdlib": tc.standard_library,
             "config_label": tc.label, "extra_flags": " ".join(tc.extra.split())}
     if carried:
         # The metadata above describes the re-recorded entries only; these predate it.
