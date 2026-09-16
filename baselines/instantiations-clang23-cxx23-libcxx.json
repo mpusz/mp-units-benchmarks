@@ -1,9 +1,9 @@
 {
   "mp_units_version": "2.6",
   "mp_units_sha": "acc6c9c7b91c37900a68264de01d7df61a2e48d3",
-  "mp_units_describe": "v2.5.0-772-gacc6c9c7b",
+  "mp_units_describe": "acc6c9c",
   "cxx": "clang++-23",
-  "cxx_version": "Ubuntu clang version 23.1.2 (++20260910044155+069ef0e7cb36-1~exp1~20260910044205.69)",
+  "cxx_version": "Ubuntu clang version 23.1.2 (++20260910044232+069ef0e7cb36-1~exp1~20260910044242.70)",
   "std": "c++23",
   "stdlib": "libc++",
   "config_label": "",
@@ -47,8 +47,8 @@
       "object_bytes": 1296,
       "code_bytes": 84,
       "symbol_bytes": 1212,
-      "decls_total": 212148,
-      "function_decls": 9540,
+      "decls_total": 211213,
+      "function_decls": 9138,
       "twin": "include/cstdio+si+space_and_time"
     },
     "affine/temperature_points": {
@@ -65,8 +65,8 @@
       "object_bytes": 1672,
       "code_bytes": 150,
       "symbol_bytes": 1522,
-      "decls_total": 248380,
-      "function_decls": 10929,
+      "decls_total": 247445,
+      "function_decls": 10527,
       "twin": "include/cstdio+si+usc"
     },
     "constants/codata_expressions": {
@@ -83,8 +83,8 @@
       "object_bytes": 2016,
       "code_bytes": 268,
       "symbol_bytes": 1748,
-      "decls_total": 359628,
-      "function_decls": 15498,
+      "decls_total": 358693,
+      "function_decls": 15096,
       "twin": "include/codata2022_essential+cstdio+numbers+si"
     },
     "control/core_only": {
@@ -99,8 +99,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 103176,
-      "function_decls": 6098
+      "decls_total": 102241,
+      "function_decls": 5696
     },
     "generic/custom_representation": {
       "InstantiateClass": 10211,
@@ -116,8 +116,8 @@
       "object_bytes": 1672,
       "code_bytes": 145,
       "symbol_bytes": 1527,
-      "decls_total": 273986,
-      "function_decls": 12427,
+      "decls_total": 273051,
+      "function_decls": 12025,
       "twin": "include/cstdio+mechanics+si+space_and_time"
     },
     "generic/dimensionless_and_angles": {
@@ -134,8 +134,8 @@
       "object_bytes": 1976,
       "code_bytes": 220,
       "symbol_bytes": 1756,
-      "decls_total": 225050,
-      "function_decls": 10261,
+      "decls_total": 224115,
+      "function_decls": 9859,
       "twin": "include/angular+cstdio+math+si+space_and_time"
     },
     "generic/generic_interfaces": {
@@ -152,9 +152,9 @@
       "object_bytes": 1592,
       "code_bytes": 125,
       "symbol_bytes": 1467,
-      "decls_total": 247829,
-      "function_decls": 11073,
-      "twin": "include/cstdio+si+space_and_time-741f"
+      "decls_total": 246894,
+      "function_decls": 10671,
+      "twin": "include/cstdio+si+space_and_time-55c1"
     },
     "include/adopted_values+cassert+chrono+format+iostream+isq+math+numbers+si+string": {
       "InstantiateClass": 19876,
@@ -170,8 +170,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 454611,
-      "function_decls": 19731
+      "decls_total": 453676,
+      "function_decls": 19329
     },
     "include/adopted_values+cstdio+mechanics+si": {
       "InstantiateClass": 9647,
@@ -187,8 +187,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 261537,
-      "function_decls": 11856
+      "decls_total": 260602,
+      "function_decls": 11454
     },
     "include/adopted_values+cstdio+si": {
       "InstantiateClass": 6110,
@@ -204,8 +204,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 194127,
-      "function_decls": 8778
+      "decls_total": 193192,
+      "function_decls": 8376
     },
     "include/algorithm+array+chrono+compare+concepts+cstddef+exception+format+framework+functional+hacks+initializer_list+iostream+iterator+limits+math+numbers+numeric+ostream+ranges+si+space_and_time+string+string_view+utility+vector+yard_pound": {
       "InstantiateClass": 7144,
@@ -221,8 +221,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 230182,
-      "function_decls": 10260
+      "decls_total": 229247,
+      "function_decls": 9858
     },
     "include/angular+cstdio+math+si+space_and_time": {
       "InstantiateClass": 6695,
@@ -238,8 +238,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 205433,
-      "function_decls": 9398
+      "decls_total": 204498,
+      "function_decls": 8996
     },
     "include/cartesian_vector+cstdio+mechanics+si+space_and_time": {
       "InstantiateClass": 9584,
@@ -255,8 +255,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 259269,
-      "function_decls": 11768
+      "decls_total": 258334,
+      "function_decls": 11366
     },
     "include/codata2022_essential+cstdio+numbers+si": {
       "InstantiateClass": 8520,
@@ -272,8 +272,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 258148,
-      "function_decls": 11590
+      "decls_total": 257213,
+      "function_decls": 11188
     },
     "include/complex+cstdio+electromagnetism+si": {
       "InstantiateClass": 12306,
@@ -289,8 +289,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 306836,
-      "function_decls": 13392
+      "decls_total": 305901,
+      "function_decls": 12990
     },
     "include/cstdint+cstdio+si+usc": {
       "InstantiateClass": 6795,
@@ -306,8 +306,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 219401,
-      "function_decls": 9806
+      "decls_total": 218466,
+      "function_decls": 9404
     },
     "include/cstdio": {
       "InstantiateClass": 0,
@@ -317,7 +317,7 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 638,
+      "decls_total": 633,
       "function_decls": 122
     },
     "include/cstdio+electromagnetism+math+si+space_and_time": {
@@ -334,8 +334,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 307428,
-      "function_decls": 13418
+      "decls_total": 306493,
+      "function_decls": 13016
     },
     "include/cstdio+format+output_workload": {
       "InstantiateClass": 6797,
@@ -351,8 +351,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 211785,
-      "function_decls": 9418
+      "decls_total": 210850,
+      "function_decls": 9016
     },
     "include/cstdio+math+mechanics+si+space_and_time": {
       "InstantiateClass": 9578,
@@ -368,8 +368,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 259352,
-      "function_decls": 11760
+      "decls_total": 258417,
+      "function_decls": 11358
     },
     "include/cstdio+mechanics+si+space_and_time": {
       "InstantiateClass": 9580,
@@ -385,10 +385,10 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 258728,
-      "function_decls": 11733
+      "decls_total": 257793,
+      "function_decls": 11331
     },
-    "include/cstdio+mechanics+si+space_and_time-6491": {
+    "include/cstdio+mechanics+si+space_and_time-326f": {
       "InstantiateClass": 9580,
       "InstantiateFunction": 5821,
       "EvaluateAsConstantExpr": 55164,
@@ -402,10 +402,10 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 258728,
-      "function_decls": 11733
+      "decls_total": 257793,
+      "function_decls": 11331
     },
-    "include/cstdio+mechanics+si+space_and_time-b28d": {
+    "include/cstdio+mechanics+si+space_and_time-bd8c": {
       "InstantiateClass": 9580,
       "InstantiateFunction": 5821,
       "EvaluateAsConstantExpr": 55164,
@@ -419,8 +419,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 258728,
-      "function_decls": 11733
+      "decls_total": 257793,
+      "function_decls": 11331
     },
     "include/cstdio+output_workload": {
       "InstantiateClass": 6797,
@@ -436,8 +436,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 211785,
-      "function_decls": 9418
+      "decls_total": 210850,
+      "function_decls": 9016
     },
     "include/cstdio+scaling_workload+utility": {
       "InstantiateClass": 11144,
@@ -453,8 +453,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 292763,
-      "function_decls": 13191
+      "decls_total": 291828,
+      "function_decls": 12789
     },
     "include/cstdio+si": {
       "InstantiateClass": 6043,
@@ -470,8 +470,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 191318,
-      "function_decls": 8655
+      "decls_total": 190383,
+      "function_decls": 8253
     },
     "include/cstdio+si+space_and_time": {
       "InstantiateClass": 6601,
@@ -487,10 +487,10 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 202345,
-      "function_decls": 9264
+      "decls_total": 201410,
+      "function_decls": 8862
     },
-    "include/cstdio+si+space_and_time-741f": {
+    "include/cstdio+si+space_and_time-55c1": {
       "InstantiateClass": 6601,
       "InstantiateFunction": 3747,
       "EvaluateAsConstantExpr": 38002,
@@ -504,8 +504,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 202345,
-      "function_decls": 9264
+      "decls_total": 201410,
+      "function_decls": 8862
     },
     "include/cstdio+si+usc": {
       "InstantiateClass": 6795,
@@ -521,10 +521,10 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 219401,
-      "function_decls": 9806
+      "decls_total": 218466,
+      "function_decls": 9404
     },
-    "include/cstdio+si+usc-59dc": {
+    "include/cstdio+si+usc-e6c4": {
       "InstantiateClass": 6795,
       "InstantiateFunction": 4359,
       "EvaluateAsConstantExpr": 46402,
@@ -538,8 +538,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 219401,
-      "function_decls": 9806
+      "decls_total": 218466,
+      "function_decls": 9404
     },
     "include/cstdio+spec_workload": {
       "InstantiateClass": 1297,
@@ -553,8 +553,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 102548,
-      "function_decls": 6071
+      "decls_total": 101613,
+      "function_decls": 5669
     },
     "include/cstdio+typed_workload": {
       "InstantiateClass": 7261,
@@ -570,8 +570,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 214100,
-      "function_decls": 9892
+      "decls_total": 213165,
+      "function_decls": 9490
     },
     "include/define_workload": {
       "InstantiateClass": 6601,
@@ -587,8 +587,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 202348,
-      "function_decls": 9265
+      "decls_total": 201413,
+      "function_decls": 8863
     },
     "include/format+output_workload+print": {
       "InstantiateClass": 6852,
@@ -604,8 +604,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 213359,
-      "function_decls": 9502
+      "decls_total": 212424,
+      "function_decls": 9100
     },
     "include/iostream+ostream+output_workload": {
       "InstantiateClass": 6914,
@@ -621,8 +621,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 215622,
-      "function_decls": 9574
+      "decls_total": 214687,
+      "function_decls": 9172
     },
     "include/output_workload+print": {
       "InstantiateClass": 6852,
@@ -638,8 +638,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 213359,
-      "function_decls": 9502
+      "decls_total": 212424,
+      "function_decls": 9100
     },
     "isq/complex_quantities": {
       "InstantiateClass": 13388,
@@ -655,8 +655,8 @@
       "object_bytes": 2120,
       "code_bytes": 361,
       "symbol_bytes": 1759,
-      "decls_total": 330797,
-      "function_decls": 14276,
+      "decls_total": 329862,
+      "function_decls": 13874,
       "twin": "include/complex+cstdio+electromagnetism+si"
     },
     "isq/custom_hierarchy": {
@@ -673,9 +673,9 @@
       "object_bytes": 1512,
       "code_bytes": 106,
       "symbol_bytes": 1406,
-      "decls_total": 284519,
-      "function_decls": 12949,
-      "twin": "include/cstdio+mechanics+si+space_and_time-b28d"
+      "decls_total": 283584,
+      "function_decls": 12547,
+      "twin": "include/cstdio+mechanics+si+space_and_time-326f"
     },
     "isq/derived_spec_conversions": {
       "InstantiateClass": 11998,
@@ -691,9 +691,9 @@
       "object_bytes": 1832,
       "code_bytes": 188,
       "symbol_bytes": 1644,
-      "decls_total": 318861,
-      "function_decls": 14479,
-      "twin": "include/cstdio+mechanics+si+space_and_time-b28d"
+      "decls_total": 317926,
+      "function_decls": 14077,
+      "twin": "include/cstdio+mechanics+si+space_and_time-326f"
     },
     "isq/fractional_exponents": {
       "InstantiateClass": 12590,
@@ -709,8 +709,8 @@
       "object_bytes": 1664,
       "code_bytes": 139,
       "symbol_bytes": 1525,
-      "decls_total": 316485,
-      "function_decls": 13739,
+      "decls_total": 315550,
+      "function_decls": 13337,
       "twin": "include/cstdio+electromagnetism+math+si+space_and_time"
     },
     "isq/hierarchy_conversions": {
@@ -727,9 +727,9 @@
       "object_bytes": 1600,
       "code_bytes": 133,
       "symbol_bytes": 1467,
-      "decls_total": 286527,
-      "function_decls": 13014,
-      "twin": "include/cstdio+mechanics+si+space_and_time-b28d"
+      "decls_total": 285592,
+      "function_decls": 12612,
+      "twin": "include/cstdio+mechanics+si+space_and_time-326f"
     },
     "isq/kind_conversions": {
       "InstantiateClass": 10183,
@@ -745,9 +745,9 @@
       "object_bytes": 1824,
       "code_bytes": 182,
       "symbol_bytes": 1642,
-      "decls_total": 276875,
-      "function_decls": 12555,
-      "twin": "include/cstdio+mechanics+si+space_and_time-b28d"
+      "decls_total": 275940,
+      "function_decls": 12153,
+      "twin": "include/cstdio+mechanics+si+space_and_time-326f"
     },
     "isq/kind_safe_interfaces": {
       "InstantiateClass": 11252,
@@ -763,8 +763,8 @@
       "object_bytes": 1448,
       "code_bytes": 87,
       "symbol_bytes": 1361,
-      "decls_total": 298101,
-      "function_decls": 13440,
+      "decls_total": 297166,
+      "function_decls": 13038,
       "twin": "include/cstdio+math+mechanics+si+space_and_time"
     },
     "isq/vector_quantities": {
@@ -781,8 +781,8 @@
       "object_bytes": 2144,
       "code_bytes": 314,
       "symbol_bytes": 1830,
-      "decls_total": 275805,
-      "function_decls": 12513,
+      "decls_total": 274870,
+      "function_decls": 12111,
       "twin": "include/cartesian_vector+cstdio+mechanics+si+space_and_time"
     },
     "parity/kinetic_energy": {
@@ -799,8 +799,8 @@
       "object_bytes": 1440,
       "code_bytes": 89,
       "symbol_bytes": 1351,
-      "decls_total": 209815,
-      "function_decls": 9430,
+      "decls_total": 208880,
+      "function_decls": 9028,
       "twin": "include/cstdio+si"
     },
     "parity/unit_conversions": {
@@ -817,9 +817,9 @@
       "object_bytes": 1984,
       "code_bytes": 228,
       "symbol_bytes": 1756,
-      "decls_total": 231577,
-      "function_decls": 10426,
-      "twin": "include/cstdio+si+usc-59dc"
+      "decls_total": 230642,
+      "function_decls": 10024,
+      "twin": "include/cstdio+si+usc-e6c4"
     },
     "parity/value_conversions": {
       "InstantiateClass": 6961,
@@ -835,8 +835,8 @@
       "object_bytes": 1704,
       "code_bytes": 179,
       "symbol_bytes": 1525,
-      "decls_total": 229329,
-      "function_decls": 10167,
+      "decls_total": 228394,
+      "function_decls": 9765,
       "twin": "include/cstdint+cstdio+si+usc"
     },
     "real_life/glide_computer": {
@@ -853,8 +853,8 @@
       "object_bytes": 698936,
       "code_bytes": 218535,
       "symbol_bytes": 480401,
-      "decls_total": 384228,
-      "function_decls": 16562,
+      "decls_total": 383293,
+      "function_decls": 16160,
       "twin": "include/algorithm+array+chrono+compare+concepts+cstddef+exception+format+framework+functional+hacks+initializer_list+iostream+iterator+limits+math+numbers+numeric+ostream+ranges+si+space_and_time+string+string_view+utility+vector+yard_pound"
     },
     "real_life/storage_tank": {
@@ -871,8 +871,8 @@
       "object_bytes": 673312,
       "code_bytes": 207074,
       "symbol_bytes": 466238,
-      "decls_total": 581988,
-      "function_decls": 25039,
+      "decls_total": 581053,
+      "function_decls": 24637,
       "twin": "include/adopted_values+cassert+chrono+format+iostream+isq+math+numbers+si+string"
     },
     "safety/affine_quantities": {
@@ -889,8 +889,8 @@
       "object_bytes": 1952,
       "code_bytes": 214,
       "symbol_bytes": 1738,
-      "decls_total": 336075,
-      "function_decls": 14940,
+      "decls_total": 335140,
+      "function_decls": 14538,
       "twin": "include/adopted_values+cstdio+mechanics+si"
     },
     "safety/raw_doubles": {
@@ -901,7 +901,7 @@
       "object_bytes": 1944,
       "code_bytes": 214,
       "symbol_bytes": 1730,
-      "decls_total": 652,
+      "decls_total": 647,
       "function_decls": 122,
       "twin": "include/cstdio"
     },
@@ -919,8 +919,8 @@
       "object_bytes": 1952,
       "code_bytes": 214,
       "symbol_bytes": 1738,
-      "decls_total": 224848,
-      "function_decls": 10020,
+      "decls_total": 223913,
+      "function_decls": 9618,
       "twin": "include/adopted_values+cstdio+si"
     },
     "safety/typed_quantities": {
@@ -937,8 +937,8 @@
       "object_bytes": 1952,
       "code_bytes": 214,
       "symbol_bytes": 1738,
-      "decls_total": 327968,
-      "function_decls": 14708,
+      "decls_total": 327033,
+      "function_decls": 14306,
       "twin": "include/adopted_values+cstdio+mechanics+si"
     },
     "scaling/broad_016": {
@@ -955,8 +955,8 @@
       "object_bytes": 1432,
       "code_bytes": 87,
       "symbol_bytes": 1345,
-      "decls_total": 339601,
-      "function_decls": 14363,
+      "decls_total": 338666,
+      "function_decls": 13961,
       "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/broad_064": {
@@ -973,8 +973,8 @@
       "object_bytes": 1432,
       "code_bytes": 87,
       "symbol_bytes": 1345,
-      "decls_total": 414540,
-      "function_decls": 16319,
+      "decls_total": 413605,
+      "function_decls": 15917,
       "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/broad_256": {
@@ -991,8 +991,8 @@
       "object_bytes": 1432,
       "code_bytes": 87,
       "symbol_bytes": 1345,
-      "decls_total": 1037830,
-      "function_decls": 32154,
+      "decls_total": 1036895,
+      "function_decls": 31752,
       "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/define_constants_016": {
@@ -1009,8 +1009,8 @@
       "object_bytes": 1016,
       "code_bytes": 51,
       "symbol_bytes": 965,
-      "decls_total": 209485,
-      "function_decls": 9597,
+      "decls_total": 208550,
+      "function_decls": 9195,
       "twin": "include/define_workload"
     },
     "scaling/define_constants_064": {
@@ -1027,8 +1027,8 @@
       "object_bytes": 1016,
       "code_bytes": 51,
       "symbol_bytes": 965,
-      "decls_total": 228996,
-      "function_decls": 10480,
+      "decls_total": 228061,
+      "function_decls": 10078,
       "twin": "include/define_workload"
     },
     "scaling/define_constants_256": {
@@ -1045,8 +1045,8 @@
       "object_bytes": 1016,
       "code_bytes": 51,
       "symbol_bytes": 965,
-      "decls_total": 308826,
-      "function_decls": 14083,
+      "decls_total": 307891,
+      "function_decls": 13681,
       "twin": "include/define_workload"
     },
     "scaling/define_specs_016": {
@@ -1063,8 +1063,8 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 202493,
-      "function_decls": 9265,
+      "decls_total": 201558,
+      "function_decls": 8863,
       "twin": "include/define_workload"
     },
     "scaling/define_specs_064": {
@@ -1081,8 +1081,8 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 202925,
-      "function_decls": 9265,
+      "decls_total": 201990,
+      "function_decls": 8863,
       "twin": "include/define_workload"
     },
     "scaling/define_specs_256": {
@@ -1099,8 +1099,8 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 204653,
-      "function_decls": 9265,
+      "decls_total": 203718,
+      "function_decls": 8863,
       "twin": "include/define_workload"
     },
     "scaling/define_units_016": {
@@ -1117,8 +1117,8 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 202855,
-      "function_decls": 9265,
+      "decls_total": 201920,
+      "function_decls": 8863,
       "twin": "include/define_workload"
     },
     "scaling/define_units_064": {
@@ -1135,8 +1135,8 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 204343,
-      "function_decls": 9265,
+      "decls_total": 203408,
+      "function_decls": 8863,
       "twin": "include/define_workload"
     },
     "scaling/define_units_256": {
@@ -1153,8 +1153,8 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 210295,
-      "function_decls": 9265,
+      "decls_total": 209360,
+      "function_decls": 8863,
       "twin": "include/define_workload"
     },
     "scaling/narrow_016": {
@@ -1171,8 +1171,8 @@
       "object_bytes": 1440,
       "code_bytes": 87,
       "symbol_bytes": 1353,
-      "decls_total": 293188,
-      "function_decls": 13208,
+      "decls_total": 292253,
+      "function_decls": 12806,
       "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/narrow_064": {
@@ -1189,8 +1189,8 @@
       "object_bytes": 1440,
       "code_bytes": 87,
       "symbol_bytes": 1353,
-      "decls_total": 294388,
-      "function_decls": 13256,
+      "decls_total": 293453,
+      "function_decls": 12854,
       "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/narrow_256": {
@@ -1207,8 +1207,8 @@
       "object_bytes": 1440,
       "code_bytes": 87,
       "symbol_bytes": 1353,
-      "decls_total": 299188,
-      "function_decls": 13448,
+      "decls_total": 298253,
+      "function_decls": 13046,
       "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/specs_broad_016": {
@@ -1223,8 +1223,8 @@
       "object_bytes": 1288,
       "code_bytes": 77,
       "symbol_bytes": 1211,
-      "decls_total": 111329,
-      "function_decls": 6498,
+      "decls_total": 110394,
+      "function_decls": 6096,
       "twin": "include/cstdio+spec_workload"
     },
     "scaling/specs_broad_064": {
@@ -1239,8 +1239,8 @@
       "object_bytes": 1288,
       "code_bytes": 77,
       "symbol_bytes": 1211,
-      "decls_total": 129305,
-      "function_decls": 7316,
+      "decls_total": 128370,
+      "function_decls": 6914,
       "twin": "include/cstdio+spec_workload"
     },
     "scaling/specs_broad_256": {
@@ -1255,8 +1255,8 @@
       "object_bytes": 1288,
       "code_bytes": 77,
       "symbol_bytes": 1211,
-      "decls_total": 229280,
-      "function_decls": 11801,
+      "decls_total": 228345,
+      "function_decls": 11399,
       "twin": "include/cstdio+spec_workload"
     },
     "scaling/typed_broad_016": {
@@ -1273,8 +1273,8 @@
       "object_bytes": 1440,
       "code_bytes": 87,
       "symbol_bytes": 1353,
-      "decls_total": 298872,
-      "function_decls": 12917,
+      "decls_total": 297937,
+      "function_decls": 12515,
       "twin": "include/cstdio+typed_workload"
     },
     "scaling/typed_broad_064": {
@@ -1291,8 +1291,8 @@
       "object_bytes": 1440,
       "code_bytes": 87,
       "symbol_bytes": 1353,
-      "decls_total": 429681,
-      "function_decls": 17342,
+      "decls_total": 428746,
+      "function_decls": 16940,
       "twin": "include/cstdio+typed_workload"
     },
     "scaling/typed_broad_256": {
@@ -1309,8 +1309,8 @@
       "object_bytes": 1440,
       "code_bytes": 87,
       "symbol_bytes": 1353,
-      "decls_total": 1702047,
-      "function_decls": 55191,
+      "decls_total": 1701112,
+      "function_decls": 54789,
       "twin": "include/cstdio+typed_workload"
     },
     "systems/user_defined_units": {
@@ -1327,9 +1327,9 @@
       "object_bytes": 1744,
       "code_bytes": 163,
       "symbol_bytes": 1581,
-      "decls_total": 272441,
-      "function_decls": 12349,
-      "twin": "include/cstdio+mechanics+si+space_and_time-6491"
+      "decls_total": 271506,
+      "function_decls": 11947,
+      "twin": "include/cstdio+mechanics+si+space_and_time-bd8c"
     },
     "text/output_format": {
       "InstantiateClass": 7613,
@@ -1345,8 +1345,8 @@
       "object_bytes": 419312,
       "code_bytes": 135174,
       "symbol_bytes": 284138,
-      "decls_total": 241618,
-      "function_decls": 10681,
+      "decls_total": 240683,
+      "function_decls": 10279,
       "twin": "include/cstdio+format+output_workload"
     },
     "text/output_format_advanced": {
@@ -1363,8 +1363,8 @@
       "object_bytes": 477128,
       "code_bytes": 152978,
       "symbol_bytes": 324150,
-      "decls_total": 249385,
-      "function_decls": 11010,
+      "decls_total": 248450,
+      "function_decls": 10608,
       "twin": "include/output_workload+print"
     },
     "text/output_ostream": {
@@ -1381,8 +1381,8 @@
       "object_bytes": 43520,
       "code_bytes": 11654,
       "symbol_bytes": 31866,
-      "decls_total": 218992,
-      "function_decls": 9746,
+      "decls_total": 218057,
+      "function_decls": 9344,
       "twin": "include/iostream+ostream+output_workload"
     },
     "text/output_printf": {
@@ -1399,8 +1399,8 @@
       "object_bytes": 1968,
       "code_bytes": 206,
       "symbol_bytes": 1762,
-      "decls_total": 212674,
-      "function_decls": 9456,
+      "decls_total": 211739,
+      "function_decls": 9054,
       "twin": "include/cstdio+output_workload"
     },
     "text/output_println": {
@@ -1417,8 +1417,8 @@
       "object_bytes": 420576,
       "code_bytes": 135659,
       "symbol_bytes": 284917,
-      "decls_total": 242658,
-      "function_decls": 10754,
+      "decls_total": 241723,
+      "function_decls": 10352,
       "twin": "include/format+output_workload+print"
     },
     "umbrella/codata_2022_umbrella": {
@@ -1435,8 +1435,8 @@
       "object_bytes": 1016,
       "code_bytes": 51,
       "symbol_bytes": 965,
-      "decls_total": 550057,
-      "function_decls": 25625
+      "decls_total": 549122,
+      "function_decls": 25223
     },
     "umbrella/codata_lean_umbrella": {
       "InstantiateClass": 6479,
@@ -1452,8 +1452,8 @@
       "object_bytes": 1016,
       "code_bytes": 51,
       "symbol_bytes": 965,
-      "decls_total": 229927,
-      "function_decls": 11481
+      "decls_total": 228992,
+      "function_decls": 11079
     },
     "umbrella/codata_umbrella": {
       "InstantiateClass": 28196,
@@ -1469,8 +1469,8 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 974819,
-      "function_decls": 45498
+      "decls_total": 973884,
+      "function_decls": 45096
     },
     "umbrella/isq_atomic_and_nuclear_physics_umbrella": {
       "InstantiateClass": 2411,
@@ -1484,8 +1484,8 @@
       "object_bytes": 1032,
       "code_bytes": 51,
       "symbol_bytes": 981,
-      "decls_total": 120094,
-      "function_decls": 6793
+      "decls_total": 119159,
+      "function_decls": 6391
     },
     "umbrella/isq_electromagnetism_umbrella": {
       "InstantiateClass": 8838,
@@ -1499,8 +1499,8 @@
       "object_bytes": 1024,
       "code_bytes": 51,
       "symbol_bytes": 973,
-      "decls_total": 237807,
-      "function_decls": 11596
+      "decls_total": 236872,
+      "function_decls": 11194
     },
     "umbrella/isq_information_science_umbrella": {
       "InstantiateClass": 3653,
@@ -1514,8 +1514,8 @@
       "object_bytes": 1024,
       "code_bytes": 51,
       "symbol_bytes": 973,
-      "decls_total": 144726,
-      "function_decls": 8045
+      "decls_total": 143791,
+      "function_decls": 7643
     },
     "umbrella/isq_light_and_radiation_umbrella": {
       "InstantiateClass": 4687,
@@ -1529,8 +1529,8 @@
       "object_bytes": 1024,
       "code_bytes": 51,
       "symbol_bytes": 973,
-      "decls_total": 164005,
-      "function_decls": 8917
+      "decls_total": 163070,
+      "function_decls": 8515
     },
     "umbrella/isq_mechanics_umbrella": {
       "InstantiateClass": 6057,
@@ -1544,8 +1544,8 @@
       "object_bytes": 1016,
       "code_bytes": 51,
       "symbol_bytes": 965,
-      "decls_total": 188923,
-      "function_decls": 9915
+      "decls_total": 187988,
+      "function_decls": 9513
     },
     "umbrella/isq_space_and_time_umbrella": {
       "InstantiateClass": 2974,
@@ -1559,8 +1559,8 @@
       "object_bytes": 1024,
       "code_bytes": 51,
       "symbol_bytes": 973,
-      "decls_total": 131198,
-      "function_decls": 7404
+      "decls_total": 130263,
+      "function_decls": 7002
     },
     "umbrella/isq_thermodynamics_umbrella": {
       "InstantiateClass": 7167,
@@ -1574,8 +1574,8 @@
       "object_bytes": 1024,
       "code_bytes": 51,
       "symbol_bytes": 973,
-      "decls_total": 210132,
-      "function_decls": 10932
+      "decls_total": 209197,
+      "function_decls": 10530
     },
     "umbrella/isq_umbrella": {
       "InstantiateClass": 16307,
@@ -1589,8 +1589,8 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 379508,
-      "function_decls": 17676
+      "decls_total": 378573,
+      "function_decls": 17274
     },
     "umbrella/si_lean_umbrella": {
       "InstantiateClass": 3983,
@@ -1606,8 +1606,8 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 158188,
-      "function_decls": 8095
+      "decls_total": 157253,
+      "function_decls": 7693
     },
     "umbrella/si_umbrella": {
       "InstantiateClass": 6043,
@@ -1623,8 +1623,8 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 191321,
-      "function_decls": 8656
+      "decls_total": 190386,
+      "function_decls": 8254
     },
     "umbrella/si_units_umbrella": {
       "InstantiateClass": 3521,
@@ -1640,8 +1640,8 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 150514,
-      "function_decls": 8018
+      "decls_total": 149579,
+      "function_decls": 7616
     }
   }
 }
