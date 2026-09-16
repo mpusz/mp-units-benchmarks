@@ -1065,8 +1065,8 @@ def assert_same_config(recorded, tc: Toolchain, where):
         if was is not None and was != current:
             sys.exit(f"{where} was recorded with {field}={was!r}, this run uses {current!r}; "
                      f"counts are only comparable within one configuration")
-    # The point release, which `cxx` cannot see. `clang++-21` is a major version, and mp-units CI
-    # installs it with `llvm.sh 21`, so whatever 21.x the LLVM apt repository currently serves. A
+    # The point release, which `cxx` cannot see. `clang++-23` is a major version, and mp-units CI
+    # installs it with `llvm.sh 23`, so whatever 23.x the LLVM apt repository currently serves. A
     # frontend or libc++ point release moves instantiation counts, and without this the run would
     # compare them against a baseline recorded on a different compiler and attribute the difference
     # to the library. Deliberately NOT fatal: a point release is not a reason to block an unrelated
@@ -3259,7 +3259,7 @@ def main():
 
     g = sub.add_parser("check", help="gate against baselines (two-sided)")
     g.add_argument("--baseline-key", help="baseline file to use (default: derived from the "
-                                          "configuration, e.g. clang21-cxx23, gcc15-cxx26)")
+                                          "configuration, e.g. clang23-cxx23, gcc15-cxx26)")
     g.add_argument("--report", help="write a JSON report (per-workflow deltas, median, regressions, improvements)")
     g.add_argument("--slack", type=float, default=GATE_SLACK, metavar="PCT",
                    help=f"per-workflow growth beyond this percent fails (default {GATE_SLACK:g})")
@@ -3322,7 +3322,7 @@ def main():
 
     u = sub.add_parser("update", help="re-record baselines")
     u.add_argument("--baseline-key", help="baseline file to write (default: derived from the "
-                                          "configuration, e.g. clang21-cxx23, gcc15-cxx26)")
+                                          "configuration, e.g. clang23-cxx23, gcc15-cxx26)")
     u.add_argument("--workflows", nargs="*",
                    help="substring filters: re-record only these, leaving the rest untouched "
                         "(default: rewrite every entry from this checkout)")

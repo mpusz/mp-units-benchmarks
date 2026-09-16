@@ -28,7 +28,7 @@ parse `-ftime-trace` and `-print-stats` output and exit with a clear message on 
 and `summary` work with any compiler - GCC builds the whole corpus, it just cannot produce counts.
 
 ```bash
-R="--repo ~/repos/mp-units --cxx clang++-21"
+R="--repo ~/repos/mp-units --cxx clang++-23"
 
 runner/bench.py $R counts                                  # deterministic counts, all workflows
 runner/bench.py $R counts --workflows isq/ affine           # substring filters (single workflow)
@@ -260,8 +260,8 @@ Baselines are keyed by the WHOLE configuration, not the compiler - compiler, `--
 `--config-label`, and a digest of `--extra-flags`:
 
 ```text
-clang21-cxx23-libcxx     clang21-cxx23-libstdcxx     gcc15-cxx26
-clang21-cxx23-libcxx-fmtlib-d2da0f   (--config-label fmtlib --extra-flags=-DMP_UNITS_API_STD_FORMAT=0)
+clang23-cxx23-libcxx     clang23-cxx23-libstdcxx     gcc15-cxx26
+clang23-cxx23-libcxx-fmtlib-d2da0f   (--config-label fmtlib --extra-flags=-DMP_UNITS_API_STD_FORMAT=0)
 ```
 
 `runner/bench.py --cxx <c> [...] key` prints the file a configuration resolves to - use it instead of
@@ -448,29 +448,38 @@ the gate table names which one it used in its `basis` column:
 
 ## CI
 
-- `.github/workflows/ci-compile-cost.yml` - three job kinds. `gate`: clang `-std=c++23` (matches
-  the baselines), counts, TIGHT bands (`SLACK: 1`, `MEDIAN_ALARM: 0.5`), growth fails the build, an
+- `.github/workflows/ci-compile-cost.yml` - three job kinds. `gate`: the DEFAULT clang, named once
+  in `GATE_CLANG` (23 since mp-units added it; 22 is skipped, see `measure` below) at
+  `-std=c++20/23/26`, one arm per standard matching the three reviewed baseline files. That one
+  value also drives the re-record PR and `modules-ab`, so the default compiler moves in one place -
+  but baselines for the new compiler must exist BEFORE it moves, because `check` refuses to compare
+  across configurations, and mp-units' own `ci-compile-time.yml` pins the same version in
+  `CLANG_VERSION`. counts, TIGHT bands (`SLACK: 1`, `MEDIAN_ALARM: 0.5`), growth fails the build, an
   improvement past `TIGHTEN_NOTICE` opens the re-record PR (never from a `pull_request` event, never
   when a regression is present), `check` runs with `continue-on-error` so reactions happen before a
   final step fails the job, and a guard skips measuring ONLY on a `schedule` when the baseline's
   `mp_units_sha` already describes the checked-out tree - a push or dispatch always measures,
-  because the table is the point of the run, and a skipped arm writes a summary saying why it has
-  no table (an empty job summary reads as a bug). `measure`: one runner per compiler - clang++-17/18/20/21
-  and g++-14/15, plus g++-16 as `experimental: true` -> `continue-on-error` - all at `-std=c++26`,
-  each uploading a `report --output` artifact. That set is mp-units' supported compilers that can do
-  c++26; clang 16 (spells it c++2c), gcc 12/13 (no c++26, and gcc 13 has no `<print>`), clang 19
-  (unsupported by mp-units) and clang 22 (currently fails to compile the library) are out. The gate
-  jobs also always upload their `results/report.json` (`gate-report-<std>`): the gate page points at
-  it for per-workflow evidence instead of carrying 270 collapsed rows. `modules-ab`: ONE runner
-  measuring headers and `--modules` back to back with a shared `--machine-tag` (and `--config-label
-  ab`), because that tag is the only thing that licenses same-machine wall-clock sections - the
-  safety ladder and the modules consumer time - and hostnames provably cannot (same name, three CPU
-  models in one fleet). `report`: `needs: [measure, modules-ab]`, `if: always()`, downloads the arm
-  artifacts, posts the `bench.py summary` PAGE into `GITHUB_STEP_SUMMARY` AND uploads that same page
-  plus the `--full-output` per-workflow tables plus the per-arm JSON as the `compile-cost-report`
-  artifact - a job summary cannot be downloaded,
-  diffed against last week's, or pasted into a talk, and a 1,400-line table cannot be read on a
-  page. The markdown files are named after the refs they measured.
+  because the table is the point of the run, and a skipped arm writes a summary saying why it has no
+  table (an empty job summary reads as a bug). `measure`: one runner per compiler -
+  clang++-17/18/20/21/23 and g++-14/15, plus g++-16 as `experimental: true` -> `continue-on-error` -
+  all at `-std=c++26`, each uploading a `report --output` artifact. That set is mp-units' supported
+  compilers that can do c++26; clang 16 (spells it c++2c), gcc 12/13 (no c++26, and gcc 13 has no
+  `<print>`), clang 19 (unsupported by mp-units) and clang 22 are out. The 21/23 adjacency is not a
+  typo: clang 22 still fails to compile the library, for a reason unrelated to the NTTP `decltype`
+  bug mp-units fixed for 23 in `9109af58b`, so the fleet skips it exactly as mp-units' own matrix
+  does. Nothing in the install step needs to know a version - it derives one from `matrix.cxx` and
+  hands it to `llvm.sh`, which maps it to the matching `llvm-toolchain-<codename>-<n>` suite. The
+  gate jobs also always upload their `results/report.json` (`gate-report-<std>`): the gate page
+  points at it for per-workflow evidence instead of carrying 270 collapsed rows. `modules-ab`: ONE
+  runner measuring headers and `--modules` back to back with a shared `--machine-tag` (and
+  `--config-label ab`), because that tag is the only thing that licenses same-machine wall-clock
+  sections - the safety ladder and the modules consumer time - and hostnames provably cannot (same
+  name, three CPU models in one fleet). `report`: `needs: [measure, modules-ab]`, `if: always()`,
+  downloads the arm artifacts, posts the `bench.py summary` PAGE into `GITHUB_STEP_SUMMARY` AND
+  uploads that same page plus the `--full-output` per-workflow tables plus the per-arm JSON as the
+  `compile-cost-report` artifact - a job summary cannot be downloaded, diffed against last week's,
+  or pasted into a talk, and a 1,400-line table cannot be read on a page. The markdown files are
+  named after the refs they measured.
 - Dispatch inputs: `ref` and optional `compare_ref` (measured by every arm alongside the first).
 - Bands are CLI flags (`--slack`, `--median-alarm`, `--tighten-notice`, `--advisory-slack`, all
   percents), NOT constants: the same baseline file is read strictly here and loosely there.

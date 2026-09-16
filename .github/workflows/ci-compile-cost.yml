@@ -49,7 +49,12 @@ concurrency:
 env:
   MP_UNITS_REF: ${{ inputs.ref || 'master' }}
   COMPARE_REF: ${{ inputs.compare_ref || '' }}
-  GATE_CLANG: 21
+  # The default clang, and therefore the one the reviewed baselines are recorded with: the gate,
+  # the re-record PR and the modules-ab pair all derive their compiler from this one value.
+  # Changing it requires baselines for the new compiler to exist first - `check` refuses to
+  # compare numbers recorded under a different configuration - and mp-units' own
+  # ci-compile-time.yml pins the same version in CLANG_VERSION, which must move with it.
+  GATE_CLANG: 23
   # Tighter than the bands mp-units blocks on: borderline growth must go red here first.
   # Asymmetric on purpose. Totals grow when the library gains a feature - which must not fail a build - so
   # SLACK is loose. SLOPE_SLACK is the tight one, because nothing legitimate moves the marginal cost of one
@@ -307,7 +312,9 @@ jobs:
     # costs its own arm. The set is exactly mp-units' supported compilers that can do -std=c++26, so
     # every column is the same standard and therefore comparable. Deliberately absent: clang 16 (only
     # spells it -std=c++2c), gcc 12 and 13 (no c++26; gcc 13 also has no <print>), clang 19 (mp-units
-    # does not support it) and clang 22 (LLVM trunk currently fails to compile the library).
+    # does not support it) and clang 22, which still fails to compile the library for a reason
+    # unrelated to the NTTP `decltype` bug mp-units fixed for 23 - so 21 and 23 are adjacent here
+    # while LLVM 22 is skipped, exactly as in mp-units' own matrix.
     strategy:
       fail-fast: false
       matrix:
@@ -316,18 +323,20 @@ jobs:
           - { id: clang18, cxx: clang++-18, std: c++26, install: clang }
           - { id: clang20, cxx: clang++-20, std: c++26, install: clang }
           - { id: clang21, cxx: clang++-21, std: c++26, install: clang }
+          - { id: clang23, cxx: clang++-23, std: c++26, install: clang }
           - { id: gcc14, cxx: g++-14, std: c++26, install: gcc }
           - { id: gcc15, cxx: g++-15, std: c++26, install: gcc-ppa }
           - { id: gcc16, cxx: g++-16, std: c++26, install: gcc-ppa, experimental: true }
           # How the library is consumed is a configuration axis of its own. `import std;` needs the
           # standard library's own module built first; modules need that plus the mp-units BMIs, and
           # the runner reports what building them cost as `bmi/*` rows.
-          - { id: clang21-importstd, cxx: clang++-21, std: c++26, install: clang, args: --import-std }
-          # Three clang versions in the modules configuration: comparing how the interface build
+          - { id: clang23-importstd, cxx: clang++-23, std: c++26, install: clang, args: --import-std }
+          # Four clang versions in the modules configuration: comparing how the interface build
           # itself evolves is half the point, and clang 17 is out because libc++ 17 ships no std.cppm.
           - { id: clang18-modules, cxx: clang++-18, std: c++26, install: clang, args: --modules --import-std }
           - { id: clang20-modules, cxx: clang++-20, std: c++26, install: clang, args: --modules --import-std }
           - { id: clang21-modules, cxx: clang++-21, std: c++26, install: clang, args: --modules --import-std }
+          - { id: clang23-modules, cxx: clang++-23, std: c++26, install: clang, args: --modules --import-std }
           # GCC cannot build the mp-units modules yet (mp-units#717: `recursive lazy load` in the
           # systems BMI), so it gets the `import std;` arm only.
           - { id: gcc16-importstd, cxx: g++-16, std: c++26, install: gcc-ppa, args: --import-std, experimental: true }
