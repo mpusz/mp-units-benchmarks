@@ -2805,6 +2805,70 @@ fix, the page could show a +24% price above a table of -1,000s: an explanation p
 way from the thing it explains is worse than no explanation.
 
 
+## 31. A rewrite that builds faster and still turns the gate red
+
+mp-units PR #848 replaced the engine that decides whether one quantity specification converts to
+another. Builds got faster and the instantiation gate failed. It is §2's finding that the count is
+not a proxy for time, met in a real PR.
+
+Wall time on the PR's first push, against master, interleaved in one session (5 reps, pinned to one
+CPU, WSL2, each workflow's best of 5 summed), over the 24 workflows that compile on both refs:
+
+| compiler | master | PR | change | noise floor |
+|---|---:|---:|---:|---:|
+| clang-23 | 89.8 s | 79.8 s | -11% | 7.2% |
+| gcc-15 | 55.1 s | 48.2 s | -12.5% | 2.7% |
+
+The same push, gated on clang-23 / c++26 / libc++ against the baselines recorded at acc6c9c7b,
+failed three workflows on the use and residual bases: `isq/vector_quantities` 1,082 -> 1,146
+(+5.9%), `isq/custom_hierarchy` 1,879 -> 1,983 (+5.5%) and the `isq_space_and_time` umbrella
+residual 4,967 -> 5,178 (+4.2%). The median moved -1.27%, and 61 of the 64 workflows improved past
+the notice band on at least one metric (127 workflow-metric rows, 103 of them constant evaluations
+and function declarations). Whole-TU counts fell with the time: `vector_quantities` went 15,941 ->
+15,182 against master. As in §30, the headers got cheaper by more than the conversions got dearer.
+
+**The use cost is one shape: `kind_of<derived K>` converted to a named target**, such as
+`isq::length / isq::duration` to `horizontal_speed`. The old engine reduced it to a conversion
+between kind roots, so many targets shared one specialization. In master's traces such a conversion
+cost 23 to 32 instantiations, but in `custom_hierarchy` `horizontal_speed` paid only 4 because
+`sink_rate` had already paid 23. The new engine runs its full reduction for each target. Some libc++
+pair and tuple machinery disappeared: `std::__check_pair_construction` 152 -> 12 and
+`std::tuple_element` 112 -> 0 in `vector_quantities`. That was almost all include cost, 147 and 108
+of them in the include-only twin. It explains the cheaper headers, not the dearer conversions. Of
+the umbrella's growth over master (4,903 -> 5,178, +275), about 246 comes from the PR's ISQ model
+changes in `space_and_time.h`: chiefly `propagation_coefficient` becoming the parent of
+`attenuation` and `phase_coefficient`, which adds two equation-checked definitions, plus a new
+equation for `angular_repetency`. With master's `space_and_time.h` the PR measured 4,932, +0.6% over
+master.
+
+**Five main cuts, verdicts unchanged.** Use-basis instantiations of `vector_quantities` /
+`custom_hierarchy` / the umbrella total, each cut measured on its own, on top of the ones above it:
+
+| change | delta |
+|---|---:|
+| `type_list_join` joins 2, 3 or 4 lists in one instantiation instead of one per list | -15 / -27 / -42 |
+| instantiate the exact-equation and own-tree checks only for a side of a single factor | -5 / -10 / -20 |
+| skip simplifying common factors when the sides share no base, and drop a class wrapper around a predicate | -24 / -31 / -36 |
+| find declared kinds from the kind root, read the sort key's roots without a function per quantity, skip the kind boundary after `none` | -3 / -14 / -49 |
+| pair without the list of every factor unless a tree ranks `cast` | -4 / -11 / -8 |
+
+Three smaller edits that also shipped account for another -1 / -8 / -3. The static tests and two ISQ
+verdict dumps (137,641 and 28,698 conversions, byte-identical at every checkpoint) cover the
+verdicts. The dumps hold named quantities, their equations and their kinds, but no
+`kind_of<derived>` source, the shape the cuts target, which only the tests check.
+
+What shipped also carries two correctness fixes, in a separate commit, that cost a little: a tie
+between equally deep factors is now searched instead of decided by name, and an upcast between named
+quantities checks the declared kinds their equations carry. With all of it, the gate passes at a
+median of -2.64%, with 7 advisory rows (worst `vector_quantities` +2.4% over the baseline, +1.3%
+over master). Wall time of that final state against master, measured the same way in a second
+session: clang-23 87.0 s -> 75.8 s (-12.9%, noise floor 4.8%), gcc-15 50.9 s -> 44.7 s (-12.2%,
+noise floor 6.5%). Master alone moved 7.5% on gcc between the two sessions, so only the comparisons
+within a session mean anything.
+
+The baselines here still need re-recording for this PR, and the advisory rows will go red under this
+repository's tighter bands until they are.
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That
