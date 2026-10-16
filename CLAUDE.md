@@ -43,8 +43,12 @@ runner/bench.py $R report WORKTREE v2.5.0 --output r.json   # the PAGE on stdout
 runner/bench.py $R report --full-output full.md             # + the complete per-workflow tables
 runner/bench.py $R report --machine-tag ab-1                # license same-machine wall comparisons
 runner/bench.py summary r1.json r2.json --full-output f.md  # merge reports (also -> STEP_SUMMARY)
-runner/bench.py $R attribute v2.5.0 master --workflows isq/kind_safe_interfaces   # why it moved
+runner/bench.py $R attribute v2.5.0 master --workflows isq/kind_safe_interfaces   # why it moved: by entity,
+                                                            # then constant evaluations and constraint checks by source line
 runner/bench.py $R attribute --workflows scaling/broad_016 scaling/broad_256      # slope, by entity
+runner/bench.py $R attribute --workflows parity/unit_conversions --why 'quantity_spec_concepts.h:64:24'
+                                                            # which instantiations trigger the evaluations at a line
+runner/bench.py $R check --workflows parity/unit_conversions   # a PARTIAL gate: one row, for local investigation
 runner/bench.py --std c++26 --cxx g++-16 $R report          # any compiler/standard
 runner/bench.py $R --std c++26 --import-std counts          # `import std;` instead of std headers
 runner/bench.py $R --std c++26 --modules --import-std report   # consume mp-units as C++20 modules
@@ -156,11 +160,28 @@ entity instantiated (template arguments collapsed) and diffs exactly two measure
 one workflow ("what did this library change cost"), or two workflows of one ref ("what does the
 bigger one instantiate", which is how a scaling slope gets attributed). Pairs are ordered by library
 version, so a delta always reads old -> new. This is the tool that turned "slope +9.8%" into
-`type_list_merge_many_sorted_impl +5.5 per step`; reach for it before guessing at source.
+`type_list_merge_many_sorted_impl +5.5 per step`; reach for it before guessing at source. It prints
+THREE tables: instantiations by entity, then constant evaluations and constraint checks by SOURCE
+LOCATION (those two events carry no entity, only where the expression or the constraint sits; the
+checkout's path is stripped so one line of one header is one row on both sides). For a workflow with
+an include twin every table is on the USE BASIS - each side minus its own twin, key by key, which is
+how the gate prices it - and the caption says so. The basis is not a detail: across the 2.6 batch the
+whole TU of parity/unit_conversions LOST 6,524 constant evaluations while its use cost gained 406
+(findings §32), both right, only one of them the gate's. `--why <regex>` asks the next question of
+ONE measurement: which enclosing instantiation triggers the constant evaluations at a location.
+An evaluation event carries nothing but a location, so each is credited by timestamp nesting to the
+innermost Instantiate*/Parse* event still open when it fired (events sorted by `(ts, -dur)`, a
+stack of open contexts popped as they end). That is what named §32's three costs from locations in
+libc++ that said nothing by themselves. `--full-args` keeps template arguments in the entity table and
+the `--why` rows, for the one question collapsing hides: which specialization.
 
-FOUR metrics are gated, all bit-deterministic and all from ONE traced compile: template
+FIVE metrics are gated, all bit-deterministic and all from ONE traced compile: template
 instantiations (frontend work), constant evaluations (`EvaluateAsConstantExpr` - what a constexpr
-implementation trades instantiations for), `function_decls` (declarations, see below) and `code_bytes`.
+implementation trades instantiations for), constraint checks (`CheckConstraintSatisfaction`, one
+event per concept the compiler checks - the cost of a constrained interface; it is the number that
+moved most in the 2.6 batch, -41 to -62% per workflow on the use basis, while no other column saw it,
+see findings §32; its floor is provisional and a baseline file that predates it reports the rows as
+`not recorded`, never as a regression), `function_decls` (declarations, see below) and `code_bytes`.
 The same compile also yields the ENTITY CENSUS (distinct specializations of the definition
 scaffolding templates - see Gate semantics) and, for every workflow with a body, its INCLUDE TWIN
 (the `include/*` rows), which together are what let the gate charge growth at cost and gate only

@@ -2893,6 +2893,31 @@ Between 2026-10-14 and 2026-10-16 mp-units merged six PRs that extend the framew
 
 **The outcome.** Two commits in mp-units (`8f34e3210f`, then `f9f826af89` with the `ratio` operators and the `pair_lists` tie-break), one in this repository with the corpus shim and the three baselines re-recorded from a detached worktree at `f9f826af89`. Against the §31 baselines the fixed tree has no constant-evaluation row past the band on any standard, instantiations are +8.4 % and +3.8 % on the two kind-factor workflows and within the band elsewhere, and the `specs_broad` slope is back at its baseline shape. Most of the session went into attribution tooling that `bench.py attribute` does not yet have: a per-location diff of constant evaluations on the use basis, and the nesting-based credit of an evaluation to the instantiation that caused it. Both are small scripts and both belong in the runner.
 
+## 33. Six follow-ups, measured one at a time
+
+The §32 open threads were tried the same afternoon, each on its own copy of the tree at `c85584d65f`, measured with clang 23 at C++23 against that tree (whole TU for the umbrellas, use basis for the rest). Six experiments, four kept, two rejected with a number attached.
+
+| experiment | `isq.h` umbrella | `glide_computer` (use) | other | verdict |
+|---|---:|---:|---:|---|
+| `is_base_of_v` instead of `derived_from` in the four symbolic concepts | -1,006 constant evaluations | -841 | | kept, folded into the next |
+| the same plus dropping the `SymbolicConstant` traits from the concepts | -7,266 (-12.7 %) | -5,506 (-11.7 %) | | rejected as written: it changes what the concepts promise |
+| the same traits kept but as ONE atom (a variable template behind the concept) | -7,014 (-12.2 %) | -4,655 | | **kept**: the guarantee was never the cost, the five separate atoms were |
+| `_character_` and `_dimension_` read directly instead of through `admitted_character()` / `get_dimension()` | -651 instantiations | -27 | `kind_safe_interfaces` -13 | **kept** |
+| `type_list_size` as a variable-template partial specialization | -698 instantiations | -169 | `kind_safe_interfaces` -102 | **kept** |
+| folds in four requires-clauses turned into one atom each (C++26) | +5 | | `si` umbrella +5, `vector_quantities` -11 | rejected: nothing to gain |
+| explicit `<`, `>`, `<=`, `>=` on `quantity` | | -13 constant evaluations, +1,699 constraint checks | | rejected |
+| `prefixed_unit` without its `scaled_unit_impl` base | | 0 at the use sites | `si` umbrella -673 instantiations (-7.3 %) | **kept** |
+
+Three lessons sit in that table.
+
+**Parentheses do not make an atom.** `SymbolicConstant` was `(__is_empty(T) && __is_trivially_constructible(T) && ... )`, five builtins in one parenthesized expression. A concept's constraint-expression is normalized through `&&` regardless of parentheses, so the concept had five atomic constraints, each evaluated and cached on its own for every type that meets `Unit`, `QuantitySpec`, `Dimension` or `PointOrigin`, and the `isq.h` umbrella meets them on about 1,600 distinct types. Moving the expression into a `constexpr bool` variable template and writing the concept as `symbolic_constant_traits<T>` keeps every guarantee and leaves one atom. The same move on `std::derived_from` (two atoms, the second a convertibility check that only matters for private or ambiguous bases the framework never has) is worth another thousand. Together the four concepts cost three atoms per type instead of eight, which is 12 % of the umbrella's constant evaluations.
+
+**The accessor question has a precise answer.** The maintainer asked whether `get_dimension()` and friends could go the way of §20 and §22, hidden friends of a non-template base. They already are: `get_dimension` is a hidden friend template of `quantity_spec_interface_base`, declared once. What §20 removed was declarations, one per specialization; what these cost is instantiations, one per argument type, and that is intrinsic to a function template whatever its home. The cure is not calling a function: inside the framework, where the type is already in hand, `Q::_dimension_` and `Q::_character_` are member reads and instantiate nothing. The public spellings stay for users. `get_quantity_spec` and `get_unit` were left alone, as they are overloaded on units and references and the reference case is what the use sites need.
+
+**Not every fold matters, and not every rewrite does.** §32 found `KindsPerFactor`'s folds re-evaluating `QuantitySpec` atoms per operand at C++26. The four other folds in requires-clauses (`common_unit`'s constraint, `fixed_string`'s character constructor, `ValidVectorAxes`, `get_common_reference`) were converted the same way and moved nothing on three TUs: their elements are cheap atoms (`is_const_v`, `is_pointer_v`) or the fold sits under a negation, which is already one atom. And the `<=>` rewrite that cost `ratio` and `string_view` dearly in `consteval` loops does not show up for `quantity` comparisons in user code: giving `quantity` explicit relational operators saved 13 constant evaluations in `glide_computer` and added 1,699 constraint checks, because eight more constrained candidates now take part in every comparison. The rule that falls out: a rewritten `<=>` is worth replacing where the comparison runs inside a constant evaluation that the engine repeats thousands of times, not at ordinary call sites.
+
+**What a prefixed symbol costs after this.** `si/unit_symbols.h` mints one `prefixed_unit` per prefix and unit, 674 in any TU that includes it, and each one derived from `scaled_unit_impl<M, U>`, a second class instantiation whose only content is the magnitude and the reference unit. The prefixed unit now carries those two members itself, and the four places that dispatched on the base (the canonical unit, the magnitude sign, the two measured-constant collectors) got a `prefixed_unit` overload each; the symbol printer already preferred the `_symbol_` overload. The SI umbrella drops from 9,251 to 8,578 instantiations. The four kept changes shipped together as mp-units `cdecd7bede`, verified on gcc 12, gcc 15, clang 16 and clang 21 including the module build. The symbol matrix is still the largest single item of every SI translation unit (674 `prefixed_unit` plus 674 symbol concatenations), and what remains of it is the definition itself.
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That
@@ -2934,6 +2959,9 @@ wrong predictions from named people who were reasoning sensibly, and numbers for
     +14 %; the use-basis attribution said a `string_view` operator, a concept that should have been a
     bool, and a constructor competing with `42 * m`. Meanwhile constraint checks fell by half and the
     compiler's memory by a fifth, and no gated column could say so. (§32)
+20. **Parentheses do not make an atom.** Five builtin traits in one parenthesized expression were
+    five constraints, evaluated per type; one variable template made them one, 12 % of an ISQ
+    umbrella's constant evaluations. Plus the two follow-ups that measured zero. (§33)
 
 **Blog-length cut:** §0 down to the 2.5.0-vs-master table as the hook, then §2 (metric choice,
 including the 0.69 and 0.97 correlations) and §6 (the `output_format` chase, ending on the

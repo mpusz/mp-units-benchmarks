@@ -7,12 +7,17 @@ Subcommands:
   time     interleaved wall-clock A/B across two or more git refs (best-of-K, rep-major
            interleaving so machine-load drift hits all arms equally)
   counts   deterministic frontend counts from one traced clang compile: -ftime-trace events
-           (instantiations, constant evaluations) plus the AST census from -print-stats
-           (declarations, types) - all bit-stable for a pinned compiler, so a noisy CI
-           machine measures them as well as a quiet one
-  check    compare instantiation counts of a checkout against baselines/ with a two-sided
-           gate: regressions fail; improvements emit a visible "tighten baselines" notice
+           (instantiations, constant evaluations, constraint satisfaction checks) plus the AST
+           census from -print-stats (declarations) - all bit-stable for a pinned compiler, so a
+           noisy CI machine measures them as well as a quiet one
+  check    compare the gated counts of a checkout against baselines/ with a two-sided gate:
+           regressions fail; improvements emit a visible "tighten baselines" notice; a metric
+           the baseline file predates is reported as "not recorded", never as either
   update   re-record baselines/ from a checkout
+  attribute  what accounts for a difference: instantiations by entity, constant evaluations
+           and constraint checks by source location (on the use basis when the workflow has an
+           include twin), or with --why the enclosing instantiations that trigger the
+           evaluations at one location
 
 Workflow corpus conventions (workflows/<category>/<name>.cpp):
   // REQUIRES: mp-units >= X.Y     minimal library version (skipped -> n/a otherwise)
@@ -294,7 +299,8 @@ def trace_counts(trace: Path):
     nested chain. Instantiating A<B<C>> is one total and three events, and the cost is three.
     """
     data = json.loads(trace.read_text())
-    counts = {"InstantiateClass": 0, "InstantiateFunction": 0}
+    counts = {"InstantiateClass": 0, "InstantiateFunction": 0, "EvaluateAsConstantExpr": 0,
+              "CheckConstraintSatisfaction": 0}
     for e in data["traceEvents"]:
         if e.get("ph") == "X" and e["name"] in counts:
             counts[e["name"]] += 1
@@ -463,7 +469,9 @@ def measure_one(tc: Toolchain, repo, src, ctx: BuildContext, tmp: Path, quote_di
 
     Instantiations are frontend work. More deterministic numbers come free from the same compile and
     cover what they cannot see: constant evaluation (which a constexpr implementation trades
-    instantiations for), the entity census (what the included headers DEFINE - see CENSUS_KINDS), the
+    instantiations for), constraint satisfaction checks (one event per concept the compiler checks -
+    the cost of a constrained interface, which §32 found moving by -41% to -62% while no other count
+    noticed), the entity census (what the included headers DEFINE - see CENSUS_KINDS), the
     object file split into the code that reaches the binary versus the symbol metadata that does not
     - see object_sizes() - and the size of the AST that was built, which is the only one of them that
     can see a declaration that was never instantiated (see ast_stats)."""
@@ -471,7 +479,8 @@ def measure_one(tc: Toolchain, repo, src, ctx: BuildContext, tmp: Path, quote_di
     trace = tmp / "wf.json"
     proc = run(compile_cmd(tc, repo, out, src, trace=True, ctx=ctx, quote_dir=quote_dir), cwd=ctx.cwd)
     data = json.loads(trace.read_text())
-    counts = {"InstantiateClass": 0, "InstantiateFunction": 0, "EvaluateAsConstantExpr": 0}
+    counts = {"InstantiateClass": 0, "InstantiateFunction": 0, "EvaluateAsConstantExpr": 0,
+              "CheckConstraintSatisfaction": 0}
     census, seen = {}, set()
     for e in data["traceEvents"]:
         if e.get("ph") != "X":
@@ -726,13 +735,13 @@ def cmd_counts(args):
     measured = {ref: measure_counts(r, tc, args.workflows) for ref, r in repos.items()}
     if len(refs) == 1:
         results = measured[refs[0]]
-        print_table(["inst_class", "inst_func", "const_eval", "entities", "code_B", "syms_B",
-                     "fn_decls", "decls"],
+        print_table(["inst_class", "inst_func", "const_eval", "constraints", "entities", "code_B",
+                     "syms_B", "fn_decls", "decls"],
                     [(n, *([sum(v.get("census", {}).values()) or None if k == "entities" else v.get(k)
                             for k in ("InstantiateClass", "InstantiateFunction", "EvaluateAsConstantExpr",
-                                      "entities", "code_bytes", "symbol_bytes",
-                                      "function_decls", "decls_total")]
-                           if isinstance(v, dict) else [v] * 8))
+                                      "CheckConstraintSatisfaction", "entities", "code_bytes",
+                                      "symbol_bytes", "function_decls", "decls_total")]
+                           if isinstance(v, dict) else [v] * 9))
                      for n, v in sorted(results.items())],
                     lambda v: "n/a" if v is None else str(v))
         if price := price_list_lines(results, tc):
@@ -870,8 +879,20 @@ def time_spread_report(samples, comparable, args):
 # below the corpus's 25th percentile of use-costs, so the mid and large rows keep full percentage
 # sensitivity; on totals these floors sit far under the band's own resolution (83+ declarations) and
 # never bind at all.
+#
+# `constraint checks` (CheckConstraintSatisfaction - clang 23 emits one event per constraint it checks)
+# joined after the 2.6 framework batch (findings §32). It is deterministic like every other trace count,
+# and on that batch it was the largest mover by a wide margin: -62% on parity/unit_conversions, -41% on
+# generic/generic_interfaces, -12% on scaling/specs_broad_064, all on the use basis, while no gated
+# column moved by more than single digits - a gate without it summarized a rewrite that halved the cost
+# of every constrained interface as "nothing moved", and peak memory fell by a fifth beside it. Its
+# floor is PROVISIONAL at 16, the same as constant evaluations: the use-basis values seen so far are
+# five digits, so the floor never binds at CI's bands, and it is to be re-derived from the corpus
+# spread once baselines carry the metric on every configuration. Baselines recorded before it exists
+# lack the key, and `check` reports such rows as "not recorded" rather than skipping them silently.
 GATED = (("instantiations", lambda e: e["InstantiateClass"] + e["InstantiateFunction"], 8),
          ("constant evaluations", lambda e: e.get("EvaluateAsConstantExpr"), 16),
+         ("constraint checks", lambda e: e.get("CheckConstraintSatisfaction"), 16),
          ("function declarations", lambda e: e.get("function_decls"), 16),
          ("emitted code (bytes)", lambda e: e.get("code_bytes"), 512))
 
@@ -884,6 +905,7 @@ GATED = (("instantiations", lambda e: e["InstantiateClass"] + e["InstantiateFunc
 # whole series, so there is no slope to speak of). `constant evaluations` is a candidate - it scales at
 # ~585 per step on `broad` - and is left out until that slope has been reviewed across configurations:
 # putting a band on a number nobody has looked at is how a gate goes red for a reason no one can explain.
+# `constraint checks` is left out on the same grounds, one batch younger.
 SLOPE_GATED = (("instantiations", "instantiations"), ("function declarations", "declarations"))
 
 
@@ -1006,6 +1028,27 @@ def gated_deltas(baseline, results, extract, rates):
                          "abs": c - b, "basis": basis, "total_baseline": b_tot, "total_current": c_tot,
                          "umbrella": name.startswith("umbrella/")}
     return details
+
+
+def unrecorded_values(baseline, results, extract):
+    """{workflow: measured value} for every gated entry whose baseline lacks this metric.
+
+    `gated_deltas` skips such an entry, which is right for the gate - a baseline recorded before a
+    metric existed must never read as a change - and wrong for the reader, who otherwise sees a
+    metric vanish from the evidence without a word. `constraint checks` arrived after every baseline
+    file was recorded, so until each configuration is re-recorded its rows are reported as `not
+    recorded`: measured, listed, not gated."""
+    out = {}
+    for name, base in sorted(baseline.items()):
+        if name.startswith(("bmi/", "include/")):
+            continue
+        cur = results.get(name)
+        if not isinstance(cur, dict) or not isinstance(base, dict):
+            continue
+        b, c = extract(base), extract(cur)
+        if isinstance(c, (int, float)) and not isinstance(b, (int, float)):
+            out[name] = c
+    return out
 
 
 # The scaling/ series' shapes: narrow/broad measure the marginal cost of USING quantity types, the
@@ -1265,9 +1308,12 @@ def census_growth_lines(details_by_metric, baseline, results):
     return out
 
 
-def entity_diff_lines(left, right, label_left, label_right, top, min_delta=1):
-    """Markdown for an entity-level diff of two instantiation tallies, ranked by CONTRIBUTION to the
-    change: increases first when the total grew, decreases first when it fell.
+def entity_diff_lines(left, right, label_left, label_right, top, min_delta=1, noun="instantiations",
+                      unit=("entity", "entities"), explain=None):
+    """Markdown for a keyed diff of two tallies, ranked by CONTRIBUTION to the change: increases
+    first when the total grew, decreases first when it fell. Written for instantiations by entity;
+    `noun`, `unit` and `explain` make it read right for constant evaluations and constraint checks
+    by source location, which `attribute` diffs the same way.
 
     Always ranking growth was right for a gate (where the total grew by definition) and wrong for a
     comparison run: attributing a price that dropped 37% listed the few entities that went UP, which
@@ -1275,20 +1321,19 @@ def entity_diff_lines(left, right, label_left, label_right, top, min_delta=1):
     total = sum(right.values()) - sum(left.values())
     sign = -1 if total >= 0 else 1
     rows = []
-    for entity in sorted(set(left) | set(right),
-                         key=lambda k: sign * (right.get(k, 0) - left.get(k, 0))):
-        a, b = left.get(entity, 0), right.get(entity, 0)
+    for key in sorted(set(left) | set(right), key=lambda k: sign * (right.get(k, 0) - left.get(k, 0))):
+        a, b = left.get(key, 0), right.get(key, 0)
         if abs(b - a) >= min_delta:
-            rows.append([entity, str(a), str(b), f"{b - a:+d}"])
-    lines = [f"Total instantiations {sum(left.values())} -> {sum(right.values())} ({total:+d}). Entities "
-             f"below are templates with their arguments collapsed, ranked by how much of that change "
-             f"they account for.", ""]
+            rows.append([key, str(a), str(b), f"{b - a:+d}"])
+    lines = [f"Total {noun} {sum(left.values())} -> {sum(right.values())} ({total:+d}). "
+             + (explain or "Entities below are templates with their arguments collapsed, ranked by how "
+                           "much of that change they account for."), ""]
     if not rows:
-        return lines + [f"No entity moved by at least {min_delta} instantiation(s): the two measurements "
-                        f"instantiate the same templates the same number of times.", ""]
-    lines += markdown_table(["entity", label_left, label_right, "delta"], rows[:top])
+        return lines + [f"No {unit[0]} moved by at least {min_delta}: the two measurements count the same "
+                        f"{noun} at the same {unit[1]}.", ""]
+    lines += markdown_table([unit[0], label_left, label_right, "delta"], rows[:top])
     if len(rows) > top:
-        lines += ["", f"{len(rows) - top} further entities moved by at least {min_delta}."]
+        lines += ["", f"{len(rows) - top} further {unit[1]} moved by at least {min_delta}."]
     return lines + [""]
 
 
@@ -1357,10 +1402,12 @@ def gate_slope_table(slopes, band, tc: Toolchain):
     return lines
 
 
-def gate_summary_table(details, median, args, tc: Toolchain, label="instantiations"):
+def gate_summary_table(details, median, args, tc: Toolchain, label="instantiations", unrecorded=None):
     """Every workflow with its measured value, its limit and the headroom left - so the distance to
-    the bands is visible by observation, not inferred from a single pass/fail line."""
-    if not details:
+    the bands is visible by observation, not inferred from a single pass/fail line. `unrecorded`
+    rows (see unrecorded_values) have a measurement and no baseline, and say so in place of a verdict."""
+    unrecorded = unrecorded or {}
+    if not details and not unrecorded:
         return []
     rows = []
     for name, d in sorted(details.items()):
@@ -1376,6 +1423,8 @@ def gate_summary_table(details, median, args, tc: Toolchain, label="instantiatio
         rows.append([name, d.get("basis", "total"), str(d["baseline"]),
                      str(d["current"]), f"{delta:+.2f}%", f"{args.slack:g}%",
                      f"{args.slack - delta:+.2f}pp", status])
+    for name, current in sorted(unrecorded.items()):
+        rows.append([name, "-", "not recorded", str(current), "-", "-", "-", "not recorded"])
     # Name the configuration: the same compiler at a different -std produces different counts, so a
     # table without it looks like it contradicts the measurement fleet's numbers.
     lines = [f"### {label} - `{config_key(tc)}`", ""]
@@ -1386,6 +1435,10 @@ def gate_summary_table(details, median, args, tc: Toolchain, label="instantiatio
                    if median is not None else
                    f"gated at the same {args.slack:g}% band as instantiations; the median alarm "
                    f"applies to instantiations only"), ""]
+    if unrecorded:
+        lines += [f"`not recorded`: this run measured {label} but the baseline file predates the metric "
+                  f"for these {len(unrecorded)} workflow(s), so there is nothing to compare against. "
+                  f"They are reported, not gated; `bench.py update` records them.", ""]
     return lines
 
 
@@ -1416,9 +1469,13 @@ def cmd_check(args):
     slack, alarm, notice = args.slack / 100, args.median_alarm / 100, args.tighten_notice / 100
     advisory_band = args.advisory_slack / 100 if args.advisory_slack is not None else None
     slope_band = (args.slope_slack if args.slope_slack is not None else args.slack) / 100
-    measured = measure_counts(repo, tc)
+    measured = measure_counts(repo, tc, args.workflows)
     per_metric = {label: gated_deltas(baseline, measured, extract, rates_by_metric.get(label, {}))
                   for label, extract, _ in GATED}
+    # A metric the baseline file predates has a measurement and nothing to compare it with: reported
+    # as `not recorded`, never as a regression and never as a crash, until `update` records it.
+    unrecorded = {label: names for label, extract, _ in GATED
+                  if (names := unrecorded_values(baseline, measured, extract))}
     floors = {label: floor for label, _, floor in GATED}
     details = per_metric["instantiations"]
 
@@ -1457,6 +1514,7 @@ def cmd_check(args):
              "slope_regressions": [f"{shape} [{label}]" for label, shape in slope_regressions],
              "regressions": list(regressions),
              "improvements": list(improvements), "advisory": list(advisory),
+             "not_recorded": unrecorded,
              "entity_rates": rates_by_metric,
              "workflows": details,
              "metrics": {label: m for label, m in per_metric.items()}}, indent=2) + "\n")
@@ -1505,7 +1563,9 @@ def cmd_check(args):
     # The VERDICT block: what happened and why, before any evidence. The CI page used to open with
     # three hundred rows of tables and state the conclusion underneath them - a reader met the
     # evidence before the finding it was evidence for.
-    verdict = [f"## compile-cost gate: {'FAILED' if failed else 'OK'} - `{config_key(tc)}`", ""]
+    verdict = [f"## compile-cost gate: {'FAILED' if failed else 'OK'} - `{config_key(tc)}`"
+               + (f" (PARTIAL: filtered to {len(details)} gated workflow(s), so the median and the slopes "
+                  f"cover only those)" if args.workflows else ""), ""]
     moved_rows = [[key, d.get("basis", "total"), f"{d['baseline']} -> {d['current']}",
                    f"{d['rel']:+.2%}", "FAILS"]
                   for key, d in sorted(regressions.items(), key=lambda kv: -kv[1]["rel"])]
@@ -1525,7 +1585,10 @@ def cmd_check(args):
                 f"{len(advisory)} advisory, {len(improvements)} improved past the "
                 f"{args.tighten_notice:g}% tighten notice."
                 + (" If the growth is intentional, run `bench.py update` and commit the new baselines."
-                   if failed else ""), ""]
+                   if failed else ""),
+                *(f"- `{label}` is not recorded in the baselines for {len(names)} workflow(s): measured "
+                  f"and listed under the evidence, not gated. `bench.py update` records it."
+                  for label, names in unrecorded.items()), ""]
 
     # Anything past the advisory band gets NAMED, not just measured: attribution against the tree
     # the baselines were recorded from, so the finding arrives with the failure instead of waiting
@@ -1550,8 +1613,9 @@ def cmd_check(args):
                *(gate_slope_table(slopes, slope_band, tc) if slopes else [])]
     evidence = []
     for label, m in per_metric.items():
-        if m:
-            evidence += gate_summary_table(m, median if label == "instantiations" else None, args, tc, label)
+        if m or unrecorded.get(label):
+            evidence += gate_summary_table(m, median if label == "instantiations" else None, args, tc, label,
+                                           unrecorded.get(label))
     if evidence:
         evidence += EVIDENCE_LEGEND
     print("\n".join(visible))
@@ -1623,6 +1687,9 @@ def cmd_update(args):
 
 METRICS = (("instantiations", "template instantiations (InstantiateClass + InstantiateFunction)"),
            ("const_evals", "compile-time constant evaluations (what constexpr code costs instead)"),
+           ("constraint_checks", "constraint satisfaction checks (one per concept the compiler checks - "
+                                 "what constrained interfaces cost, and the one count that saw the 2.6 "
+                                 "character-mask rewrite)"),
            ("function_decls", "function declarations (what a declaration-only change moves, and nothing "
                               "else does)"),
            ("decls_total", "declarations in the AST (every kind, for context under the row above)"),
@@ -1648,30 +1715,123 @@ UNRENDERED = ("symbol_bytes",)
 REPORTED = tuple(m for m in METRICS if m[0] not in UNRENDERED)
 
 
-def trace_entities(repo: Path, tc: Toolchain, source: Path, ctx: BuildContext, workdir: Path,
-                   quote_dir=None):
-    """Instantiation events grouped by the entity that was instantiated, from one traced compile.
+# The trace events `attribute` tallies, and what each is keyed by. An instantiation names the entity
+# instantiated; a constant evaluation and a constraint check carry only a source location (`detail` is
+# `<file:line:col, col:N>`), so those are keyed by it with the checkout's path stripped - the same line
+# of the same header in two trees is then one key, and a diff by key reads as a diff by source line.
+LOCATION_EVENTS = {"EvaluateAsConstantExpr": "constant evaluations",
+                   "CheckConstraintSatisfaction": "constraint checks"}
+TALLY_KINDS = ("entities", *LOCATION_EVENTS.values())
+
+
+def trace_tallies(repo: Path, tc: Toolchain, source: Path, ctx: BuildContext, workdir: Path,
+                  quote_dir=None, full_args=False):
+    """Every event `attribute` can diff, from one traced compile: instantiations by entity, constant
+    evaluations by location and constraint checks by location, as {kind: {key: count}}.
 
     `counts` answers how many; this answers WHICH, which is what turns "3% slower" into a name.
     Template arguments are collapsed - `quantity<metre, double>` and `quantity<second, int>` are one
-    entity - because the interesting unit is the template, not each specialization of it."""
+    entity - because the interesting unit is the template, not each specialization of it; `full_args`
+    keeps them for the question "which specialization", which §32 needed once (the open-factor
+    pairing rounds were visible only with the arguments spelled out)."""
     out = workdir / "attr.o"
     run(compile_cmd(tc, repo, out, source, trace=True, ctx=ctx, quote_dir=quote_dir), cwd=ctx.cwd)
     events = json.loads((workdir / "attr.json").read_text())["traceEvents"]
-    tally = {}
+    prefix = str(repo) + "/"
+    tallies = {kind: {} for kind in TALLY_KINDS}
     for e in events:
-        if e.get("ph") == "X" and e["name"] in ("InstantiateClass", "InstantiateFunction"):
-            entity = re.sub(r"<.*", "<>", e.get("args", {}).get("detail", "(unnamed)"))
-            tally[entity] = tally.get(entity, 0) + 1
-    return tally
+        if e.get("ph") != "X":
+            continue
+        detail = e.get("args", {}).get("detail", "(unnamed)")
+        if e["name"] in ("InstantiateClass", "InstantiateFunction"):
+            kind, key = "entities", detail if full_args else re.sub(r"<.*", "<>", detail)
+        elif e["name"] in LOCATION_EVENTS:
+            kind, key = LOCATION_EVENTS[e["name"]], detail.replace(prefix, "")
+        else:
+            continue
+        tallies[kind][key] = tallies[kind].get(key, 0) + 1
+    return tallies
+
+
+def trace_entities(repo: Path, tc: Toolchain, source: Path, ctx: BuildContext, workdir: Path,
+                   quote_dir=None):
+    """Instantiation events grouped by the entity instantiated - the tally `check` attributes with."""
+    return trace_tallies(repo, tc, source, ctx, workdir, quote_dir)["entities"]
+
+
+def subtract_tallies(whole: dict, twin: dict):
+    """One tally on the use basis: the workflow's counts minus its include twin's, per key, keys that
+    cancel dropped. A key the twin has and the workflow lacks goes negative, and that is a reading
+    rather than noise - the body made something the bare include set does unnecessary."""
+    return {k: whole.get(k, 0) - twin.get(k, 0) for k in {*whole, *twin} if whole.get(k, 0) != twin.get(k, 0)}
+
+
+# The trace events that enclose others: what the compiler was parsing or instantiating when a nested
+# event fired. `--why` credits a constant evaluation to the innermost of these still open at its start.
+CONTEXT_EVENTS = frozenset(("InstantiateFunction", "InstantiateClass", "ParseFunctionDefinition",
+                            "ParseDeclarationOrFunctionDefinition", "ParseTemplate", "ParseClass",
+                            "PerformPendingInstantiations"))
+
+
+def why_lines(repo: Path, tc: Toolchain, source: Path, ctx: BuildContext, workdir: Path, pattern,
+              top, full_args, label):
+    """Which enclosing instantiations trigger the constant evaluations at a location.
+
+    A constant evaluation's event carries a location and nothing else, so WHO asked for it has to be
+    read off the trace's nesting: every event is complete (`ph == "X"`, a start and a duration), a
+    nested event lies inside its parent's interval, and the innermost context event still open when
+    the evaluation starts is the thing being instantiated or parsed at that moment. Sorting by
+    `(ts, -dur)` puts a parent before the children that start on the same tick. This is what named the
+    three costs of findings §32 - a `string_view` operator, a fold-based concept, a variadic
+    constructor - from locations in libc++ and the framework that said nothing by themselves."""
+    out = workdir / "why.o"
+    run(compile_cmd(tc, repo, out, source, trace=True, ctx=ctx), cwd=ctx.cwd)
+    events = [e for e in json.loads((workdir / "why.json").read_text())["traceEvents"] if e.get("ph") == "X"]
+    regex = re.compile(pattern)
+    stack, tally, matched = [], {}, 0
+    for e in sorted(events, key=lambda e: (e["ts"], -e["dur"])):
+        while stack and stack[-1]["ts"] + stack[-1]["dur"] <= e["ts"]:
+            stack.pop()
+        if e["name"] in CONTEXT_EVENTS:
+            stack.append(e)
+            continue
+        if e["name"] != "EvaluateAsConstantExpr" or not regex.search(e.get("args", {}).get("detail", "")):
+            continue
+        matched += 1
+        if stack:
+            detail = stack[-1].get("args", {}).get("detail", "")
+            key = f"{stack[-1]['name']}: {detail if full_args else re.sub(r'<.*', '<>', detail)}"
+        else:
+            key = "(top level)"
+        tally[key] = tally.get(key, 0) + 1
+    lines = [f"### who triggers the constant evaluations matching `{pattern}`: {label}", "",
+             f"{matched} constant evaluation(s) match, over the whole TU. Each is credited to the innermost "
+             f"instantiation or parse that was open when it fired, so a row says which code keeps asking "
+             f"for it; template arguments are {'kept' if full_args else 'collapsed'}.", ""]
+    if not matched:
+        return lines + ["Nothing matched. The trace spells a location as `<file:line:col, col:N>` with "
+                        "the file's absolute path, so match on `file:line` or `file:line:col`.", ""]
+    rows = [[k, str(v)] for k, v in sorted(tally.items(), key=lambda kv: (-kv[1], kv[0]))[:top]]
+    lines += markdown_table(["enclosing instantiation", "evaluations"], rows)
+    if len(tally) > top:
+        lines += ["", f"{len(tally) - top} further enclosing instantiations trigger the rest."]
+    return lines + [""]
 
 
 def cmd_attribute(args):
-    """Diff two measurements by entity, to answer why one costs more than the other.
+    """Diff two measurements by entity and by source location, to answer why one costs more.
 
     Two shapes, because there are two questions. One workflow across two refs: what did a library
     change make more expensive. One ref across two workflows: what does the bigger one instantiate
-    that the smaller does not - which is how a scaling series' slope gets attributed."""
+    that the smaller does not - which is how a scaling series' slope gets attributed.
+
+    Three tables per comparison: instantiations by entity, then constant evaluations and constraint
+    checks by source location, since those two events carry no entity, only where the expression or
+    the constraint sits. A workflow with an include twin is compared on the USE basis - workflow minus
+    twin, per key, on each side - which is the basis the gate reads and the one on which §32's costs
+    were visible at all: the whole TU of parity/unit_conversions LOST 6,524 constant evaluations
+    across the 2.6 batch while its use cost gained 406. `--why` asks the fourth question - not which
+    line evaluates more, but which instantiation keeps asking for it - of one measurement."""
     refs = args.refs or ["WORKTREE"]
     repos = materialize(args, refs)
     tc = toolchain(args)
@@ -1682,22 +1842,63 @@ def cmd_attribute(args):
     # rather than depending on the order the refs happened to be typed in.
     ordered = sorted(refs, key=lambda r: tuple(detect_version(repos[r])))
     pairs = [(ref, name, src) for ref in ordered for name, src in sorted(selections[ref].items()) if src]
+    if args.why:
+        if len(pairs) != 1:
+            sys.exit(f"--why reads exactly one measurement, got {len(pairs)}: give one ref and one workflow")
+        ref, name, source = pairs[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = build_modules(repos[ref], tc, Path(tmp) / "bmi")
+            print("\n".join(why_lines(repos[ref], tc, source, ctx, Path(tmp), args.why, args.top,
+                                      args.full_args, f"{name} @ {short_ref(ref)}")))
+        return
     if len(pairs) != 2:
         sys.exit(f"attribution compares exactly two measurements, got {len(pairs)}: give either two "
                  f"refs and one workflow, or one ref and two workflows")
 
     with tempfile.TemporaryDirectory() as tmp:
-        tallies, labels = [], []
-        for ref, name, source in pairs:
-            ctx = build_modules(repos[ref], tc, Path(tmp) / f"bmi-{ref.replace('/', '_')}")
-            tallies.append(trace_entities(repos[ref], tc, source, ctx, Path(tmp)))
-            # A 40-character sha as a column header makes the table unreadable.
-            shown = ref[:9] if len(ref) >= 20 and all(c in "0123456789abcdef" for c in ref) else ref
-            labels.append(name if len(refs) == 1 else f"{name} @ {shown}")
+        tallies, labels, twinned, contexts = [], [], [], {}
+        for i, (ref, name, source) in enumerate(pairs):
+            if ref not in contexts:
+                contexts[ref] = build_modules(repos[ref], tc, Path(tmp) / f"bmi-{ref.replace('/', '_')}")
+            got = trace_tallies(repos[ref], tc, source, contexts[ref], Path(tmp), full_args=args.full_args)
+            by_wf, twins = twin_sources({name: source})
+            if name in by_wf:  # a use cost: subtract this side's own twin, key by key
+                text, quote = twins[by_wf[name]]
+                twin_src = Path(tmp) / f"twin-{i}.cpp"
+                twin_src.write_text(text)
+                twin = trace_tallies(repos[ref], tc, twin_src, contexts[ref], Path(tmp), quote_dir=quote,
+                                     full_args=args.full_args)
+                got = {kind: subtract_tallies(got[kind], twin[kind]) for kind in got}
+            tallies.append(got)
+            twinned.append(name in by_wf)
+            labels.append(name if len(refs) == 1 else f"{name} @ {short_ref(ref)}")
 
+    if all(twinned):
+        basis = ("use basis - each side is the workflow minus its own include twin, key by key, which is "
+                 "how the gate prices it; a header getting cheaper to parse cancels, and what remains is "
+                 "the cost of the code the workflow writes")
+    elif not any(twinned):
+        basis = "whole TU - these workflows are their include sets, so there is no twin to subtract"
+    else:
+        basis = (f"MIXED - `{labels[twinned.index(True)]}` is its use cost (minus its include twin) and "
+                 f"`{labels[twinned.index(False)]}` its whole TU, which is rarely the comparison wanted")
     left, right = tallies
+    args_note = "their full arguments" if args.full_args else "their arguments collapsed"
     print(f"### what accounts for the difference: {labels[0]} vs {labels[1]}\n")
-    print("\n".join(entity_diff_lines(left, right, labels[0], labels[1], args.top, args.min_delta)))
+    print(f"Basis: {basis}.\n")
+    print("#### instantiations by entity\n")
+    print("\n".join(entity_diff_lines(
+        left["entities"], right["entities"], labels[0], labels[1], args.top, args.min_delta,
+        explain=f"Entities below are templates with {args_note}, ranked by how much of that change "
+                f"they account for.")))
+    for kind, what in (("constant evaluations", "expression"), ("constraint checks", "constraint")):
+        print(f"#### {kind} by source location\n")
+        print("\n".join(entity_diff_lines(
+            left[kind], right[kind], labels[0], labels[1], args.top, args.min_delta, noun=kind,
+            unit=("location", "locations"),
+            explain=f"Locations below are where the {what} sits (`file:line:col` with the checkout's path "
+                    f"stripped, so one line of one header is one row on both sides), ranked by how much of "
+                    f"that change they account for.")))
 
 
 def attribute_price_mover(args, tc: Toolchain, repos, refs, source):
@@ -1732,8 +1933,7 @@ def attribute_price_mover(args, tc: Toolchain, repos, refs, source):
                     twin_src.write_text(text)
                     twin = trace_entities(repos[ref], tc, twin_src, ctx, tmp, quote_dir=quote)
                     use_basis = True
-                    whole = {k: whole.get(k, 0) - twin.get(k, 0)
-                             for k in {*whole, *twin} if whole.get(k, 0) != twin.get(k, 0)}
+                    whole = subtract_tallies(whole, twin)
             except subprocess.CalledProcessError:
                 return []
             tallies[ref] = whole
@@ -1762,6 +1962,7 @@ def cmd_report(args):
             metrics["instantiations"].setdefault(name, {})[ref] = "FAIL" if entry == "FAIL" else total(entry)
             if isinstance(entry, dict):
                 metrics["const_evals"].setdefault(name, {})[ref] = entry.get("EvaluateAsConstantExpr")
+                metrics["constraint_checks"].setdefault(name, {})[ref] = entry.get("CheckConstraintSatisfaction")
                 for key in ("code_bytes", "symbol_bytes", "function_decls", "decls_total"):
                     metrics[key].setdefault(name, {})[ref] = entry.get(key)
         for name, entry in sorted(timed[ref].items()):
@@ -3274,6 +3475,10 @@ def main():
                    help="band for the marginal cost per step from the scaling/ series (default: --slack). "
                         "Keep this tighter than --slack: a total can grow because the library gained a "
                         "feature, but the slope only grows when user code got more expensive")
+    g.add_argument("--workflows", nargs="*",
+                   help="gate only the matching workflows (substring filters): a PARTIAL gate for "
+                        "investigating one row locally, since the median and the slopes then cover "
+                        "only what was measured; CI always runs the full corpus")
     g.add_argument("--attribute-top", type=int, default=3, metavar="N",
                    help="name the offenders: for the N workflows that moved the most past the advisory "
                         "band, diff instantiation events by entity against the tree the baselines were "
@@ -3306,8 +3511,15 @@ def main():
     a = sub.add_parser("attribute", help="diff two measurements by entity, to explain a difference")
     a.add_argument("refs", nargs="*", help="one or two git refs (default: WORKTREE)")
     a.add_argument("--workflows", nargs="*", help="one or two workflows (substring filters)")
-    a.add_argument("--top", type=int, default=20, help="entities to show (default 20)")
-    a.add_argument("--min-delta", type=int, default=1, help="ignore entities moving less than this")
+    a.add_argument("--top", type=int, default=20, help="rows to show per table (default 20)")
+    a.add_argument("--min-delta", type=int, default=1, help="ignore entities/locations moving less than this")
+    a.add_argument("--why", metavar="REGEX",
+                   help="for ONE ref and ONE workflow: which enclosing instantiations trigger the "
+                        "constant evaluations whose source location matches REGEX (e.g. "
+                        "'quantity_spec_concepts.h:64:24'), read off the trace's nesting")
+    a.add_argument("--full-args", action="store_true",
+                   help="keep template arguments instead of collapsing them to `<>` (entity table and "
+                        "--why rows)")
     a.add_argument("--worktree-cache", default=str(ROOT / ".worktrees"))
 
     s = sub.add_parser("summary", help="merge report JSONs into the two-screen page (+ job summary)")

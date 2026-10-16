@@ -92,8 +92,13 @@ Five metrics, with very different trust levels:
    changes in mp-units 2.6 moved instantiations by 0 and declarations by 2–3%. Also gated. The other
    two numbers from the same block — declarations and types in the whole AST — are 20–50× larger and
    move by fractions of a percent on the same changes, so they are context, not gates.
-3. **Compile-time constant evaluations** and **emitted code** (`bench.py counts`) — also exact, also
-   from the same traced compile, and gated alongside instantiations. **Symbol metadata** is measured and
+3. **Compile-time constant evaluations**, **constraint satisfaction checks** and **emitted code**
+   (`bench.py counts`) — also exact, also from the same traced compile, and gated alongside
+   instantiations. Constraint checks (`CheckConstraintSatisfaction`, one event per concept the
+   compiler checks) are deterministic like the other trace counts and were the number that moved most
+   in the mp-units 2.6 framework batch — down 41–62% per workflow on the use basis, while no other
+   column saw it — so the gate watches them; a baseline file recorded before the metric existed reports
+   its rows as *not recorded* rather than as a change. **Symbol metadata** is measured and
    reported but deliberately not gated: it tracks mangled-name volume, which is linker input rather than
    compile-time cost, and it is far too small in absolute terms for a percentage band to mean anything. They exist because instantiations only measure the *front end*:
    `text/output_format` spends a third of its time in the optimizer and no frontend metric notices.
@@ -156,6 +161,12 @@ runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 counts
 runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 report WORKTREE v2.5.0 --output results/clang.json
 runner/bench.py --repo ~/repos/mp-units --cxx g++-15 --std c++26 report --output results/gcc.json
 runner/bench.py summary results/clang.json results/gcc.json   # one table per metric, all compilers
+
+# why a row moved: instantiations by entity, then constant evaluations and constraint checks by
+# source line - on the use basis (workflow minus its include twin) when the workflow has one
+runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 attribute v2.5.0 master --workflows isq/kind_safe_interfaces
+# which instantiations trigger the constant evaluations at one source line (one ref, one workflow)
+runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 attribute --workflows parity/unit_conversions --why 'quantity_spec_concepts.h:64:24'
 
 # gate / re-record
 runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 check
