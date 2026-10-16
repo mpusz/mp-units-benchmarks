@@ -26,6 +26,15 @@ namespace scaling_specs {
 
 using namespace mp_units;
 
+// 2.6 moved the conversion predicates to `mp_units::utility` and left deprecated forwarders behind.
+// A forwarder is one more function instantiation per call, which the slope would otherwise report as
+// a cost of composing a spec; the predicate is called where the library of each era defines it.
+#if MP_UNITS_BENCH_VERSION >= 206
+namespace conv = mp_units::utility;
+#else
+namespace conv = mp_units;
+#endif
+
 template<std::size_t I>
 constexpr auto base_spec()
 {
@@ -56,7 +65,7 @@ template<std::size_t I>
 constexpr bool spec_step()
 {
   constexpr auto spec = spec_for<I>();
-  return implicitly_convertible(spec, spec);  // what a QuantityOf constraint does with it
+  return conv::implicitly_convertible(spec, spec);  // what a QuantityOf constraint does with it
 }
 
 template<std::size_t... Is>

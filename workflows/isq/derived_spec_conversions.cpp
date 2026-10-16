@@ -25,6 +25,14 @@ import mp_units;
 
 using namespace mp_units;
 
+// The conversion predicates live in `mp_units::utility` since 2.6; the old names are deprecated
+// forwarders, and going through one would add an instantiation per check that is not the engine's.
+#if MP_UNITS_BENCH_VERSION >= 206
+namespace conv = mp_units::utility;
+#else
+namespace conv = mp_units;
+#endif
+
 // User specs whose equations name *specific* children, so an incoming quantity built from different
 // children of the same roots has to be reconciled against them.
 QUANTITY_SPEC(patch_area, isq::width* isq::length);
@@ -32,22 +40,22 @@ QUANTITY_SPEC(sweep_rate, isq::area / isq::duration);
 
 // Ingredients that are children of what the recipe asks for: radius and height are lengths,
 // duration is a time, so each has to be exploded and walked before the answer is known.
-static_assert(implicitly_convertible(isq::radius * isq::radius, isq::area));
-static_assert(implicitly_convertible(isq::radius * isq::radius * isq::height, isq::volume));
-static_assert(implicitly_convertible(isq::height / isq::duration, isq::speed));
-static_assert(implicitly_convertible(isq::width * isq::height, isq::area));
-static_assert(implicitly_convertible(isq::mass * isq::speed * isq::speed, isq::kinetic_energy));
-static_assert(implicitly_convertible(isq::radius * isq::height, patch_area));
-static_assert(implicitly_convertible(isq::radius * isq::radius / isq::duration, sweep_rate));
+static_assert(conv::implicitly_convertible(isq::radius * isq::radius, isq::area));
+static_assert(conv::implicitly_convertible(isq::radius * isq::radius * isq::height, isq::volume));
+static_assert(conv::implicitly_convertible(isq::height / isq::duration, isq::speed));
+static_assert(conv::implicitly_convertible(isq::width * isq::height, isq::area));
+static_assert(conv::implicitly_convertible(isq::mass * isq::speed * isq::speed, isq::kinetic_energy));
+static_assert(conv::implicitly_convertible(isq::radius * isq::height, patch_area));
+static_assert(conv::implicitly_convertible(isq::radius * isq::radius / isq::duration, sweep_rate));
 
 // The walk is directional: a parent does not satisfy a recipe written over a child.
-static_assert(!implicitly_convertible(isq::area, isq::radius * isq::radius));
-static_assert(explicitly_convertible(isq::area, isq::radius * isq::radius));
+static_assert(!conv::implicitly_convertible(isq::area, isq::radius * isq::radius));
+static_assert(conv::explicitly_convertible(isq::area, isq::radius * isq::radius));
 
 // And it respects character: `work` and `moment_of_force` are defined over vector ingredients, so a
 // scalar `distance` cannot stand in for them however the tree is walked.
-static_assert(!implicitly_convertible(isq::force * isq::distance, isq::work));
-static_assert(!implicitly_convertible(isq::distance * isq::force, isq::moment_of_force));
+static_assert(!conv::implicitly_convertible(isq::force * isq::distance, isq::work));
+static_assert(!conv::implicitly_convertible(isq::distance * isq::force, isq::moment_of_force));
 
 int main()
 {
