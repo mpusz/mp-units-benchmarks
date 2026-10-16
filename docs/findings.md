@@ -2931,6 +2931,25 @@ The first row is §17's pack-indexing result reaching C++20 and C++23. The `inde
 
 **Closing the loop on CI.** The baselines re-recorded locally after each round carried the local clang snapshot, and §32 predicted that CI's snapshot would read the declaration rows as improved. It did: the mp-units gate on the re-pinned baselines passed on all three standards with 19 rows past the tighten notice at C++23, all declarations. A `Compile cost` dispatch against the final tree (`fe6fc4aef1`) then did what the repository was built to do: every gate arm green, median instantiations -4.5 % at C++20 against the previous baselines, best row `scaling/typed_broad_016` at -10.2 %, and the tighten job refreshed its single pull request with the three baseline files recorded on CI's own compiler, constraint checks included. That pull request was merged as `3281616c` and mp-units pinned to it. From here on the thresholds are CI's, not a laptop's.
 
+## 34. The time lens: what the counts stopped seeing
+
+Every gate metric is a count, and §2 established that counts predict time at 0.69. After three rounds of cutting counts the obvious question is where the *time* goes now, and clang's trace can answer it if each event is charged only its exclusive time (its duration minus its children's, stack-walked by timestamp). On the tree at `fe6fc4aef1`, clang 23 at C++23, self time by event kind:
+
+| kind | `isq.h` umbrella (3,477 ms attributed) | `glide_computer` (9,005 ms) |
+|---|---:|---:|
+| `CheckConstraintSatisfaction` | 659 (19 %) | 2,456 (27 %) |
+| `InstantiateFunction` | 987 | 1,579 |
+| `InstantiateClass` | 769 | 743 |
+| parsing (`ParseClass`, function definitions, declarations) | 664 | 922 |
+| constant evaluation (all `Evaluate*` kinds) | 342 | 585 |
+| the optimizer (`RunPass` and the passes under it) | 0 | about 1,400 |
+
+Constraint checking is the largest frontend cost of the real-life TU and the third of the umbrella. It is not spread evenly. In `glide_computer` the top sites are libc++'s `format_arg_store.h:162` (146 ms: `std::format` checking every argument's formattability per call site), then four of mp-units' own: `symbolic_expression.h:672` (63 ms), `overflow_policies.h:347` (48 ms), `quantity.h:1148` (34 ms), `overflow_policies.h:204` (34 ms). Those locations are not concepts. They are *call sites*: `vmin + detail::reduce_modulo(V{v - vmin}, range)` inside `wrap_to_range`, `quantity{std::forward<FwdRep>(lhs), r}` inside `operator*`, a `requires RepresentationOf<...>` inside the formatter. What is being charged is overload resolution over `quantity`'s hidden-friend operator set: every `a + b` or `q * unit` enumerates the candidates and checks each one's constraints, and a candidate is rejected only after its constraints have been evaluated far enough to fail. That is the bill for a constrained interface, and the counts never saw it because concept satisfaction is cached per argument set and these are new argument sets on every line of user code.
+
+Two small items fell out of the same profile and were taken on the spot. `first_n_primes_result<100>`, the table that magnitude factorization starts from, was computed in every translation unit by a probable-prime test per candidate: 31 ms of `EvaluateAsInitializer` in `control/core_only`, which includes the core and defines nothing, and the same in every TU above it. It is a literal now, with the sieve kept as the oracle in the static tests. And the exclusive-time ranking of entities confirms §33's targets in time rather than counts: `type_list_merge_sorted_impl` 95 ms, `expr_map_impl` 83 ms, `expr_simplify` 82 ms, `quantity_spec_less` 77 ms, `reduce` 76 ms, `substituted_side` 68 ms, `expr_fractions_impl` 64 ms, `pair_lists` 58 ms in the umbrella: the expression pipeline and the conversion engine, about 600 ms and 300 ms of the umbrella's 3.5 s. In `glide_computer` the first entity is `std::formatter<>` at 99 ms, then the same pipeline, then `prefixed_unit<>` at 66 ms for 674 of them.
+
+**What this reframes.** The next lever is not another metafunction. It is the number and the order of constrained candidates a `quantity` operator call has to consider, and how early each candidate's constraint fails for the common shapes. That needs per-candidate attribution (which candidate's constraint the check belongs to, not which call site), which the trace does not carry; it would have to come from a build of clang with the candidate in the event detail, or from a careful read of each operator's overload set against the shapes real code produces. Either way it is a different kind of work from the three rounds above, and it is where the remaining time is.
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That
@@ -2975,6 +2994,9 @@ wrong predictions from named people who were reasoning sensibly, and numbers for
 20. **Parentheses do not make an atom.** Five builtin traits in one parenthesized expression were
     five constraints, evaluated per type; one variable template made them one, 12 % of an ISQ
     umbrella's constant evaluations. Plus the two follow-ups that measured zero. (§33)
+21. **The time lens.** Charge each trace event its own time and constraint checking is 27 % of a
+    real translation unit, concentrated at call sites of `quantity`'s operators, invisible to
+    every count. Plus a 31 ms prime sieve that ran in every TU. (§34)
 
 **Blog-length cut:** §0 down to the 2.5.0-vs-master table as the hook, then §2 (metric choice,
 including the 0.69 and 0.97 correlations) and §6 (the `output_format` chase, ending on the
