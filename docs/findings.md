@@ -2964,9 +2964,23 @@ Two small items fell out of the same profile and were taken on the spot. `first_
 
 The same mechanism had a second victim. `RepresentationOf<T, V>` was `SomeRepresentation<T> && CharacterConstraint<V> && overlaps(representable_character<T>...)`. For a `T` that fails the first atom, the third atom's mapping still gets substituted, and that instantiates the variable template `representable_character<T>`, which evaluates `Scalar`, `Vector` and `Tensor` on `T`. For a `quantity_point` that is 2,707 checks and 27 ms, most of it `std::equality_comparable` on points; `disable_representation` did not even cover points, only quantities and quantity-likes. With the point covered through `is_quantity_abstraction`, a constrained partial specialization of `disable_representation` that answers for any quantity abstraction before the primary's element-type search runs, and the character match wrapped in a requires-expression, `RepresentationOf<quantity_point, ...>` costs 262 checks.
 
-**What shipped.** The twelve `Value` overloads of `quantity` (`+`, `-`, `%`, `==`, `<=>`, `*`, `/`, both argument orders) and the two `std::common_type` specializations take `requires (!disable_representation<Value>) && requires { requires <the original constraints>; }`: one cheap atom that rejects a quantity, a point or a symbolic constant, and the rest lazy. `RepresentationOf` keeps its two guards as atoms and the character match lazy. On the probe, `a + a`'s two rejected candidates go from 568 and 525 checks to 42 and 0; `a * b`'s from 537 each to 166 and 201; `p + b`'s rejected `(Value, quantity)` candidate from 1,601 to about 1,100 (what remains is the selected point overload resolving `q + q` inside its trailing requires-clause, which is work it has to do). On the use basis, `real_life/glide_computer` loses 6,113 constraint checks (-3.1 %), `affine/custom_origins` 2,553 (-17.6 %), `isq/kind_safe_interfaces` 1,517 (-3.5 %); the instantiation and constant-evaluation columns barely move, as they should. Wall time on this laptop could not resolve the change: four alternating runs of `glide_computer` spread from 8.8 s to 10.4 s with another suite running beside them.
+**What shipped, and what did not.** The first attempt rewrote the twelve `Value` overloads of `quantity` (`+`, `-`, `%`, `==`, `<=>`, `*`, `/`, both argument orders) and the two `std::common_type` specializations as `requires (!disable_representation<Value>) && requires { requires <the original constraints>; }`, and shipped it as mp-units `d03b6a0e7d` on the strength of three workflows: `real_life/glide_computer` -6,113 constraint checks, `affine/custom_origins` -2,553, `isq/kind_safe_interfaces` -1,517, all on the use basis. The CI gate on that commit failed on all three standards with 29 rows: `scaling/broad_*` +11 to +13 % constraint checks, `scaling/define_constants_*` +12 to +13 % on both constraint checks and constant evaluations, `constants/codata_expressions` +6 % constant evaluations and +6 % declarations, `parity/kinetic_energy` +4 % instantiations. Two causes, both found afterwards. The constrained partial specialization of `disable_representation` that answered for quantity abstractions was evaluated, as every matching candidate's constraint is, on every instantiation of `disable_representation`, so every unit and magnitude type now paid `QuantityLike` and `QuantityPointLike` checks it never paid before. And the lazy form costs on the *accepted* path: in a TU that multiplies numbers by constants all day, the requires-expression is evaluated for every accepted `Value` and the nested constraint is substituted anew each time, where the type-constraint form had it as part of the template's own normal form. The probe had only measured rejection.
 
-**The rule for the codebase.** When a constrained overload has a cheap reason to reject most arguments, write that reason as the first atom and put everything expensive, in particular anything whose template arguments are computed by a `consteval` call, inside a requires-expression behind it. Short-circuiting saves the evaluation; only the requires-expression saves the substitution.
+The maintainer's rule for such changes is that a low-level optimization stays only if the measurements prove it, and this one did not: taken apart against its parent commit on seven workflows, the `Value` rewrite was mixed (instantiations and constant evaluations up by 1 to 6 % on `codata_expressions`, `kinetic_energy`, `kind_safe_interfaces` and `simple_quantities`, constraint checks down on some of the same), and it was reverted to the `RepresentationOf<get_quantity_spec(R1)> Value` spelling in the follow-up commit. The two internal pieces, measured on their own, won everywhere: the pattern-matched `disable_representation` specializations for `quantity` and `quantity_point` alone (v1) and those plus the lazy character match in `RepresentationOf` (v2), parent -> v2 on the use basis:
+
+| workflow | instantiations | constant evaluations | constraint checks |
+|---|---:|---:|---:|
+| `scaling/broad_016` | -30 | -315 | -600 |
+| `constants/codata_expressions` | -40 | -436 | -855 |
+| `parity/kinetic_energy` | -8 | -72 | -145 |
+| `isq/kind_safe_interfaces` | -10 | -102 | -188 |
+| `safety/simple_quantities` | -20 | -192 | -384 |
+| `affine/custom_origins` | -6 | -49 | -97 |
+| `real_life/glide_computer` | -69 | -782 | -3,105 |
+
+Not one column up on one workflow, which is the shape a change needs before it is kept. The `RepresentationOf` on a point still goes from 2,707 checks to 262. Wall time on this laptop could not resolve either version: four alternating runs of `glide_computer` spread from 8.8 s to 10.4 s with another suite running beside them, and the timing confirmation belongs to an idle machine or to the `Compile cost` fleet's own `time` arms.
+
+**The rule for the codebase, and its limit.** When a constrained overload has a cheap reason to reject most arguments, write that reason as the first atom and put everything expensive, in particular anything whose template arguments are computed by a `consteval` call, inside a requires-expression behind it: short-circuiting saves the evaluation, only the requires-expression saves the substitution. But measure the accepted path as well as the rejected one, on the corpus and not on the probe, and keep the change only if no gated column moves up on any workflow. The probe finds the mechanism; the gate decides.
 
 ## Talk skeleton
 
@@ -3027,6 +3041,25 @@ is not the number that costs you* — which needs no mp-units background at all.
 
 ## Open threads
 
+- **Timing confirmation for §34 and §35** on an idle machine or on the fleet: `bench.py time
+  98c055d044 <kept commit> --reps 5 --pin` for `glide_computer`, `custom_origins`, `codata_expressions`
+  and `broad_064`, or a `Compile cost` dispatch with `compare_ref` set to the parent, whose arms
+  measure both refs in one session. The counts are in; the time is the claim the talk would make.
+- **Constraint checks count cache hits** (§35): a rejected candidate emits hundreds of
+  `CheckConstraintSatisfaction` events at 0 ms. The gated column is still deterministic and still
+  moves with real changes, but the self-time view is what a reader needs beside it. Report both, or
+  report the count with its self time per workflow from the same trace.
+- **The per-candidate probe belongs in the runner** (§35): one expression per function, warm-up copy,
+  event tree with exclusive time, per-candidate summary. `bench.py probe "a + b" ...` against any ref.
+- **Measure in both modes, and against two anchors.** Every gate and every `report` compares the tree
+  against the previous snapshot of itself. A second anchor, a named release such as `v2.5.0`, would
+  show the user what a year of work bought and what it cost, and keep the "previous snapshot" delta
+  from hiding a slow drift. Both anchors, both bases (use and residual), one page.
+- **Gate the modules build** the way the headers are gated: the `bmi/*` rows carry counts already, and
+  nothing fails when `mp_units.systems` grows.
+- **A report a user can read first**: the page opens on the price list, which answers "what does
+  using this cost"; a reader coming from a release note wants "what changed for me since the version I
+  run", which is the two-anchor table above with the five findings on top.
 - **Gate `CheckConstraintSatisfaction`** (§32): deterministic, the largest mover of the 2.6 batch
   (-41 to -62 % per workflow) and invisible to every gated column. The cost of adding it is one
   more number per row to explain.
