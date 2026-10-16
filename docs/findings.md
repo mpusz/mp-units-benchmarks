@@ -2918,6 +2918,17 @@ Three lessons sit in that table.
 
 **What a prefixed symbol costs after this.** `si/unit_symbols.h` mints one `prefixed_unit` per prefix and unit, 674 in any TU that includes it, and each one derived from `scaled_unit_impl<M, U>`, a second class instantiation whose only content is the magnitude and the reference unit. The prefixed unit now carries those two members itself, and the four places that dispatched on the base (the canonical unit, the magnitude sign, the two measured-constant collectors) got a `prefixed_unit` overload each; the symbol printer already preferred the `_symbol_` overload. The SI umbrella drops from 9,251 to 8,578 instantiations. The four kept changes shipped together as mp-units `cdecd7bede`, verified on gcc 12, gcc 15, clang 16 and clang 21 including the module build. The symbol matrix is still the largest single item of every SI translation unit (674 `prefixed_unit` plus 674 symbol concatenations), and what remains of it is the definition itself.
 
+**A second pass over the same ranking** (same method, tree at `cdecd7bede`, clang 23 at C++23):
+
+| experiment | `isq.h` umbrella | `glide_computer` (use) | verdict |
+|---|---:|---:|---|
+| `type_list_element`, `split` and `extract` through `__type_pack_element` where the compiler has it (Clang, GCC 14+) | -1,437 instantiations (-6.7 %), -7,100 constant evaluations (-14 %), -18,148 constraint checks | -323 / -1,367 / -3,584 | **kept** |
+| `quantity_spec_less_value` as a variable template over a function that still does the work | 0 | 0 | rejected: the function is instantiated all the same |
+| the same, written as one expression with no function behind it | -268 instantiations | 0 | **kept** |
+| the `Unit` concept's two exclusion atoms merged into one variable template | compile error (the partial specialization for `prefixed_unit` is declared later than the first use) | | rejected at ~1 % |
+
+The first row is §17's pack-indexing result reaching C++20 and C++23. The `indexed_type_list` trick (one leaf base per element, then overload resolution to pick one) costs three class instantiations per list it is applied to, and `type_list_split` applies it to every list it splits, which the expression engine does on every product. `__type_pack_element<I, Ts...>` is O(1) in the compiler and instantiates nothing, so the three branches that pack indexing already had for C++26 gained a sibling for the builtin. GCC 12 and 13 and MSVC keep the indexed trick. The second and third rows are the same lesson as the accessors in §33: moving a function behind a variable template changes nothing; only an expression with no function in it removes the instantiation.
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That
