@@ -2982,6 +2982,8 @@ Not one column up on one workflow, which is the shape a change needs before it i
 
 **The rule for the codebase, and its limit.** When a constrained overload has a cheap reason to reject most arguments, write that reason as the first atom and put everything expensive, in particular anything whose template arguments are computed by a `consteval` call, inside a requires-expression behind it: short-circuiting saves the evaluation, only the requires-expression saves the substitution. But measure the accepted path as well as the rejected one, on the corpus and not on the probe, and keep the change only if no gated column moves up on any workflow. The probe finds the mechanism; the gate decides.
 
+**Timing, from the fleet (2026-10-17).** The `Compile cost` dispatch 39042038069 measured `98c055d044` and `9ffaf3e1fa` in one session per arm, interleaved, best of two, on sixteen configurations. Wall time did not move at that resolution. The corpus totals sit between -0.9 % and +0.6 % on every configuration. The four workflows named above read, on clang 23, `glide_computer` 9,815 -> 9,782 ms (-0.3 %), `custom_origins` 3,349 -> 3,347 ms (-0.1 %), `codata_expressions` 5,356 -> 5,324 ms (-0.6 %), `broad_064` 5,863 -> 5,887 ms (+0.4 %). The counts moved as the gate said they would: whole-TU constraint checks -0.9 % on `glide_computer` and -0.8 % on `broad_256`, instantiations -0.2 % to -1.2 % per configuration, the broad slope -1.6 % to -3.2 %. So the mechanism of this section is real, and the two pieces kept from it are worth under one percent of a real TU's wall time, which best of two on a shared runner cannot see. The 27 % of §34 is still there to be taken, and taking it needs fewer candidates per operator call rather than a better order of atoms inside each.
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That
@@ -3041,10 +3043,12 @@ is not the number that costs you* — which needs no mp-units background at all.
 
 ## Open threads
 
-- **Timing confirmation for §34 and §35** on an idle machine or on the fleet: `bench.py time
+- ~~**Timing confirmation for §34 and §35** on an idle machine or on the fleet: `bench.py time
   98c055d044 <kept commit> --reps 5 --pin` for `glide_computer`, `custom_origins`, `codata_expressions`
   and `broad_064`, or a `Compile cost` dispatch with `compare_ref` set to the parent, whose arms
-  measure both refs in one session. The counts are in; the time is the claim the talk would make.
+  measure both refs in one session. The counts are in; the time is the claim the talk would make.~~
+  Done 2026-10-17 on the fleet (dispatch 39042038069), recorded at the end of §35. Wall time was flat
+  within noise on every configuration. The kept pieces moved the counts and left the time where it was.
 - ~~**Constraint checks count cache hits** (§35): a rejected candidate emits hundreds of
   `CheckConstraintSatisfaction` events at 0 ms. The gated column is still deterministic and still
   moves with real changes, but the self-time view is what a reader needs beside it. Report both, or
