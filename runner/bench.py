@@ -18,6 +18,10 @@ Subcommands:
            and constraint checks by source location (on the use basis when the workflow has an
            include twin), or with --why the enclosing instantiations that trigger the
            evaluations at one location
+  probe    what one expression shape costs the compiler, candidate by candidate: each shape is
+           compiled in a tiny TU, cold and then warm, and the trace events nested under each
+           copy's parse are read with their exclusive time - the top-level candidates, the
+           constraint-check sites that paid, optionally the whole tree
 
 Workflow corpus conventions (workflows/<category>/<name>.cpp):
   // REQUIRES: mp-units >= X.Y     minimal library version (skipped -> n/a otherwise)
@@ -297,14 +301,62 @@ def trace_counts(trace: Path):
     isq/custom_hierarchy). It is not the same number: on that TU the events count 13,600 and the
     summary says 3,956, a ratio consistent with the summary counting only the outermost request in a
     nested chain. Instantiating A<B<C>> is one total and three events, and the cost is three.
+
+    Besides the four counts this returns the entity census (see CENSUS_KINDS) and the constraint
+    checks' exclusive time, so a module interface build and a workflow TU are described by the same
+    numbers: a `bmi/*` row gates on the four counts and carries a census like a workflow TU does.
     """
-    data = json.loads(trace.read_text())
+    events = [e for e in json.loads(trace.read_text())["traceEvents"] if e.get("ph") == "X"]
     counts = {"InstantiateClass": 0, "InstantiateFunction": 0, "EvaluateAsConstantExpr": 0,
               "CheckConstraintSatisfaction": 0}
-    for e in data["traceEvents"]:
-        if e.get("ph") == "X" and e["name"] in counts:
+    census, seen = {}, set()
+    for e in events:
+        if e["name"] in counts:
             counts[e["name"]] += 1
+        # Census on class instantiations only: a member function of a scaffolding template would
+        # match the prefix too, and it is a use, not a definition.
+        if e["name"] == "InstantiateClass":
+            detail = e.get("args", {}).get("detail", "")
+            for kind, prefix in CENSUS_KINDS:
+                if detail.startswith(prefix) and detail not in seen:
+                    seen.add(detail)
+                    census[kind] = census.get(kind, 0) + 1
+    counts["census"] = census
+    counts["constraint_self_ms"] = constraint_self_ms(events)
     return counts
+
+
+def walk_trace(events):
+    """Nest the complete events of a trace and charge each its own time.
+
+    `-ftime-trace` events nest by interval - a child lies inside its parent's `[ts, ts + dur]` - so a
+    walk in `(ts, -dur)` order with a stack of still-open events finds every parent, and a parent's
+    duration minus its children's is what the compiler spent in that event itself. Returns
+    `{id(event): [self_us, depth, parent event or None]}`. The `Total *` summary rows are skipped: they
+    sit at `ts` 0 on their own thread and would otherwise read as the parent of everything.
+
+    Findings §34 and §35 read the trace this way. It is also why the gated constraint-check count
+    needs a companion number: a cached check and a cold one are one event each, 0 us against
+    milliseconds, and the count cannot tell them apart."""
+    info, stack = {}, []
+    for e in sorted((e for e in events if not e["name"].startswith("Total")),
+                    key=lambda e: (e["ts"], -e["dur"])):
+        while stack and stack[-1]["ts"] + stack[-1]["dur"] <= e["ts"]:
+            stack.pop()
+        if stack:
+            info[id(stack[-1])][0] -= e["dur"]
+        info[id(e)] = [e["dur"], len(stack), stack[-1] if stack else None]
+        stack.append(e)
+    return info
+
+
+def constraint_self_ms(events, info=None):
+    """Exclusive wall time of the TU's CheckConstraintSatisfaction events, in ms, to read beside the
+    gated count, which weighs the hundreds of 0 us cache hits a rejected candidate emits the same as
+    the cold checks that cost (findings §35). It is wall clock, so it is not gated and not recorded:
+    `update` drops it and `check` prints it from the current run alone."""
+    info = info or walk_trace(events)
+    return round(sum(info[id(e)][0] for e in events if e["name"] == "CheckConstraintSatisfaction") / 1000, 1)
 
 
 # The entity census: how many things the headers in this TU DEFINE, counted off the same traced
@@ -476,26 +528,8 @@ def measure_one(tc: Toolchain, repo, src, ctx: BuildContext, tmp: Path, quote_di
     - see object_sizes() - and the size of the AST that was built, which is the only one of them that
     can see a declaration that was never instantiated (see ast_stats)."""
     out = tmp / "wf.o"
-    trace = tmp / "wf.json"
     proc = run(compile_cmd(tc, repo, out, src, trace=True, ctx=ctx, quote_dir=quote_dir), cwd=ctx.cwd)
-    data = json.loads(trace.read_text())
-    counts = {"InstantiateClass": 0, "InstantiateFunction": 0, "EvaluateAsConstantExpr": 0,
-              "CheckConstraintSatisfaction": 0}
-    census, seen = {}, set()
-    for e in data["traceEvents"]:
-        if e.get("ph") != "X":
-            continue
-        if e["name"] in counts:
-            counts[e["name"]] += 1
-        # Census on class instantiations only: a member function of a scaffolding template would
-        # match the prefix too, and it is a use, not a definition.
-        if e["name"] == "InstantiateClass":
-            detail = e.get("args", {}).get("detail", "")
-            for kind, prefix in CENSUS_KINDS:
-                if detail.startswith(prefix) and detail not in seen:
-                    seen.add(detail)
-                    census[kind] = census.get(kind, 0) + 1
-    counts["census"] = census
+    counts = trace_counts(tmp / "wf.json")
     counts.update(object_sizes(out))
     counts.update(ast_stats(proc.stderr))
     return counts
@@ -735,13 +769,13 @@ def cmd_counts(args):
     measured = {ref: measure_counts(r, tc, args.workflows) for ref, r in repos.items()}
     if len(refs) == 1:
         results = measured[refs[0]]
-        print_table(["inst_class", "inst_func", "const_eval", "constraints", "entities", "code_B",
-                     "syms_B", "fn_decls", "decls"],
+        print_table(["inst_class", "inst_func", "const_eval", "constraints", "constr_ms", "entities",
+                     "code_B", "syms_B", "fn_decls", "decls"],
                     [(n, *([sum(v.get("census", {}).values()) or None if k == "entities" else v.get(k)
                             for k in ("InstantiateClass", "InstantiateFunction", "EvaluateAsConstantExpr",
-                                      "CheckConstraintSatisfaction", "entities", "code_bytes",
-                                      "symbol_bytes", "function_decls", "decls_total")]
-                           if isinstance(v, dict) else [v] * 9))
+                                      "CheckConstraintSatisfaction", "constraint_self_ms", "entities",
+                                      "code_bytes", "symbol_bytes", "function_decls", "decls_total")]
+                           if isinstance(v, dict) else [v] * 10))
                      for n, v in sorted(results.items())],
                     lambda v: "n/a" if v is None else str(v))
         if price := price_list_lines(results, tc):
@@ -1001,7 +1035,7 @@ def gated_deltas(baseline, results, extract, rates):
 
     details = {}
     for name, base in sorted(baseline.items()):
-        if name.startswith(("bmi/", "include/")):
+        if name.startswith("include/"):
             continue  # an include set is gated through the workflows that subtract it, not twice
         cur = results.get(name)
         if not isinstance(cur, dict) or not isinstance(base, dict):
@@ -1009,6 +1043,10 @@ def gated_deltas(baseline, results, extract, rates):
         b_tot, c_tot = extract(base), extract(cur)
         if not isinstance(b_tot, (int, float)) or not isinstance(c_tot, (int, float)) or not b_tot:
             continue
+        # A module interface (`bmi/*`) gates on its TOTAL, by choice: it is the one entry whose growth
+        # IS the cost - every importer pays the whole BMI - and nothing in a modules configuration can
+        # price its census (the consumer umbrellas instantiate next to nothing). So the library gaining
+        # a chapter goes red here and is re-recorded, where a header umbrella absorbs it as residual.
         basis, b, c = "total", b_tot, c_tot
         if name.startswith("umbrella/"):
             if isinstance(base.get("census"), dict):
@@ -1026,7 +1064,9 @@ def gated_deltas(baseline, results, extract, rates):
             continue
         details[name] = {"baseline": round(b, 1), "current": round(c, 1), "rel": (c - b) / b,
                          "abs": c - b, "basis": basis, "total_baseline": b_tot, "total_current": c_tot,
-                         "umbrella": name.startswith("umbrella/")}
+                         # "churn-expected": out of the median alarm and labelled so in the tighten PR.
+                         # A BMI grows with the library exactly as an umbrella does.
+                         "umbrella": name.startswith(("umbrella/", "bmi/"))}
     return details
 
 
@@ -1040,7 +1080,7 @@ def unrecorded_values(baseline, results, extract):
     recorded`: measured, listed, not gated."""
     out = {}
     for name, base in sorted(baseline.items()):
-        if name.startswith(("bmi/", "include/")):
+        if name.startswith("include/"):
             continue
         cur = results.get(name)
         if not isinstance(cur, dict) or not isinstance(base, dict):
@@ -1309,23 +1349,28 @@ def census_growth_lines(details_by_metric, baseline, results):
 
 
 def entity_diff_lines(left, right, label_left, label_right, top, min_delta=1, noun="instantiations",
-                      unit=("entity", "entities"), explain=None):
+                      unit=("entity", "entities"), explain=None, fmt=str):
     """Markdown for a keyed diff of two tallies, ranked by CONTRIBUTION to the change: increases
     first when the total grew, decreases first when it fell. Written for instantiations by entity;
     `noun`, `unit` and `explain` make it read right for constant evaluations and constraint checks
-    by source location, which `attribute` diffs the same way.
+    by source location, which `attribute` diffs the same way, and `fmt` renders a tally that is not
+    a count (microseconds of self time, shown as ms).
 
     Always ranking growth was right for a gate (where the total grew by definition) and wrong for a
     comparison run: attributing a price that dropped 37% listed the few entities that went UP, which
     explains nothing about why it dropped."""
     total = sum(right.values()) - sum(left.values())
     sign = -1 if total >= 0 else 1
+
+    def signed(v):
+        return ("+" if v >= 0 else "") + fmt(v)
+
     rows = []
     for key in sorted(set(left) | set(right), key=lambda k: sign * (right.get(k, 0) - left.get(k, 0))):
         a, b = left.get(key, 0), right.get(key, 0)
         if abs(b - a) >= min_delta:
-            rows.append([key, str(a), str(b), f"{b - a:+d}"])
-    lines = [f"Total {noun} {sum(left.values())} -> {sum(right.values())} ({total:+d}). "
+            rows.append([key, fmt(a), fmt(b), signed(b - a)])
+    lines = [f"Total {noun} {fmt(sum(left.values()))} -> {fmt(sum(right.values()))} ({signed(total)}). "
              + (explain or "Entities below are templates with their arguments collapsed, ranked by how "
                            "much of that change they account for."), ""]
     if not rows:
@@ -1402,10 +1447,28 @@ def gate_slope_table(slopes, band, tc: Toolchain):
     return lines
 
 
-def gate_summary_table(details, median, args, tc: Toolchain, label="instantiations", unrecorded=None):
+def constraint_self_aside(results):
+    """`{workflow: "N ms"}` of this run's exclusive constraint-check time, minus the include twin's
+    where the workflow has one, so it sits on the same basis as the count it qualifies. Both numbers
+    come from this run on this machine; nothing here is compared with a baseline."""
+    aside = {}
+    for name, entry in results.items():
+        if not isinstance(entry, dict) or entry.get("constraint_self_ms") is None:
+            continue
+        ms = entry["constraint_self_ms"]
+        twin = results.get(entry.get("twin"))
+        if isinstance(twin, dict) and twin.get("constraint_self_ms") is not None:
+            ms -= twin["constraint_self_ms"]
+        aside[name] = f"{ms:.1f} ms"
+    return aside
+
+
+def gate_summary_table(details, median, args, tc: Toolchain, label="instantiations", unrecorded=None,
+                       aside=None):
     """Every workflow with its measured value, its limit and the headroom left - so the distance to
     the bands is visible by observation, not inferred from a single pass/fail line. `unrecorded`
-    rows (see unrecorded_values) have a measurement and no baseline, and say so in place of a verdict."""
+    rows (see unrecorded_values) have a measurement and no baseline, and say so in place of a verdict.
+    `aside` adds one ungated column of context per row - the constraint checks' own wall time."""
     unrecorded = unrecorded or {}
     if not details and not unrecorded:
         return []
@@ -1422,14 +1485,21 @@ def gate_summary_table(details, median, args, tc: Toolchain, label="instantiatio
             status = "ok"
         rows.append([name, d.get("basis", "total"), str(d["baseline"]),
                      str(d["current"]), f"{delta:+.2f}%", f"{args.slack:g}%",
-                     f"{args.slack - delta:+.2f}pp", status])
+                     f"{args.slack - delta:+.2f}pp", status, *([aside.get(name, "-")] if aside else [])])
     for name, current in sorted(unrecorded.items()):
-        rows.append([name, "-", "not recorded", str(current), "-", "-", "-", "not recorded"])
+        rows.append([name, "-", "not recorded", str(current), "-", "-", "-", "not recorded",
+                     *([aside.get(name, "-")] if aside else [])])
     # Name the configuration: the same compiler at a different -std produces different counts, so a
     # table without it looks like it contradicts the measurement fleet's numbers.
     lines = [f"### {label} - `{config_key(tc)}`", ""]
-    lines += markdown_table(["workflow", "basis", "baseline", "current", "delta", "limit", "headroom", ""],
-                            rows)
+    lines += markdown_table(["workflow", "basis", "baseline", "current", "delta", "limit", "headroom", "",
+                             *(["self time (this run)"] if aside else [])], rows)
+    if aside:
+        lines += ["", "`self time (this run)` is the exclusive wall time these checks took in this run, "
+                      "minus the include twin's where the workflow has one. The count weighs a cached check "
+                      "(0 us) the same as a cold one, "
+                      "so a change can move the count by hundreds and the time by nothing, or the other "
+                      "way round (findings §35). It is compared with nothing and not gated."]
     lines += ["", (f"median across non-umbrella workflows: **{median:+.2%}** against a "
                    f"{args.median_alarm:g}% alarm ({args.median_alarm - median * 100:+.2f}pp headroom)"
                    if median is not None else
@@ -1615,7 +1685,9 @@ def cmd_check(args):
     for label, m in per_metric.items():
         if m or unrecorded.get(label):
             evidence += gate_summary_table(m, median if label == "instantiations" else None, args, tc, label,
-                                           unrecorded.get(label))
+                                           unrecorded.get(label),
+                                           constraint_self_aside(measured) if label == "constraint checks"
+                                           else None)
     if evidence:
         evidence += EVIDENCE_LEGEND
     print("\n".join(visible))
@@ -1654,6 +1726,10 @@ def cmd_update(args):
         sys.exit(f"no workflow matches {args.workflows}; baselines left untouched")
     recorded, preserved = {}, {}
     for name, value in measured.items():
+        if isinstance(value, dict):
+            # Wall clock has no place in a reviewed file of counts: it would differ on every machine
+            # and move on every re-record. `check` reads it from the current run alone.
+            value = {k: v for k, v in value.items() if k != "constraint_self_ms"}
         if isinstance(value, dict) or name not in previous:
             recorded[name] = value  # a fresh measurement, or a new workflow with nothing to keep
         else:
@@ -1721,7 +1797,10 @@ REPORTED = tuple(m for m in METRICS if m[0] not in UNRENDERED)
 # of the same header in two trees is then one key, and a diff by key reads as a diff by source line.
 LOCATION_EVENTS = {"EvaluateAsConstantExpr": "constant evaluations",
                    "CheckConstraintSatisfaction": "constraint checks"}
-TALLY_KINDS = ("entities", *LOCATION_EVENTS.values())
+# The constraint checks' exclusive time, by the same location key, in microseconds. Kept beside the
+# count because the count cannot tell a cache hit from a cold check (findings §35).
+SELF_TIME_KIND = "constraint self time"
+TALLY_KINDS = ("entities", *LOCATION_EVENTS.values(), SELF_TIME_KIND)
 
 
 def trace_tallies(repo: Path, tc: Toolchain, source: Path, ctx: BuildContext, workdir: Path,
@@ -1736,17 +1815,18 @@ def trace_tallies(repo: Path, tc: Toolchain, source: Path, ctx: BuildContext, wo
     pairing rounds were visible only with the arguments spelled out)."""
     out = workdir / "attr.o"
     run(compile_cmd(tc, repo, out, source, trace=True, ctx=ctx, quote_dir=quote_dir), cwd=ctx.cwd)
-    events = json.loads((workdir / "attr.json").read_text())["traceEvents"]
+    events = [e for e in json.loads((workdir / "attr.json").read_text())["traceEvents"] if e.get("ph") == "X"]
+    info = walk_trace(events)
     prefix = str(repo) + "/"
     tallies = {kind: {} for kind in TALLY_KINDS}
     for e in events:
-        if e.get("ph") != "X":
-            continue
         detail = e.get("args", {}).get("detail", "(unnamed)")
         if e["name"] in ("InstantiateClass", "InstantiateFunction"):
             kind, key = "entities", detail if full_args else re.sub(r"<.*", "<>", detail)
         elif e["name"] in LOCATION_EVENTS:
             kind, key = LOCATION_EVENTS[e["name"]], detail.replace(prefix, "")
+            if e["name"] == "CheckConstraintSatisfaction":
+                tallies[SELF_TIME_KIND][key] = tallies[SELF_TIME_KIND].get(key, 0) + info[id(e)][0]
         else:
             continue
         tallies[kind][key] = tallies[kind].get(key, 0) + 1
@@ -1899,6 +1979,16 @@ def cmd_attribute(args):
             explain=f"Locations below are where the {what} sits (`file:line:col` with the checkout's path "
                     f"stripped, so one line of one header is one row on both sides), ranked by how much of "
                     f"that change they account for.")))
+    print("#### constraint checks by source location, exclusive time (ms)\n")
+    print("\n".join(entity_diff_lines(
+        left[SELF_TIME_KIND], right[SELF_TIME_KIND], labels[0], labels[1], args.top, min_delta=500,
+        noun="ms of constraint checking", unit=("location", "locations"), fmt=lambda us: f"{us / 1000:.1f}",
+        explain="The same locations as the count above, weighed by the wall time the checks at each spent "
+                "themselves (their duration minus their children's). A rejected candidate emits hundreds "
+                "of cached checks at 0 us, so a location can lead the count and cost nothing, or the other "
+                "way round (findings §35); rows moving by less than 0.5 ms are left out. This is wall clock "
+                "from two compiles in one session, so the order of the rows means something and a few tenths "
+                "of a millisecond do not.")))
 
 
 def attribute_price_mover(args, tc: Toolchain, repos, refs, source):
@@ -1942,6 +2032,158 @@ def attribute_price_mover(args, tc: Toolchain, repos, refs, source):
     return [f"### why `{source}` moved", "", f"Attributed on its {basis}.", "",
             *entity_diff_lines(tallies[old_ref], tallies[new_ref],
                                short_ref(old_ref), short_ref(new_ref), top=10)]
+
+
+# The fixture every probe shape is compiled against: one parameter per argument kind an operator can
+# meet, so a shape is written the way user code writes it (`a + b`, `2.0 * a`, `p - b`) and the trace
+# shows what the compiler did with that exact pair of types. The kinds are the ones real code produces
+# (findings §35): the same unit, two units of one dimension, an integral representation, a typed
+# quantity and a point.
+PROBE_PARAMS = (("a", "quantity<km, double>"), ("b", "quantity<m, double>"), ("i", "quantity<m, int>"),
+                ("l", "quantity<isq::length[m], double>"),
+                ("p", "quantity_point<m, default_point_origin(m), double>"))
+PROBE_FIXTURE = ("#include <mp-units/systems/si.h>\n#include <mp-units/systems/isq/space_and_time.h>\n"
+                 "using namespace mp_units;\nusing namespace mp_units::si::unit_symbols;\n"
+                 + "".join(f"using qty_{name} = {spelling};\n" for name, spelling in PROBE_PARAMS)
+                 # Complete the five fixture types here, or the first shape's parse pays for instantiating
+                 # them (2.5 ms of `quantity_point` under `a + a`) and reads as costlier than the rest.
+                 + "inline constexpr auto probe_fixture_complete = "
+                 + " + ".join(f"sizeof(qty_{name})" for name, _ in PROBE_PARAMS) + ";\n")
+
+
+def probe_source(shapes, warm):
+    """One function per shape and copy, `probe_<n>_cold` then `probe_<n>_warm`, each returning the
+    expression over the fixture parameters. The warm copy is the SAME expression a second time: with
+    satisfaction cached per argument set it parses in a fraction of a millisecond, so the cold copy
+    carries the cost of the first occurrence of that (operator, type pair) in a TU and the warm one
+    the marginal cost of every later occurrence. A real TU is a stream of first occurrences
+    (findings §35)."""
+    params = ", ".join(f"[[maybe_unused]] qty_{name} {name}" for name, _ in PROBE_PARAMS)
+    text = PROBE_FIXTURE
+    for n, expr in enumerate(shapes):
+        for tag in ("cold", "warm") if warm else ("cold",):
+            text += f"auto probe_{n}_{tag}({params}) {{ return {expr}; }}\n"
+    return text
+
+
+def probe_lines(events, shapes, args, tc: Toolchain, repo: Path, tmp: Path):
+    """The report for one probe TU: per shape, what the cold parse cost and the warm one, the top-level
+    events under the cold parse (a candidate's constraint check or a body instantiation each), and
+    the constraint-check sites ranked by exclusive time; with --tree, the nested events themselves."""
+    info = walk_trace(events)
+    # A site is `<path:line:col>`; the checkout's, the temp directory's and libc++'s paths say nothing.
+    site_prefix = re.compile(rf"(?<=<)(?:{re.escape(str(repo))}/|{re.escape(str(tmp))}/"
+                             rf"|/usr/lib/llvm-\d+/bin/\.\./include/c\+\+/v1/)")
+
+    def detail(e):
+        return site_prefix.sub("", e.get("args", {}).get("detail", "")) or "(unnamed)"
+
+    def parse_of(name):
+        return next((e for e in events if e["name"] == "ParseFunctionDefinition" and detail(e) == name), None)
+
+    def nested(root):
+        # In start order: the trace file lists events as their scopes END, children before parents,
+        # which would print a tree upside down.
+        lo, hi = root["ts"], root["ts"] + root["dur"]
+        return sorted((e for e in events if lo <= e["ts"] and e["ts"] + e["dur"] <= hi and e is not root
+                       and id(e) in info), key=lambda e: (e["ts"], -e["dur"]))
+
+    def tally(inside):
+        return {"checks": sum(1 for e in inside if e["name"] == "CheckConstraintSatisfaction"),
+                "checks_ms": sum(info[id(e)][0] for e in inside if e["name"] == "CheckConstraintSatisfaction") / 1000,
+                "insts": sum(1 for e in inside if e["name"] in ("InstantiateClass", "InstantiateFunction")),
+                "evals": sum(1 for e in inside if e["name"] == "EvaluateAsConstantExpr")}
+
+    lines = [f"## probe - `{config_key(tc)}` @ {short_ref(args.ref)}", "",
+             "Fixture parameters: " + ", ".join(f"`{n}` is `{s}`" for n, s in PROBE_PARAMS) + ". Each shape is "
+             "one function returning the expression, compiled cold (its first occurrence in the TU)"
+             + ("" if args.no_warm else " and then warm (the identical expression once more)")
+             + ". Constraint-check counts include cache hits at 0 us, "
+             "so read the time beside a count. Function bodies clang instantiates at the end of the TU "
+             "(those that are neither constexpr nor have a deduced return type) fall outside every parse "
+             "and are not seen here.", ""]
+    if not any(e["name"] == "CheckConstraintSatisfaction" for e in events):
+        lines += ["This clang emitted no `CheckConstraintSatisfaction` event anywhere in the TU (the event "
+                  "exists from clang 22 on), so the tables below show instantiations only and no candidate.",
+                  ""]
+    for n, expr in enumerate(shapes):
+        cold = parse_of(f"probe_{n}_cold")
+        lines += [f"### `{expr}`", ""]
+        if cold is None:
+            lines += ["No parse event for this shape: the trace does not name the function.", ""]
+            continue
+        inside = nested(cold)
+        t = tally(inside)
+        lines += [f"- cold: parse {cold['dur'] / 1000:.1f} ms; {t['checks']} constraint checks "
+                  f"({t['checks_ms']:.1f} ms exclusive); {t['insts']} instantiations; {t['evals']} constant "
+                  f"evaluations"]
+        if (warm := parse_of(f"probe_{n}_warm")) is not None:
+            w = tally(nested(warm))
+            lines += [f"- warm: parse {warm['dur'] / 1000:.1f} ms; {w['checks']} constraint checks "
+                      f"({w['checks_ms']:.1f} ms exclusive); {w['insts']} instantiations"]
+        lines += [""]
+        depth = info[id(cold)][1] + 1
+        tops = sorted((e for e in inside if info[id(e)][1] == depth), key=lambda e: -e["dur"])
+        rows = []
+        for e in tops[:args.top]:
+            sub = tally(nested(e))
+            rows.append([f"{e['name']}: {detail(e)[:110]}", f"{e['dur'] / 1000:.2f}", str(sub["checks"]),
+                         str(sub["insts"])])
+        if rows:
+            lines += ["Top-level events under the cold parse, by inclusive time - the costly ones are one "
+                      "candidate's constraint check or the selected body each:", ""]
+            lines += markdown_table(["event", "ms", "checks within", "instantiations within"], rows)
+            if len(tops) > args.top:
+                lines += ["", f"{len(tops) - args.top} further top-level events."]
+            lines += [""]
+        by_site = {}
+        for e in inside:
+            if e["name"] == "CheckConstraintSatisfaction":
+                count, us = by_site.get(detail(e), (0, 0))
+                by_site[detail(e)] = (count + 1, us + info[id(e)][0])
+        sites = sorted(by_site.items(), key=lambda kv: -kv[1][1])[:args.top]
+        if sites:
+            lines += ["Constraint-check sites under the cold parse, by exclusive time:", ""]
+            lines += markdown_table(["site", "ms", "checks"],
+                                    [[site, f"{us / 1000:.2f}", str(count)] for site, (count, us) in sites])
+            lines += [""]
+        if args.tree:
+            lines += [f"Event tree under the cold parse (depth <= {args.depth}, events >= {args.min_us} us; "
+                      f"`self` is the event's own time):", "", "```text"]
+            for e in inside:
+                d = info[id(e)][1] - depth
+                if d > args.depth or e["dur"] < args.min_us:
+                    continue
+                lines += [f"{'  ' * d}{e['dur'] / 1000:7.2f} ms (self {info[id(e)][0] / 1000:6.2f})  "
+                          f"{e['name']}: {detail(e)[:150]}"]
+            lines += ["```", ""]
+    return lines
+
+
+def cmd_probe(args):
+    """What one expression shape costs, candidate by candidate - the question §34 could not answer
+    from a workflow's trace, where constraint checking is charged to call sites and nothing says which
+    overload of the set was paying. A tiny TU with one function per shape makes the parse of that
+    function the scope, and the events nested under it, read with their exclusive time, are what the
+    expression cost: the selected candidate's constraints, each rejected candidate's, the body. The
+    probe shows the mechanism. Whether a change built on it stays is decided by the gate on the
+    corpus (findings §35)."""
+    tc = toolchain(args)
+    if not tc.is_clang:
+        sys.exit("the probe reads clang's -ftime-trace; another compiler cannot produce it")
+    if tc.modules or tc.import_std:
+        sys.exit("the probe's fixture includes headers; drop --modules / --import-std")
+    repo = materialize(args, [args.ref])[args.ref]
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        src, out = tmp / "probe.cpp", tmp / "probe.o"
+        src.write_text(probe_source(args.shapes, not args.no_warm))
+        try:
+            run(compile_cmd(tc, repo, out, src, trace=True))
+        except subprocess.CalledProcessError as exc:
+            sys.exit(f"the probe TU did not compile:\n{exc.stderr[-3000:]}")
+        events = [e for e in json.loads((tmp / "probe.json").read_text())["traceEvents"] if e.get("ph") == "X"]
+        print("\n".join(probe_lines(events, args.shapes, args, tc, repo, tmp)))
 
 
 def cmd_report(args):
@@ -2784,12 +3026,21 @@ def prepare(payloads, previous=None):
     (metric, workflow, (key, ref)) -> value cell store, the provenance notes, and the comparison
     section (range for a two-ref run, previous-run control for a single-ref one)."""
     refs = refs_oldest_first(payloads)
-    # A run that measured a range answers for that range. Comparing its newest ref against the previous
-    # run's newest would compare master with master, report "nothing moved", and lead a report whose
-    # every cell reads `v2.5.0 -> master` - the previous run is the control for a SINGLE-ref run only.
+    # A run that measured a range answers for that range first: its newest ref against the previous
+    # run's newest must never REPLACE that table, since it compares master with master and would lead
+    # a report whose every cell reads `v2.5.0 -> master` with "nothing moved". It may follow it. With
+    # both, the page carries two anchors - the release the run measured against and the previous
+    # snapshot of the same tree - which is what a reader coming from a release note needs ("what
+    # changed since the version I run") and what keeps a slow drift from hiding behind a week-to-week
+    # delta of nothing. The scheduled run measures `v2.5.0` beside master for exactly this page.
     comparison_md, comparison_findings = (None, [])
     if len(refs) >= 2:
         comparison_md, comparison_findings = range_summary(payloads, refs)
+        if previous:
+            prev_md, prev_findings = run_over_run(payloads, previous)
+            if prev_md:
+                comparison_md = "\n\n".join(s for s in (comparison_md, prev_md) if s)
+            comparison_findings = [*comparison_findings, *prev_findings]
     elif previous:
         comparison_md, comparison_findings = run_over_run(payloads, previous)
     keys, cells, notes = [], {}, []
@@ -3522,6 +3773,20 @@ def main():
                         "--why rows)")
     a.add_argument("--worktree-cache", default=str(ROOT / ".worktrees"))
 
+    pr = sub.add_parser("probe", help="what one expression shape costs, candidate by candidate: the trace "
+                                      "events under a tiny TU's parse of it, with their exclusive time")
+    pr.add_argument("shapes", nargs="+",
+                    help="expressions over the fixture parameters " + ", ".join(
+                        f"{n} ({s})" for n, s in PROBE_PARAMS) + ", e.g. 'a + b' '2.0 * a' 'p - b'")
+    pr.add_argument("--ref", default="WORKTREE", help="git ref to probe (default: WORKTREE)")
+    pr.add_argument("--no-warm", action="store_true",
+                    help="skip the second, identical copy of each shape (the warm line)")
+    pr.add_argument("--tree", action="store_true", help="also print the nested events under each cold parse")
+    pr.add_argument("--depth", type=int, default=4, help="--tree: deepest nesting shown (default 4)")
+    pr.add_argument("--min-us", type=int, default=200, help="--tree: shortest event shown (default 200 us)")
+    pr.add_argument("--top", type=int, default=12, help="rows per table (default 12)")
+    pr.add_argument("--worktree-cache", default=str(ROOT / ".worktrees"))
+
     s = sub.add_parser("summary", help="merge report JSONs into the two-screen page (+ job summary)")
     s.add_argument("reports", nargs="+", help="JSON files written by `report --output`")
     s.add_argument("--full-output", metavar="MD",
@@ -3554,6 +3819,8 @@ def main():
         cmd_summary(args)
     elif args.cmd == "attribute":
         cmd_attribute(args)
+    elif args.cmd == "probe":
+        cmd_probe(args)
     elif args.cmd == "key":
         print(baseline_path(args, toolchain(args)))
 

@@ -98,7 +98,10 @@ Five metrics, with very different trust levels:
    compiler checks) are deterministic like the other trace counts and were the number that moved most
    in the mp-units 2.6 framework batch — down 41–62% per workflow on the use basis, while no other
    column saw it — so the gate watches them; a baseline file recorded before the metric existed reports
-   its rows as *not recorded* rather than as a change. **Symbol metadata** is measured and
+   its rows as *not recorded* rather than as a change. Beside that count, `counts`, `check` and
+   `attribute` print the exclusive wall time the checks took in that run because the count weighs a
+   cached check (0 µs) the same as a cold one and cannot tell a rejected candidate that costs from one
+   that does not. That time is printed as context and is not gated. **Symbol metadata** is measured and
    reported but deliberately not gated: it tracks mangled-name volume, which is linker input rather than
    compile-time cost, and it is far too small in absolute terms for a percentage band to mean anything. They exist because instantiations only measure the *front end*:
    `text/output_format` spends a third of its time in the optimizer and no frontend metric notices.
@@ -167,6 +170,10 @@ runner/bench.py summary results/clang.json results/gcc.json   # one table per me
 runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 attribute v2.5.0 master --workflows isq/kind_safe_interfaces
 # which instantiations trigger the constant evaluations at one source line (one ref, one workflow)
 runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 attribute --workflows parity/unit_conversions --why 'quantity_spec_concepts.h:64:24'
+# what one expression costs, candidate by candidate: the events under a tiny TU's parse of it with
+# their exclusive time, cold and then warm; --tree prints the nesting itself. Needs clang 23: older
+# clangs emit no constraint-check events (22 does, but cannot build the library)
+runner/bench.py --repo ~/repos/mp-units --cxx clang++-23 probe 'a + b' '2.0 * a' 'p - b' --ref master
 
 # gate / re-record
 runner/bench.py --repo ~/repos/mp-units --cxx clang++-21 check
@@ -186,15 +193,20 @@ baselines of workflows that ref cannot compile.
 
 `.github/workflows/ci-compile-cost.yml` runs three kinds of job:
 
-- **gate** — clang with `-std=c++23` (what the baselines were recorded with), instantiation counts
-  against those baselines with **tight** bands (1% per workflow, 0.5% median). Growth fails the
-  build, so borderline growth is investigated here rather than in mp-units; an improvement past the
-  tighten band opens a PR re-recording the baselines, because stale baselines silently desensitize
-  the gate. It exits before compiling when the checked-out sha is the one the baselines record.
+- **gate** — clang at `-std=c++20`, `c++23` and `c++26`, one reviewed baseline file each, plus the
+  modules build at `c++26`, whose module-interface rows (`bmi/*`) gate on their totals: a BMI is what
+  every importer pays whole. Counts against those baselines with **tight** bands (1% per workflow,
+  0.5% median). Growth fails the build, so borderline growth is investigated here rather than in
+  mp-units; an improvement past the tighten band opens a PR re-recording the baselines, because stale
+  baselines silently desensitize the gate, and a configuration with no baseline file yet records its
+  first one through the same PR. It exits before compiling when the checked-out sha is the one the
+  baselines record.
 - **measure** — one runner per compiler: `clang++-17/18/20/21` and `g++-14/15`, plus `g++-16` as a
   never-fatal experimental arm. That set is exactly mp-units' supported compilers that can do
   `-std=c++26`, so every column shares one standard and stays comparable. Arms cannot interfere, and
-  a compiler that cannot build the corpus costs only its own arm.
+  a compiler that cannot build the corpus costs only its own arm. The scheduled weekly run also
+  measures `v2.5.0` beside master in every measure arm, so its page says what changed since the last
+  release as well as since the previous run.
 - **report** — merges those artifacts into one markdown report in the job summary: a table per metric
   **per compiler family**, since the supported set grows and one wide table stops being readable. Refs
   are ordered by the library version they measured, oldest first, and when two refs are compared each

@@ -3045,21 +3045,35 @@ is not the number that costs you* — which needs no mp-units background at all.
   98c055d044 <kept commit> --reps 5 --pin` for `glide_computer`, `custom_origins`, `codata_expressions`
   and `broad_064`, or a `Compile cost` dispatch with `compare_ref` set to the parent, whose arms
   measure both refs in one session. The counts are in; the time is the claim the talk would make.
-- **Constraint checks count cache hits** (§35): a rejected candidate emits hundreds of
+- ~~**Constraint checks count cache hits** (§35): a rejected candidate emits hundreds of
   `CheckConstraintSatisfaction` events at 0 ms. The gated column is still deterministic and still
   moves with real changes, but the self-time view is what a reader needs beside it. Report both, or
-  report the count with its self time per workflow from the same trace.
-- **The per-candidate probe belongs in the runner** (§35): one expression per function, warm-up copy,
-  event tree with exclusive time, per-candidate summary. `bench.py probe "a + b" ...` against any ref.
-- **Measure in both modes, and against two anchors.** Every gate and every `report` compares the tree
+  report the count with its self time per workflow from the same trace.~~ Done 2026-10-17: the same
+  traced compile now yields the checks' exclusive time (`walk_trace`), printed by `counts`
+  (`constr_ms`), by `check` beside the constraint-checks rows on their basis, and by `attribute` as a
+  fourth table, by location. It is not gated, and `update` strips it from the baselines.
+  On `glide_computer`, 98c055d044 -> 9ffaf3e1fa, that table reads 2,188 -> 1,484 ms (use basis,
+  loaded laptop), `format_arg_store.h:162` 115 -> 58 ms and `unit_magnitude.h:571` 33 -> 0.4 ms.
+- ~~**The per-candidate probe belongs in the runner** (§35): one expression per function, warm-up copy,
+  event tree with exclusive time, per-candidate summary. `bench.py probe "a + b" ...` against any
+  ref.~~ Done 2026-10-17: `bench.py probe 'a + b' '2.0 * a' --ref <ref>`, with `--tree` for the
+  nesting. Five shapes cost 7 s.
+- ~~**Measure in both modes, and against two anchors.** Every gate and every `report` compares the tree
   against the previous snapshot of itself. A second anchor, a named release such as `v2.5.0`, would
   show the user what a year of work bought and what it cost, and keep the "previous snapshot" delta
-  from hiding a slow drift. Both anchors, both bases (use and residual), one page.
-- **Gate the modules build** the way the headers are gated: the `bmi/*` rows carry counts already, and
-  nothing fails when `mp_units.systems` grows.
-- **A report a user can read first**: the page opens on the price list, which answers "what does
+  from hiding a slow drift. Both anchors, both bases (use and residual), one page.~~ Done 2026-10-17
+  in part: the scheduled run measures `v2.5.0` beside master, and `summary` renders the range table
+  and the previous-run table on one page when it has both. The tables stay corpus totals over the
+  intersection. Per-basis columns (use and residual) were not built.
+- ~~**Gate the modules build** the way the headers are gated: the `bmi/*` rows carry counts already, and
+  nothing fails when `mp_units.systems` grows.~~ Done 2026-10-17: a `cxx26-modules` gate arm; `bmi/*`
+  rows gate on their totals, with the census recorded, and sit outside the median alarm. The arm
+  records its own baseline file on its first run and opens the PR that adds it.
+- ~~**A report a user can read first**: the page opens on the price list, which answers "what does
   using this cost"; a reader coming from a release note wants "what changed for me since the version I
-  run", which is the two-anchor table above with the five findings on top.
+  run", which is the two-anchor table above with the five findings on top.~~ Done 2026-10-17 as far
+  as the two anchors go: the range table (since the release) opens the comparison, the previous-run
+  table follows, both sets of findings sit under `## What changed`. One merged table was not built.
 - **Gate `CheckConstraintSatisfaction`** (§32): deterministic, the largest mover of the 2.6 batch
   (-41 to -62 % per workflow) and invisible to every gated column. The cost of adding it is one
   more number per row to explain.

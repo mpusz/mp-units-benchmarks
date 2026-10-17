@@ -1,10 +1,11 @@
 # Compile cost of the corpus: one gate, plus a measurement fleet whose results are aggregated into
 # a single table at the end of the run.
 #
-#   gate     - clang, -std=c++23 (what the recorded baselines were measured with), instantiation
-#              counts against those baselines with TIGHT bands. Growth fails the build so borderline
-#              growth is investigated here rather than in mp-units, whose own workflow blocks only on
-#              egregious growth; an improvement opens a PR re-recording the baselines.
+#   gate     - clang at each supported -std, plus the modules build at c++26: counts against the
+#              reviewed baselines with TIGHT bands. Growth fails the build so borderline growth is
+#              investigated here rather than in mp-units, whose own workflow blocks only on egregious
+#              growth; an improvement opens a PR re-recording the baselines, and a configuration
+#              without a baseline file records its first one the same way.
 #   measure  - one runner per compiler, each producing every metric it can (counts only from clang;
 #              wall time and peak memory from any compiler), uploaded as an artifact.
 #   summary  - merges those artifacts into one markdown report in the job summary.
@@ -19,6 +20,7 @@ name: Compile cost
 run-name: >-
   ${{ github.event_name == 'workflow_dispatch'
       && format('Compile cost: {0}{1}', inputs.ref, inputs.compare_ref != '' && format(' vs {0}', inputs.compare_ref) || '')
+      || github.event_name == 'schedule' && 'Compile cost: weekly, master vs v2.5.0'
       || '' }}
 
 on:
@@ -48,7 +50,12 @@ concurrency:
 
 env:
   MP_UNITS_REF: ${{ inputs.ref || 'master' }}
-  COMPARE_REF: ${{ inputs.compare_ref || '' }}
+  # The scheduled run measures the last release beside master in every measure arm, so its page carries two
+  # anchors: what a year of work cost or bought against the version a user runs, and what moved
+  # since the previous snapshot. It doubles that run's fleet minutes, once a week, on purpose. A
+  # push or a dispatch without `compare_ref` stays single-ref. When a release ships, move the tag
+  # here and in `run-name` above, which cannot read this variable.
+  COMPARE_REF: ${{ inputs.compare_ref || (github.event_name == 'schedule' && 'v2.5.0') || '' }}
   # The default clang, and therefore the one the reviewed baselines are recorded with: the gate,
   # the re-record PR and the modules-ab pair all derive their compiler from this one value.
   # Changing it requires baselines for the new compiler to exist first - `check` refuses to
@@ -68,7 +75,11 @@ env:
 jobs:
   gate:
     # One gate per language standard the library supports: counts differ per -std, and a regression
-    # can appear in one standard alone (a c++26-only code path, a c++20 fallback).
+    # can appear in one standard alone (a c++26-only code path, a c++20 fallback). Plus one gate for
+    # the modules build: its `bmi/*` rows are the cost every importer pays, gated on their totals
+    # (see "Gate semantics" in CLAUDE.md), and nothing else in the fleet fails when they grow. A
+    # configuration whose baseline file does not exist yet records it here, with CI's own compiler
+    # rather than a laptop's, and hands it to the tightening PR instead of failing.
     strategy:
       fail-fast: false
       matrix:
@@ -76,6 +87,7 @@ jobs:
           - { std: c++20, id: cxx20 }
           - { std: c++23, id: cxx23 }
           - { std: c++26, id: cxx26 }
+          - { std: c++26, id: cxx26-modules, args: --modules --import-std }
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -90,7 +102,7 @@ jobs:
         # this job spends minutes installing a toolchain.
         run: |
           runner/bench.py --help > /dev/null
-          runner/bench.py --cxx clang++-${{ env.GATE_CLANG }} key
+          runner/bench.py --cxx clang++-${{ env.GATE_CLANG }} ${{ matrix.args }} key
       - name: Install Clang ${{ env.GATE_CLANG }}
         shell: bash
         run: |
@@ -100,13 +112,17 @@ jobs:
           sudo apt install -y libc++-${{ env.GATE_CLANG }}-dev libc++abi-${{ env.GATE_CLANG }}-dev libunwind-${{ env.GATE_CLANG }}-dev
       - name: Record what was measured
         shell: bash
+        env:
+          # Through a variable, not inline: backticks in a `${{ }}` string land in the shell unescaped
+          # and `--modules --import-std` would run as a command substitution.
+          MATRIX_ARGS: ${{ matrix.args }}
         run: |
           {
             echo "| gated against | value |"
             echo "|---|---|"
             echo "| mp-units ref | \`${MP_UNITS_REF}\` @ $(git -C mp-units describe --tags --always --dirty) |"
             echo "| library version | $(sed -nE 's/.*VERSION[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' mp-units/src/CMakeLists.txt | head -1) |"
-            echo "| compiler | $(clang++-${GATE_CLANG} --version | head -1), \`-std=${{ matrix.std }}\` |"
+            echo "| compiler | $(clang++-${GATE_CLANG} --version | head -1), \`-std=${{ matrix.std }}\`${MATRIX_ARGS:+, \`${MATRIX_ARGS}\`} |"
             echo "| bands | slack ${SLACK}%, slope ${SLOPE_SLACK}%, median ${MEDIAN_ALARM}%, tighten ${TIGHTEN_NOTICE}% |"
             echo
             # One paragraph per echo: GitHub turns a newline inside a paragraph into a line break.
@@ -125,8 +141,8 @@ jobs:
         run: |
           # Checked explicitly: `set -e` does not abort on a failing command substitution in an
           # assignment, and an empty path would be read as '.' further down.
-          if ! BASELINE_FILE="$(runner/bench.py --cxx clang++-${GATE_CLANG} --std ${{ matrix.std }} key)" || [ -z "$BASELINE_FILE" ]; then
-            echo "::error::could not resolve the baseline file for clang++-${GATE_CLANG} ${{ matrix.std }}"
+          if ! BASELINE_FILE="$(runner/bench.py --cxx clang++-${GATE_CLANG} --std ${{ matrix.std }} ${{ matrix.args }} key)" || [ -z "$BASELINE_FILE" ]; then
+            echo "::error::could not resolve the baseline file for clang++-${GATE_CLANG} ${{ matrix.std }} ${{ matrix.args }}"
             exit 1
           fi
           export BASELINE_FILE
@@ -134,9 +150,25 @@ jobs:
           import json, os, pathlib, subprocess
 
           key = os.environ["GATE_CLANG"]
-          data = json.loads(pathlib.Path(os.environ["BASELINE_FILE"]).read_text())
+          baseline = pathlib.Path(os.environ["BASELINE_FILE"])
           head = subprocess.run(["git", "-C", "mp-units", "rev-parse", "HEAD"],
                                 capture_output=True, text=True).stdout.strip()
+          if not baseline.exists():
+              # A new configuration: there is nothing to compare against, and a file recorded on a
+              # laptop would carry another compiler snapshot (declaration counts differ by several
+              # percent between snapshots). Record here, hand the file to the tightening PR, gate
+              # from the next run on.
+              print(f"no baselines at {baseline.name}: recording them from {head}")
+              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                  out.write("measure=true\nbootstrap=true\n")
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+                  summary.write(f"### instantiation counts - first recording\n\nNo baseline file exists for "
+                                f"this configuration (`{baseline.name}`). This arm records one from "
+                                f"`{head[:9]}` and hands it to the pull request that adds it, and the gate "
+                                f"for this configuration starts with the run after that file is merged. A "
+                                f"pull-request event records nothing.\n\n")
+              raise SystemExit(0)
+          data = json.loads(baseline.read_text())
           recorded = data.get("mp_units_sha")
           # Same tree AND same compiler means the comparison cannot have moved since the baselines
           # were recorded. Only worth skipping on a schedule: when a human pushed or dispatched, the
@@ -146,7 +178,7 @@ jobs:
           print(f"baselines describe {recorded or '(no sha recorded)'}, checked out {head}"
                 f" -> {'nothing to measure' if skip else 'measuring'}")
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write(f"measure={'false' if skip else 'true'}\n")
+              out.write(f"measure={'false' if skip else 'true'}\nbootstrap=false\n")
           if skip:  # never leave a job with an empty summary: say why there is no table
               with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
                   summary.write(f"### instantiation counts - not re-measured\n\nThe baselines already "
@@ -156,24 +188,33 @@ jobs:
           PY
       - name: Compare against the reviewed baselines
         id: check
-        if: steps.guard.outputs.measure == 'true'
+        if: steps.guard.outputs.measure == 'true' && steps.guard.outputs.bootstrap != 'true'
         continue-on-error: true # the reactions below run first; the job fails at the end
         run: |
-          runner/bench.py --repo mp-units --cxx clang++-${{ env.GATE_CLANG }} --std ${{ matrix.std }} check \
+          runner/bench.py --repo mp-units --cxx clang++-${{ env.GATE_CLANG }} --std ${{ matrix.std }} \
+            ${{ matrix.args }} check \
             --report results/report.json \
             --slack ${{ env.SLACK }} --slope-slack ${{ env.SLOPE_SLACK }} \
             --median-alarm ${{ env.MEDIAN_ALARM }} --tighten-notice ${{ env.TIGHTEN_NOTICE }}
       - uses: actions/upload-artifact@v7
         # The gate page points here for its per-workflow evidence: the summary carries the verdict,
         # the movers and the attribution, and this JSON carries every metric's value vs baseline.
-        if: steps.guard.outputs.measure == 'true'
+        if: steps.guard.outputs.measure == 'true' && steps.guard.outputs.bootstrap != 'true'
         with:
           name: gate-report-${{ matrix.id }}
           path: results/report.json
           retention-days: 30
+      - name: Record the first baselines of a new configuration
+        if: steps.guard.outputs.bootstrap == 'true' && github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          runner/bench.py --repo mp-units --cxx "clang++-${GATE_CLANG}" --std ${{ matrix.std }} ${{ matrix.args }} update
+          mkdir -p tighten
+          cp "$(runner/bench.py --cxx clang++-${GATE_CLANG} --std ${{ matrix.std }} ${{ matrix.args }} key)" tighten/
+          echo "First recording for \`clang++-${GATE_CLANG} -std=${{ matrix.std }} ${{ matrix.args }}\`: no baseline file existed for this configuration, so this run measured mp-units \`$(git -C mp-units rev-parse --short HEAD)\` and recorded every entry. Nothing is compared here; the gate for this configuration starts with the run after this file is merged." > "tighten/pr-body-${{ matrix.id }}.md"
       - name: Decide whether the baselines can be tightened
         id: decide
-        if: steps.guard.outputs.measure == 'true'
+        if: steps.guard.outputs.measure == 'true' && steps.guard.outputs.bootstrap != 'true'
         shell: bash
         run: |
           python3 - <<'PY'
@@ -234,12 +275,12 @@ jobs:
         if: steps.decide.outputs.tighten == 'true' && github.event_name != 'pull_request'
         shell: bash
         run: |
-          runner/bench.py --repo mp-units --cxx "clang++-${GATE_CLANG}" --std ${{ matrix.std }} update
+          runner/bench.py --repo mp-units --cxx "clang++-${GATE_CLANG}" --std ${{ matrix.std }} ${{ matrix.args }} update
           mkdir -p tighten
-          cp "$(runner/bench.py --cxx clang++-${GATE_CLANG} --std ${{ matrix.std }} key)" tighten/
+          cp "$(runner/bench.py --cxx clang++-${GATE_CLANG} --std ${{ matrix.std }} ${{ matrix.args }} key)" tighten/
           mv pr-body.md "tighten/pr-body-${{ matrix.id }}.md"
       - uses: actions/upload-artifact@v4
-        if: steps.decide.outputs.tighten == 'true' && github.event_name != 'pull_request'
+        if: (steps.decide.outputs.tighten == 'true' || steps.guard.outputs.bootstrap == 'true') && github.event_name != 'pull_request'
         with:
           name: tighten-${{ matrix.id }}
           path: tighten/
@@ -350,8 +391,9 @@ jobs:
           repository: mpusz/mp-units
           ref: ${{ env.MP_UNITS_REF }}
           path: mp-units
-          # Full history only when a second ref is requested, since each ref becomes a worktree.
-          fetch-depth: ${{ inputs.compare_ref != '' && '0' || '1' }}
+          # Full history (and the tags) only when a second ref is measured, since each ref becomes a
+          # worktree - a dispatch with `compare_ref`, or the scheduled run against the release.
+          fetch-depth: ${{ env.COMPARE_REF != '' && '0' || '1' }}
       - name: Smoke-test the runner
         run: runner/bench.py --help > /dev/null
       - name: Install ${{ matrix.cxx }}

@@ -48,6 +48,9 @@ runner/bench.py $R attribute v2.5.0 master --workflows isq/kind_safe_interfaces 
 runner/bench.py $R attribute --workflows scaling/broad_016 scaling/broad_256      # slope, by entity
 runner/bench.py $R attribute --workflows parity/unit_conversions --why 'quantity_spec_concepts.h:64:24'
                                                             # which instantiations trigger the evaluations at a line
+runner/bench.py $R probe 'a + b' '2.0 * a' 'p - b' --ref master  # one expression, candidate by candidate:
+                                                            # the events under its parse with their self time
+runner/bench.py $R probe 'a + a' --tree --depth 3 --min-us 500   # the nesting itself
 runner/bench.py $R check --workflows parity/unit_conversions   # a PARTIAL gate: one row, for local investigation
 runner/bench.py --std c++26 --cxx g++-16 $R report          # any compiler/standard
 runner/bench.py $R --std c++26 --import-std counts          # `import std;` instead of std headers
@@ -108,8 +111,13 @@ Under `What changed` comes ONE per-configuration summary table, and which one de
 measured, never on what was passed: a run measuring two refs gets the RANGE (`v2.5.0 -> master` inside
 each arm, both sides from one interleaved session, so even wall time is a real A/B), and a run
 measuring one ref gets the previous CI run as a control (`--previous`, matched by configuration key).
-A range run must never be summarized against the previous run - that compares master with master,
-prints "nothing moved", and contradicts every cell of the report below it. Corpus totals in either
+A range run is never summarized against the previous run INSTEAD of its range - that compares master
+with master, prints "nothing moved", and contradicts every cell of the report below it - but it may
+be summarized against it AS WELL: with `--previous` present, the range table comes first and `## Since
+the previous run` follows it, so the page carries two anchors, the release the run measured against
+and the previous snapshot. The scheduled run measures `v2.5.0` beside master for that page, and a
+reader coming from a release note gets "what changed since the version I run" above "what changed
+since last week". A weekly delta alone can hide a slow drift. Corpus totals in either
 table are summed over the entries BOTH sides measured; summing each side's own set turned a -19.0%
 range into -6.7% by counting workflows that do not exist on the older ref. Module-interface totals are
 deliberately NOT intersected: a module unit the newer ref has is a real cost of building it. Its
@@ -161,9 +169,10 @@ one workflow ("what did this library change cost"), or two workflows of one ref 
 bigger one instantiate", which is how a scaling slope gets attributed). Pairs are ordered by library
 version, so a delta always reads old -> new. This is the tool that turned "slope +9.8%" into
 `type_list_merge_many_sorted_impl +5.5 per step`; reach for it before guessing at source. It prints
-THREE tables: instantiations by entity, then constant evaluations and constraint checks by SOURCE
+FOUR tables: instantiations by entity, then constant evaluations and constraint checks by SOURCE
 LOCATION (those two events carry no entity, only where the expression or the constraint sits; the
-checkout's path is stripped so one line of one header is one row on both sides). For a workflow with
+checkout's path is stripped so one line of one header is one row on both sides), then the constraint
+checks' exclusive time by the same locations. For a workflow with
 an include twin every table is on the USE BASIS - each side minus its own twin, key by key, which is
 how the gate prices it - and the caption says so. The basis is not a detail: across the 2.6 batch the
 whole TU of parity/unit_conversions LOST 6,524 constant evaluations while its use cost gained 406
@@ -174,6 +183,27 @@ innermost Instantiate*/Parse* event still open when it fired (events sorted by `
 stack of open contexts popped as they end). That is what named §32's three costs from locations in
 libc++ that said nothing by themselves. `--full-args` keeps template arguments in the entity table and
 the `--why` rows, for the one question collapsing hides: which specialization.
+
+`probe` answers HOW MANY CANDIDATES of an operator's overload set a call pays for and what each costs,
+which neither of those can; the trace never names a candidate, so which overload a row is gets read
+off the events nested under it (`--tree`) and the overload set. A workflow's trace charges constraint checking to call sites (findings §34: 27% of
+`glide_computer`'s attributed self time, at `a + b` and `q * unit`) and never says which overload was
+being checked. The probe compiles each expression shape as one function in a tiny TU over a fixed
+fixture (`a`/`b` two units of one dimension, `i` an integral representation, `l` a typed quantity, `p`
+a point), twice, cold and then the identical expression warm, and reads the events nested under each
+parse with their EXCLUSIVE time (`walk_trace`, duration minus the children's, by timestamp nesting).
+Among the top-level events under the cold parse, the costly ones are one candidate's constraint check
+or the selected body each. Reading its output takes three facts from §35. The second identical expression is free, so a
+real TU is a stream of first occurrences. The gated constraint-check COUNT includes cache hits at 0 us,
+so a rejected candidate with 500 checks and 3 ms and one with 500 checks and 0 ms are the same number
+to the gate, which is why `counts`, `check` and `attribute` print the checks' self time beside the
+count. That time is not gated and not recorded in the baselines (`update` strips
+`constraint_self_ms`), and `check` shows the current run's alone because a wall clock recorded on
+another machine cannot be compared with this one's. And a rejected atom does not stop substitution.
+That is a mechanism the probe shows, and whether a change built on it stays is decided by the gate on
+the corpus: the `Value` overload rewrite won on three workflows and turned the gate red on
+`scaling/broad_*`, `define_constants_*` and others, for two reasons, one of them the accepted path
+(§35).
 
 FIVE metrics are gated, all bit-deterministic and all from ONE traced compile: template
 instantiations (frontend work), constant evaluations (`EvaluateAsConstantExpr` - what a constexpr
@@ -363,7 +393,8 @@ extra flags attached (`--extra-flags=-DFOO=1`): argparse reads a detached `-D...
   base-vs-variant per detected library version and yields `None` (reported `n/a`) below a
   workflow's floor - that is why comparing refs never means comparing different sources.
 - `runner/bench.py` - subcommands: time (interleaved A/B across git refs; WORKTREE = the
-  checkout as-is), counts, check (two-sided gate), update (re-record baselines).
+  checkout as-is), counts, check (two-sided gate), update (re-record baselines), attribute (why a
+  number moved), probe (what one expression costs, by candidate).
 - `baselines/instantiations-<key>.json` - reviewed baseline file, keyed by pinned compiler.
 
 ## Gate semantics (bench.py check)
@@ -413,6 +444,15 @@ the gate table names which one it used in its `basis` column:
   run; every census move is itemized under `### census changes` with what it was priced at.
 - `total` (control/ by design; any entry whose baseline predates twins and censuses): the raw
   number, the pre-redesign behavior.
+- `bmi/*` (the module interface builds, gated by the `cxx26-modules` arm) is the one deliberate
+  exception to "never bigger": it gates on its TOTAL. Every importer pays the whole BMI, so when it
+  grows every importer pays more, and nothing in a modules configuration can price its census - the consumer
+  umbrellas there instantiate next to nothing, so no rate can be derived. The library gaining a
+  chapter therefore goes red on `bmi/mp_units.systems` and is re-recorded, where a header umbrella
+  absorbs it as residual. The census IS recorded for those rows (`trace_counts` counts it off the
+  BMI's own trace), so a residual pricing is possible once a rate source exists; until then
+  `### census changes` lists residual rows only and a BMI's growth arrives as a plain total. They are
+  out of the median alarm like umbrellas.
 - Per-workflow growth on the gated basis > `--slack` (AND past the metric's absolute floor) -> error
   naming the count, the spread across metrics and the worst case. ONE annotation, not one per workflow: a
   uniform change used to
@@ -471,7 +511,12 @@ the gate table names which one it used in its `basis` column:
 
 - `.github/workflows/ci-compile-cost.yml` - three job kinds. `gate`: the DEFAULT clang, named once
   in `GATE_CLANG` (23 since mp-units added it; 22 is skipped, see `measure` below) at
-  `-std=c++20/23/26`, one arm per standard matching the three reviewed baseline files. That one
+  `-std=c++20/23/26`, one arm per standard matching the three reviewed baseline files, plus a
+  `cxx26-modules` arm (`--modules --import-std`) whose baseline file gates the `bmi/*` rows. An arm
+  whose baseline file does not exist records it (`update`) and hands it to the `tighten` job, which
+  opens the PR adding it. Gating starts with the run after the merge. A new configuration's file is
+  created only this way because a file recorded on a laptop carries another clang snapshot, and
+  declaration counts differ by several percent between snapshots. That one
   value also drives the re-record PR and `modules-ab`, so the default compiler moves in one place -
   but baselines for the new compiler must exist BEFORE it moves, because `check` refuses to compare
   across configurations, and mp-units' own `ci-compile-time.yml` pins the same version in
@@ -501,7 +546,10 @@ the gate table names which one it used in its `basis` column:
   `compile-cost-report` artifact - a job summary cannot be downloaded, diffed against last week's,
   or pasted into a talk, and a 1,400-line table cannot be read on a page. The markdown files are
   named after the refs they measured.
-- Dispatch inputs: `ref` and optional `compare_ref` (measured by every arm alongside the first).
+- Dispatch inputs: `ref` and optional `compare_ref` (measured by every measure arm alongside the
+  first; the gate arms and `modules-ab` stay single-ref). The
+  scheduled run sets `COMPARE_REF` to the last release (`v2.5.0`, moved by hand when one ships), so
+  the weekly page has both anchors. It doubles that run's fleet minutes, once a week, on purpose.
 - Bands are CLI flags (`--slack`, `--median-alarm`, `--tighten-notice`, `--advisory-slack`, all
   percents), NOT constants: the same baseline file is read strictly here and loosely there.
 
