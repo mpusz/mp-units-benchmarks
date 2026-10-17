@@ -1,7 +1,7 @@
 {
   "mp_units_version": "2.6",
-  "mp_units_sha": "fe6fc4aef1f83ec0ad828730c382f4342e69d155",
-  "mp_units_describe": "fe6fc4a",
+  "mp_units_sha": "9ffaf3e1fa4b6185903f06646f8012e91993344e",
+  "mp_units_describe": "9ffaf3e",
   "cxx": "clang++-23",
   "cxx_version": "Ubuntu clang version 23.1.4 (++20261014053933+0cd28174a1f6-1~exp1~20261014053943.82)",
   "std": "c++26",
@@ -12,19 +12,19 @@
     "instantiations": {
       "named_constant": 87.73,
       "prefixed_unit": 2.04,
-      "named_unit": 48.31,
+      "named_unit": 48.36,
       "quantity_spec": 67.12
     },
     "constant evaluations": {
       "named_constant": 234.86,
       "prefixed_unit": 7.98,
-      "named_unit": 143.42,
+      "named_unit": 143.22,
       "quantity_spec": 149.18
     },
     "constraint checks": {
       "named_constant": 857.63,
       "prefixed_unit": 18.81,
-      "named_unit": 732.41,
+      "named_unit": 733.34,
       "quantity_spec": 954.81
     },
     "function declarations": {
@@ -40,10 +40,10 @@
   },
   "results": {
     "affine/custom_origins": {
-      "InstantiateClass": 5691,
-      "InstantiateFunction": 3673,
-      "EvaluateAsConstantExpr": 27864,
-      "CheckConstraintSatisfaction": 151899,
+      "InstantiateClass": 5686,
+      "InstantiateFunction": 3676,
+      "EvaluateAsConstantExpr": 27819,
+      "CheckConstraintSatisfaction": 151911,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -54,15 +54,15 @@
       "object_bytes": 1296,
       "code_bytes": 84,
       "symbol_bytes": 1212,
-      "decls_total": 200032,
-      "function_decls": 8643,
+      "decls_total": 200177,
+      "function_decls": 8653,
       "twin": "include/cstdio+si+space_and_time"
     },
     "affine/temperature_points": {
-      "InstantiateClass": 6065,
-      "InstantiateFunction": 5221,
-      "EvaluateAsConstantExpr": 37332,
-      "CheckConstraintSatisfaction": 181144,
+      "InstantiateClass": 6044,
+      "InstantiateFunction": 5224,
+      "EvaluateAsConstantExpr": 37141,
+      "CheckConstraintSatisfaction": 180845,
       "census": {
         "quantity_spec": 30,
         "named_unit": 109,
@@ -73,15 +73,15 @@
       "object_bytes": 1672,
       "code_bytes": 150,
       "symbol_bytes": 1522,
-      "decls_total": 233847,
-      "function_decls": 10178,
+      "decls_total": 233756,
+      "function_decls": 10188,
       "twin": "include/cstdio+si+usc"
     },
     "constants/codata_expressions": {
-      "InstantiateClass": 10371,
-      "InstantiateFunction": 9108,
-      "EvaluateAsConstantExpr": 56816,
-      "CheckConstraintSatisfaction": 304371,
+      "InstantiateClass": 10332,
+      "InstantiateFunction": 9107,
+      "EvaluateAsConstantExpr": 56368,
+      "CheckConstraintSatisfaction": 303557,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -92,15 +92,15 @@
       "object_bytes": 2016,
       "code_bytes": 268,
       "symbol_bytes": 1748,
-      "decls_total": 334899,
-      "function_decls": 14035,
+      "decls_total": 334408,
+      "function_decls": 14041,
       "twin": "include/codata2022_essential+cstdio+numbers+si"
     },
     "control/core_only": {
-      "InstantiateClass": 1298,
-      "InstantiateFunction": 994,
-      "EvaluateAsConstantExpr": 6263,
-      "CheckConstraintSatisfaction": 52878,
+      "InstantiateClass": 1299,
+      "InstantiateFunction": 992,
+      "EvaluateAsConstantExpr": 6259,
+      "CheckConstraintSatisfaction": 52917,
       "census": {
         "quantity_spec": 1,
         "named_unit": 3,
@@ -109,14 +109,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 107395,
-      "function_decls": 5951
+      "decls_total": 107510,
+      "function_decls": 5956
     },
     "generic/custom_representation": {
-      "InstantiateClass": 7976,
-      "InstantiateFunction": 5249,
-      "EvaluateAsConstantExpr": 36635,
-      "CheckConstraintSatisfaction": 200596,
+      "InstantiateClass": 7965,
+      "InstantiateFunction": 5248,
+      "EvaluateAsConstantExpr": 36540,
+      "CheckConstraintSatisfaction": 200465,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -127,15 +127,15 @@
       "object_bytes": 1672,
       "code_bytes": 145,
       "symbol_bytes": 1527,
-      "decls_total": 237383,
-      "function_decls": 10266,
+      "decls_total": 237359,
+      "function_decls": 10272,
       "twin": "include/cstdio+mechanics+si+space_and_time"
     },
     "generic/dimensionless_and_angles": {
-      "InstantiateClass": 6041,
-      "InstantiateFunction": 4200,
-      "EvaluateAsConstantExpr": 30957,
-      "CheckConstraintSatisfaction": 161771,
+      "InstantiateClass": 6022,
+      "InstantiateFunction": 4199,
+      "EvaluateAsConstantExpr": 30795,
+      "CheckConstraintSatisfaction": 161486,
       "census": {
         "quantity_spec": 61,
         "named_unit": 49,
@@ -146,15 +146,15 @@
       "object_bytes": 1976,
       "code_bytes": 220,
       "symbol_bytes": 1756,
-      "decls_total": 212328,
-      "function_decls": 9301,
+      "decls_total": 212193,
+      "function_decls": 9307,
       "twin": "include/angular+cstdio+math+si+space_and_time"
     },
     "generic/generic_interfaces": {
-      "InstantiateClass": 7159,
-      "InstantiateFunction": 4760,
-      "EvaluateAsConstantExpr": 35219,
-      "CheckConstraintSatisfaction": 188669,
+      "InstantiateClass": 7148,
+      "InstantiateFunction": 4759,
+      "EvaluateAsConstantExpr": 35067,
+      "CheckConstraintSatisfaction": 188460,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -165,15 +165,15 @@
       "object_bytes": 1592,
       "code_bytes": 125,
       "symbol_bytes": 1467,
-      "decls_total": 227855,
-      "function_decls": 9826,
+      "decls_total": 227772,
+      "function_decls": 9832,
       "twin": "include/cstdio+si+space_and_time-55c1"
     },
     "include/adopted_values+cassert+chrono+format+iostream+isq+math+numbers+si+string": {
-      "InstantiateClass": 14907,
-      "InstantiateFunction": 9482,
-      "EvaluateAsConstantExpr": 60361,
-      "CheckConstraintSatisfaction": 360979,
+      "InstantiateClass": 14908,
+      "InstantiateFunction": 9481,
+      "EvaluateAsConstantExpr": 60349,
+      "CheckConstraintSatisfaction": 361020,
       "census": {
         "quantity_spec": 285,
         "named_unit": 44,
@@ -184,14 +184,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 349176,
-      "function_decls": 14427
+      "decls_total": 349297,
+      "function_decls": 14433
     },
     "include/adopted_values+cstdio+mechanics+si": {
-      "InstantiateClass": 7514,
-      "InstantiateFunction": 4881,
-      "EvaluateAsConstantExpr": 32788,
-      "CheckConstraintSatisfaction": 182696,
+      "InstantiateClass": 7515,
+      "InstantiateFunction": 4880,
+      "EvaluateAsConstantExpr": 32776,
+      "CheckConstraintSatisfaction": 182737,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -202,14 +202,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 224998,
-      "function_decls": 9778
+      "decls_total": 225119,
+      "function_decls": 9784
     },
     "include/adopted_values+cstdio+si": {
-      "InstantiateClass": 5082,
-      "InstantiateFunction": 3175,
-      "EvaluateAsConstantExpr": 23978,
-      "CheckConstraintSatisfaction": 128103,
+      "InstantiateClass": 5083,
+      "InstantiateFunction": 3174,
+      "EvaluateAsConstantExpr": 23966,
+      "CheckConstraintSatisfaction": 128144,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -220,14 +220,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 183099,
-      "function_decls": 8089
+      "decls_total": 183220,
+      "function_decls": 8095
     },
     "include/algorithm+array+chrono+compare+concepts+cstddef+exception+format+framework+functional+hacks+initializer_list+iostream+iterator+limits+math+numbers+numeric+ostream+ranges+si+space_and_time+string+string_view+utility+vector+yard_pound": {
-      "InstantiateClass": 6045,
-      "InstantiateFunction": 4077,
-      "EvaluateAsConstantExpr": 29006,
-      "CheckConstraintSatisfaction": 160841,
+      "InstantiateClass": 6046,
+      "InstantiateFunction": 4076,
+      "EvaluateAsConstantExpr": 28994,
+      "CheckConstraintSatisfaction": 160882,
       "census": {
         "quantity_spec": 59,
         "named_unit": 64,
@@ -238,14 +238,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 216239,
-      "function_decls": 9330
+      "decls_total": 216360,
+      "function_decls": 9336
     },
     "include/angular+cstdio+math+si+space_and_time": {
-      "InstantiateClass": 5641,
-      "InstantiateFunction": 3546,
-      "EvaluateAsConstantExpr": 25856,
-      "CheckConstraintSatisfaction": 139369,
+      "InstantiateClass": 5642,
+      "InstantiateFunction": 3545,
+      "EvaluateAsConstantExpr": 25844,
+      "CheckConstraintSatisfaction": 139410,
       "census": {
         "quantity_spec": 61,
         "named_unit": 49,
@@ -256,14 +256,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 193279,
-      "function_decls": 8512
+      "decls_total": 193400,
+      "function_decls": 8518
     },
     "include/cartesian_vector+cstdio+mechanics+si+space_and_time": {
-      "InstantiateClass": 7456,
-      "InstantiateFunction": 4749,
-      "EvaluateAsConstantExpr": 32339,
-      "CheckConstraintSatisfaction": 181450,
+      "InstantiateClass": 7457,
+      "InstantiateFunction": 4748,
+      "EvaluateAsConstantExpr": 32327,
+      "CheckConstraintSatisfaction": 181491,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -274,14 +274,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 222975,
-      "function_decls": 9695
+      "decls_total": 223096,
+      "function_decls": 9701
     },
     "include/codata2022_essential+cstdio+numbers+si": {
-      "InstantiateClass": 7143,
-      "InstantiateFunction": 5778,
-      "EvaluateAsConstantExpr": 34729,
-      "CheckConstraintSatisfaction": 183558,
+      "InstantiateClass": 7144,
+      "InstantiateFunction": 5777,
+      "EvaluateAsConstantExpr": 34717,
+      "CheckConstraintSatisfaction": 183599,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -292,14 +292,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 238090,
-      "function_decls": 10603
+      "decls_total": 238211,
+      "function_decls": 10609
     },
     "include/complex+cstdio+electromagnetism+si": {
-      "InstantiateClass": 9346,
-      "InstantiateFunction": 5848,
-      "EvaluateAsConstantExpr": 38907,
-      "CheckConstraintSatisfaction": 224165,
+      "InstantiateClass": 9347,
+      "InstantiateFunction": 5847,
+      "EvaluateAsConstantExpr": 38895,
+      "CheckConstraintSatisfaction": 224206,
       "census": {
         "quantity_spec": 132,
         "named_unit": 44,
@@ -310,14 +310,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 249824,
-      "function_decls": 10772
+      "decls_total": 249945,
+      "function_decls": 10778
     },
     "include/cstdint+cstdio+si+usc": {
-      "InstantiateClass": 5708,
+      "InstantiateClass": 5709,
       "InstantiateFunction": 4135,
-      "EvaluateAsConstantExpr": 28714,
-      "CheckConstraintSatisfaction": 145291,
+      "EvaluateAsConstantExpr": 28692,
+      "CheckConstraintSatisfaction": 145330,
       "census": {
         "quantity_spec": 30,
         "named_unit": 109,
@@ -328,8 +328,8 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 204750,
-      "function_decls": 9065
+      "decls_total": 204886,
+      "function_decls": 9072
     },
     "include/cstdio": {
       "InstantiateClass": 0,
@@ -344,10 +344,10 @@
       "function_decls": 122
     },
     "include/cstdio+electromagnetism+math+si+space_and_time": {
-      "InstantiateClass": 9338,
-      "InstantiateFunction": 5848,
-      "EvaluateAsConstantExpr": 38739,
-      "CheckConstraintSatisfaction": 224010,
+      "InstantiateClass": 9339,
+      "InstantiateFunction": 5847,
+      "EvaluateAsConstantExpr": 38727,
+      "CheckConstraintSatisfaction": 224051,
       "census": {
         "quantity_spec": 132,
         "named_unit": 44,
@@ -358,14 +358,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 250413,
-      "function_decls": 10798
+      "decls_total": 250534,
+      "function_decls": 10804
     },
     "include/cstdio+format+output_workload": {
-      "InstantiateClass": 5764,
-      "InstantiateFunction": 3704,
-      "EvaluateAsConstantExpr": 28384,
-      "CheckConstraintSatisfaction": 156353,
+      "InstantiateClass": 5753,
+      "InstantiateFunction": 3703,
+      "EvaluateAsConstantExpr": 28252,
+      "CheckConstraintSatisfaction": 156158,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -376,14 +376,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 202693,
-      "function_decls": 8686
+      "decls_total": 202637,
+      "function_decls": 8692
     },
     "include/cstdio+math+mechanics+si+space_and_time": {
-      "InstantiateClass": 7450,
-      "InstantiateFunction": 4749,
-      "EvaluateAsConstantExpr": 32248,
-      "CheckConstraintSatisfaction": 181200,
+      "InstantiateClass": 7451,
+      "InstantiateFunction": 4748,
+      "EvaluateAsConstantExpr": 32236,
+      "CheckConstraintSatisfaction": 181241,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -394,14 +394,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 223059,
-      "function_decls": 9687
+      "decls_total": 223180,
+      "function_decls": 9693
     },
     "include/cstdio+mechanics+si+space_and_time": {
-      "InstantiateClass": 7452,
-      "InstantiateFunction": 4749,
-      "EvaluateAsConstantExpr": 32300,
-      "CheckConstraintSatisfaction": 181189,
+      "InstantiateClass": 7453,
+      "InstantiateFunction": 4748,
+      "EvaluateAsConstantExpr": 32288,
+      "CheckConstraintSatisfaction": 181230,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -412,14 +412,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 222438,
-      "function_decls": 9660
+      "decls_total": 222559,
+      "function_decls": 9666
     },
     "include/cstdio+mechanics+si+space_and_time-326f": {
-      "InstantiateClass": 7452,
-      "InstantiateFunction": 4749,
-      "EvaluateAsConstantExpr": 32300,
-      "CheckConstraintSatisfaction": 181189,
+      "InstantiateClass": 7453,
+      "InstantiateFunction": 4748,
+      "EvaluateAsConstantExpr": 32288,
+      "CheckConstraintSatisfaction": 181230,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -430,14 +430,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 222438,
-      "function_decls": 9660
+      "decls_total": 222559,
+      "function_decls": 9666
     },
     "include/cstdio+mechanics+si+space_and_time-bd8c": {
-      "InstantiateClass": 7452,
-      "InstantiateFunction": 4749,
-      "EvaluateAsConstantExpr": 32300,
-      "CheckConstraintSatisfaction": 181189,
+      "InstantiateClass": 7453,
+      "InstantiateFunction": 4748,
+      "EvaluateAsConstantExpr": 32288,
+      "CheckConstraintSatisfaction": 181230,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -448,14 +448,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 222438,
-      "function_decls": 9660
+      "decls_total": 222559,
+      "function_decls": 9666
     },
     "include/cstdio+output_workload": {
-      "InstantiateClass": 5764,
-      "InstantiateFunction": 3704,
-      "EvaluateAsConstantExpr": 28384,
-      "CheckConstraintSatisfaction": 156363,
+      "InstantiateClass": 5753,
+      "InstantiateFunction": 3703,
+      "EvaluateAsConstantExpr": 28252,
+      "CheckConstraintSatisfaction": 156168,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -466,14 +466,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 202693,
-      "function_decls": 8686
+      "decls_total": 202637,
+      "function_decls": 8692
     },
     "include/cstdio+scaling_workload+utility": {
-      "InstantiateClass": 8684,
-      "InstantiateFunction": 5811,
-      "EvaluateAsConstantExpr": 39813,
-      "CheckConstraintSatisfaction": 219374,
+      "InstantiateClass": 8671,
+      "InstantiateFunction": 5810,
+      "EvaluateAsConstantExpr": 39689,
+      "CheckConstraintSatisfaction": 219201,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -484,14 +484,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 251702,
-      "function_decls": 10853
+      "decls_total": 251644,
+      "function_decls": 10859
     },
     "include/cstdio+si": {
-      "InstantiateClass": 5020,
-      "InstantiateFunction": 3043,
-      "EvaluateAsConstantExpr": 23490,
-      "CheckConstraintSatisfaction": 126596,
+      "InstantiateClass": 5021,
+      "InstantiateFunction": 3042,
+      "EvaluateAsConstantExpr": 23478,
+      "CheckConstraintSatisfaction": 126637,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -502,14 +502,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 180539,
-      "function_decls": 7971
+      "decls_total": 180660,
+      "function_decls": 7977
     },
     "include/cstdio+si+space_and_time": {
-      "InstantiateClass": 5556,
-      "InstantiateFunction": 3457,
-      "EvaluateAsConstantExpr": 25478,
-      "CheckConstraintSatisfaction": 137463,
+      "InstantiateClass": 5557,
+      "InstantiateFunction": 3456,
+      "EvaluateAsConstantExpr": 25466,
+      "CheckConstraintSatisfaction": 137504,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -520,14 +520,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 190467,
-      "function_decls": 8390
+      "decls_total": 190588,
+      "function_decls": 8396
     },
     "include/cstdio+si+space_and_time-55c1": {
-      "InstantiateClass": 5556,
-      "InstantiateFunction": 3457,
-      "EvaluateAsConstantExpr": 25478,
-      "CheckConstraintSatisfaction": 137463,
+      "InstantiateClass": 5557,
+      "InstantiateFunction": 3456,
+      "EvaluateAsConstantExpr": 25466,
+      "CheckConstraintSatisfaction": 137504,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -538,14 +538,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 190467,
-      "function_decls": 8390
+      "decls_total": 190588,
+      "function_decls": 8396
     },
     "include/cstdio+si+usc": {
-      "InstantiateClass": 5708,
+      "InstantiateClass": 5709,
       "InstantiateFunction": 4135,
-      "EvaluateAsConstantExpr": 28714,
-      "CheckConstraintSatisfaction": 145291,
+      "EvaluateAsConstantExpr": 28692,
+      "CheckConstraintSatisfaction": 145330,
       "census": {
         "quantity_spec": 30,
         "named_unit": 109,
@@ -556,14 +556,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 204750,
-      "function_decls": 9065
+      "decls_total": 204886,
+      "function_decls": 9072
     },
     "include/cstdio+si+usc-e6c4": {
-      "InstantiateClass": 5708,
+      "InstantiateClass": 5709,
       "InstantiateFunction": 4135,
-      "EvaluateAsConstantExpr": 28714,
-      "CheckConstraintSatisfaction": 145291,
+      "EvaluateAsConstantExpr": 28692,
+      "CheckConstraintSatisfaction": 145330,
       "census": {
         "quantity_spec": 30,
         "named_unit": 109,
@@ -574,14 +574,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 204750,
-      "function_decls": 9065
+      "decls_total": 204886,
+      "function_decls": 9072
     },
     "include/cstdio+spec_workload": {
       "InstantiateClass": 1308,
-      "InstantiateFunction": 998,
-      "EvaluateAsConstantExpr": 6402,
-      "CheckConstraintSatisfaction": 51925,
+      "InstantiateFunction": 996,
+      "EvaluateAsConstantExpr": 6398,
+      "CheckConstraintSatisfaction": 51928,
       "census": {
         "quantity_spec": 8,
         "named_unit": 3,
@@ -590,14 +590,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 104948,
-      "function_decls": 5880
+      "decls_total": 104947,
+      "function_decls": 5879
     },
     "include/cstdio+typed_workload": {
-      "InstantiateClass": 6072,
-      "InstantiateFunction": 3851,
-      "EvaluateAsConstantExpr": 27830,
-      "CheckConstraintSatisfaction": 147240,
+      "InstantiateClass": 6073,
+      "InstantiateFunction": 3850,
+      "EvaluateAsConstantExpr": 27818,
+      "CheckConstraintSatisfaction": 147281,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -608,14 +608,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 199974,
-      "function_decls": 8891
+      "decls_total": 200095,
+      "function_decls": 8897
     },
     "include/define_workload": {
-      "InstantiateClass": 5556,
-      "InstantiateFunction": 3457,
-      "EvaluateAsConstantExpr": 25478,
-      "CheckConstraintSatisfaction": 137463,
+      "InstantiateClass": 5557,
+      "InstantiateFunction": 3456,
+      "EvaluateAsConstantExpr": 25466,
+      "CheckConstraintSatisfaction": 137504,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -626,14 +626,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 190470,
-      "function_decls": 8391
+      "decls_total": 190591,
+      "function_decls": 8397
     },
     "include/format+output_workload+print": {
-      "InstantiateClass": 5819,
-      "InstantiateFunction": 3738,
-      "EvaluateAsConstantExpr": 28965,
-      "CheckConstraintSatisfaction": 158933,
+      "InstantiateClass": 5808,
+      "InstantiateFunction": 3737,
+      "EvaluateAsConstantExpr": 28833,
+      "CheckConstraintSatisfaction": 158738,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -644,14 +644,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 204267,
-      "function_decls": 8770
+      "decls_total": 204211,
+      "function_decls": 8776
     },
     "include/iostream+ostream+output_workload": {
-      "InstantiateClass": 5881,
-      "InstantiateFunction": 3809,
-      "EvaluateAsConstantExpr": 29712,
-      "CheckConstraintSatisfaction": 166308,
+      "InstantiateClass": 5870,
+      "InstantiateFunction": 3808,
+      "EvaluateAsConstantExpr": 29580,
+      "CheckConstraintSatisfaction": 166113,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -662,14 +662,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 206534,
-      "function_decls": 8842
+      "decls_total": 206478,
+      "function_decls": 8848
     },
     "include/output_workload+print": {
-      "InstantiateClass": 5819,
-      "InstantiateFunction": 3738,
-      "EvaluateAsConstantExpr": 28965,
-      "CheckConstraintSatisfaction": 158933,
+      "InstantiateClass": 5808,
+      "InstantiateFunction": 3737,
+      "EvaluateAsConstantExpr": 28833,
+      "CheckConstraintSatisfaction": 158738,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -680,14 +680,14 @@
       "object_bytes": 1000,
       "code_bytes": 51,
       "symbol_bytes": 949,
-      "decls_total": 204267,
-      "function_decls": 8770
+      "decls_total": 204211,
+      "function_decls": 8776
     },
     "isq/complex_quantities": {
-      "InstantiateClass": 10252,
-      "InstantiateFunction": 6456,
-      "EvaluateAsConstantExpr": 44271,
-      "CheckConstraintSatisfaction": 256360,
+      "InstantiateClass": 10247,
+      "InstantiateFunction": 6455,
+      "EvaluateAsConstantExpr": 44207,
+      "CheckConstraintSatisfaction": 256304,
       "census": {
         "quantity_spec": 133,
         "named_unit": 44,
@@ -698,15 +698,15 @@
       "object_bytes": 2120,
       "code_bytes": 361,
       "symbol_bytes": 1759,
-      "decls_total": 269910,
-      "function_decls": 11471,
+      "decls_total": 269936,
+      "function_decls": 11477,
       "twin": "include/complex+cstdio+electromagnetism+si"
     },
     "isq/custom_hierarchy": {
-      "InstantiateClass": 8371,
-      "InstantiateFunction": 5621,
-      "EvaluateAsConstantExpr": 38301,
-      "CheckConstraintSatisfaction": 209258,
+      "InstantiateClass": 8354,
+      "InstantiateFunction": 5620,
+      "EvaluateAsConstantExpr": 38163,
+      "CheckConstraintSatisfaction": 209032,
       "census": {
         "quantity_spec": 110,
         "named_unit": 44,
@@ -717,15 +717,15 @@
       "object_bytes": 1512,
       "code_bytes": 106,
       "symbol_bytes": 1406,
-      "decls_total": 246392,
-      "function_decls": 10645,
+      "decls_total": 246308,
+      "function_decls": 10651,
       "twin": "include/cstdio+mechanics+si+space_and_time-326f"
     },
     "isq/derived_spec_conversions": {
-      "InstantiateClass": 9379,
-      "InstantiateFunction": 6738,
-      "EvaluateAsConstantExpr": 44395,
-      "CheckConstraintSatisfaction": 240864,
+      "InstantiateClass": 9342,
+      "InstantiateFunction": 6737,
+      "EvaluateAsConstantExpr": 44136,
+      "CheckConstraintSatisfaction": 240384,
       "census": {
         "quantity_spec": 107,
         "named_unit": 44,
@@ -736,15 +736,15 @@
       "object_bytes": 1832,
       "code_bytes": 188,
       "symbol_bytes": 1644,
-      "decls_total": 273498,
-      "function_decls": 11872,
+      "decls_total": 273202,
+      "function_decls": 11878,
       "twin": "include/cstdio+mechanics+si+space_and_time-326f"
     },
     "isq/fractional_exponents": {
-      "InstantiateClass": 10165,
-      "InstantiateFunction": 6569,
-      "EvaluateAsConstantExpr": 43305,
-      "CheckConstraintSatisfaction": 253509,
+      "InstantiateClass": 10152,
+      "InstantiateFunction": 6568,
+      "EvaluateAsConstantExpr": 43212,
+      "CheckConstraintSatisfaction": 253358,
       "census": {
         "quantity_spec": 132,
         "named_unit": 44,
@@ -755,15 +755,15 @@
       "object_bytes": 1664,
       "code_bytes": 139,
       "symbol_bytes": 1525,
-      "decls_total": 272268,
-      "function_decls": 11520,
+      "decls_total": 272242,
+      "function_decls": 11526,
       "twin": "include/cstdio+electromagnetism+math+si+space_and_time"
     },
     "isq/hierarchy_conversions": {
-      "InstantiateClass": 8188,
-      "InstantiateFunction": 5603,
-      "EvaluateAsConstantExpr": 38784,
-      "CheckConstraintSatisfaction": 208975,
+      "InstantiateClass": 8167,
+      "InstantiateFunction": 5602,
+      "EvaluateAsConstantExpr": 38627,
+      "CheckConstraintSatisfaction": 208709,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -774,15 +774,15 @@
       "object_bytes": 1600,
       "code_bytes": 133,
       "symbol_bytes": 1467,
-      "decls_total": 247461,
-      "function_decls": 10677,
+      "decls_total": 247331,
+      "function_decls": 10683,
       "twin": "include/cstdio+mechanics+si+space_and_time-326f"
     },
     "isq/kind_conversions": {
-      "InstantiateClass": 7970,
-      "InstantiateFunction": 5338,
-      "EvaluateAsConstantExpr": 37092,
-      "CheckConstraintSatisfaction": 200150,
+      "InstantiateClass": 7953,
+      "InstantiateFunction": 5337,
+      "EvaluateAsConstantExpr": 36947,
+      "CheckConstraintSatisfaction": 199905,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -793,15 +793,15 @@
       "object_bytes": 1824,
       "code_bytes": 182,
       "symbol_bytes": 1642,
-      "decls_total": 240499,
-      "function_decls": 10363,
+      "decls_total": 240401,
+      "function_decls": 10369,
       "twin": "include/cstdio+mechanics+si+space_and_time-326f"
     },
     "isq/kind_safe_interfaces": {
-      "InstantiateClass": 8893,
-      "InstantiateFunction": 5970,
-      "EvaluateAsConstantExpr": 40399,
-      "CheckConstraintSatisfaction": 223959,
+      "InstantiateClass": 8884,
+      "InstantiateFunction": 5969,
+      "EvaluateAsConstantExpr": 40285,
+      "CheckConstraintSatisfaction": 223812,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -812,15 +812,15 @@
       "object_bytes": 1448,
       "code_bytes": 87,
       "symbol_bytes": 1361,
-      "decls_total": 255251,
-      "function_decls": 11015,
+      "decls_total": 255214,
+      "function_decls": 11021,
       "twin": "include/cstdio+math+mechanics+si+space_and_time"
     },
     "isq/vector_quantities": {
-      "InstantiateClass": 8032,
-      "InstantiateFunction": 5264,
-      "EvaluateAsConstantExpr": 36790,
-      "CheckConstraintSatisfaction": 203063,
+      "InstantiateClass": 8025,
+      "InstantiateFunction": 5263,
+      "EvaluateAsConstantExpr": 36712,
+      "CheckConstraintSatisfaction": 202972,
       "census": {
         "quantity_spec": 107,
         "named_unit": 44,
@@ -831,15 +831,15 @@
       "object_bytes": 2144,
       "code_bytes": 314,
       "symbol_bytes": 1830,
-      "decls_total": 238374,
-      "function_decls": 10319,
+      "decls_total": 238379,
+      "function_decls": 10325,
       "twin": "include/cartesian_vector+cstdio+mechanics+si+space_and_time"
     },
     "parity/kinetic_energy": {
-      "InstantiateClass": 5591,
-      "InstantiateFunction": 3641,
-      "EvaluateAsConstantExpr": 27428,
-      "CheckConstraintSatisfaction": 149395,
+      "InstantiateClass": 5584,
+      "InstantiateFunction": 3640,
+      "EvaluateAsConstantExpr": 27344,
+      "CheckConstraintSatisfaction": 149291,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -850,15 +850,15 @@
       "object_bytes": 1440,
       "code_bytes": 89,
       "symbol_bytes": 1351,
-      "decls_total": 197270,
-      "function_decls": 8617,
+      "decls_total": 197279,
+      "function_decls": 8623,
       "twin": "include/cstdio+si"
     },
     "parity/unit_conversions": {
-      "InstantiateClass": 5810,
+      "InstantiateClass": 5801,
       "InstantiateFunction": 4717,
-      "EvaluateAsConstantExpr": 32538,
-      "CheckConstraintSatisfaction": 157597,
+      "EvaluateAsConstantExpr": 32403,
+      "CheckConstraintSatisfaction": 157408,
       "census": {
         "quantity_spec": 30,
         "named_unit": 109,
@@ -869,15 +869,15 @@
       "object_bytes": 1984,
       "code_bytes": 228,
       "symbol_bytes": 1756,
-      "decls_total": 217776,
-      "function_decls": 9690,
+      "decls_total": 217746,
+      "function_decls": 9697,
       "twin": "include/cstdio+si+usc-e6c4"
     },
     "parity/value_conversions": {
-      "InstantiateClass": 5874,
+      "InstantiateClass": 5859,
       "InstantiateFunction": 4475,
-      "EvaluateAsConstantExpr": 32526,
-      "CheckConstraintSatisfaction": 158395,
+      "EvaluateAsConstantExpr": 32408,
+      "CheckConstraintSatisfaction": 158210,
       "census": {
         "quantity_spec": 30,
         "named_unit": 109,
@@ -888,15 +888,15 @@
       "object_bytes": 1704,
       "code_bytes": 179,
       "symbol_bytes": 1525,
-      "decls_total": 216201,
-      "function_decls": 9435,
+      "decls_total": 216162,
+      "function_decls": 9442,
       "twin": "include/cstdint+cstdio+si+usc"
     },
     "real_life/glide_computer": {
-      "InstantiateClass": 9954,
-      "InstantiateFunction": 8909,
-      "EvaluateAsConstantExpr": 70144,
-      "CheckConstraintSatisfaction": 351117,
+      "InstantiateClass": 9905,
+      "InstantiateFunction": 8969,
+      "EvaluateAsConstantExpr": 69769,
+      "CheckConstraintSatisfaction": 351057,
       "census": {
         "quantity_spec": 60,
         "named_unit": 64,
@@ -907,15 +907,15 @@
       "object_bytes": 702592,
       "code_bytes": 220700,
       "symbol_bytes": 481892,
-      "decls_total": 360876,
-      "function_decls": 14973,
+      "decls_total": 360323,
+      "function_decls": 14983,
       "twin": "include/algorithm+array+chrono+compare+concepts+cstddef+exception+format+framework+functional+hacks+initializer_list+iostream+iterator+limits+math+numbers+numeric+ostream+ranges+si+space_and_time+string+string_view+utility+vector+yard_pound"
     },
     "real_life/storage_tank": {
-      "InstantiateClass": 18717,
-      "InstantiateFunction": 13629,
-      "EvaluateAsConstantExpr": 89817,
-      "CheckConstraintSatisfaction": 505068,
+      "InstantiateClass": 18690,
+      "InstantiateFunction": 13628,
+      "EvaluateAsConstantExpr": 89489,
+      "CheckConstraintSatisfaction": 504570,
       "census": {
         "quantity_spec": 286,
         "named_unit": 44,
@@ -926,15 +926,15 @@
       "object_bytes": 674952,
       "code_bytes": 208688,
       "symbol_bytes": 466264,
-      "decls_total": 461240,
-      "function_decls": 18979,
+      "decls_total": 460908,
+      "function_decls": 18985,
       "twin": "include/adopted_values+cassert+chrono+format+iostream+isq+math+numbers+si+string"
     },
     "safety/affine_quantities": {
-      "InstantiateClass": 9875,
-      "InstantiateFunction": 7150,
-      "EvaluateAsConstantExpr": 48854,
-      "CheckConstraintSatisfaction": 261994,
+      "InstantiateClass": 9811,
+      "InstantiateFunction": 7147,
+      "EvaluateAsConstantExpr": 48249,
+      "CheckConstraintSatisfaction": 259796,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -945,8 +945,8 @@
       "object_bytes": 1952,
       "code_bytes": 214,
       "symbol_bytes": 1738,
-      "decls_total": 291222,
-      "function_decls": 12350,
+      "decls_total": 289792,
+      "function_decls": 12326,
       "twin": "include/adopted_values+cstdio+mechanics+si"
     },
     "safety/raw_doubles": {
@@ -963,10 +963,10 @@
       "twin": "include/cstdio"
     },
     "safety/simple_quantities": {
-      "InstantiateClass": 5881,
-      "InstantiateFunction": 4173,
-      "EvaluateAsConstantExpr": 30942,
-      "CheckConstraintSatisfaction": 165670,
+      "InstantiateClass": 5862,
+      "InstantiateFunction": 4172,
+      "EvaluateAsConstantExpr": 30738,
+      "CheckConstraintSatisfaction": 165327,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -977,15 +977,15 @@
       "object_bytes": 1952,
       "code_bytes": 214,
       "symbol_bytes": 1738,
-      "decls_total": 211896,
-      "function_decls": 9159,
+      "decls_total": 211725,
+      "function_decls": 9165,
       "twin": "include/adopted_values+cstdio+si"
     },
     "safety/typed_quantities": {
-      "InstantiateClass": 9798,
-      "InstantiateFunction": 6993,
-      "EvaluateAsConstantExpr": 47032,
-      "CheckConstraintSatisfaction": 252845,
+      "InstantiateClass": 9761,
+      "InstantiateFunction": 6992,
+      "EvaluateAsConstantExpr": 46722,
+      "CheckConstraintSatisfaction": 252292,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -996,15 +996,15 @@
       "object_bytes": 1952,
       "code_bytes": 214,
       "symbol_bytes": 1738,
-      "decls_total": 283868,
-      "function_decls": 12143,
+      "decls_total": 283518,
+      "function_decls": 12149,
       "twin": "include/adopted_values+cstdio+mechanics+si"
     },
     "scaling/broad_016": {
-      "InstantiateClass": 9348,
-      "InstantiateFunction": 6755,
-      "EvaluateAsConstantExpr": 52932,
-      "CheckConstraintSatisfaction": 278609,
+      "InstantiateClass": 9305,
+      "InstantiateFunction": 6754,
+      "EvaluateAsConstantExpr": 52493,
+      "CheckConstraintSatisfaction": 277836,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -1015,15 +1015,15 @@
       "object_bytes": 1432,
       "code_bytes": 87,
       "symbol_bytes": 1345,
-      "decls_total": 293083,
-      "function_decls": 11781,
+      "decls_total": 292540,
+      "function_decls": 11787,
       "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/broad_064": {
-      "InstantiateClass": 10635,
-      "InstantiateFunction": 8403,
-      "EvaluateAsConstantExpr": 72877,
-      "CheckConstraintSatisfaction": 382067,
+      "InstantiateClass": 10550,
+      "InstantiateFunction": 8402,
+      "EvaluateAsConstantExpr": 71997,
+      "CheckConstraintSatisfaction": 380454,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -1034,15 +1034,15 @@
       "object_bytes": 1432,
       "code_bytes": 87,
       "symbol_bytes": 1345,
-      "decls_total": 357829,
-      "function_decls": 13356,
+      "decls_total": 356614,
+      "function_decls": 13362,
       "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/broad_256": {
-      "InstantiateClass": 20673,
-      "InstantiateFunction": 21427,
-      "EvaluateAsConstantExpr": 243744,
-      "CheckConstraintSatisfaction": 1160675,
+      "InstantiateClass": 20204,
+      "InstantiateFunction": 21426,
+      "EvaluateAsConstantExpr": 238832,
+      "CheckConstraintSatisfaction": 1151382,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -1053,15 +1053,15 @@
       "object_bytes": 1432,
       "code_bytes": 87,
       "symbol_bytes": 1345,
-      "decls_total": 913519,
-      "function_decls": 25973,
+      "decls_total": 906160,
+      "function_decls": 25979,
       "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/define_constants_016": {
-      "InstantiateClass": 5715,
-      "InstantiateFunction": 3805,
-      "EvaluateAsConstantExpr": 26818,
-      "CheckConstraintSatisfaction": 141378,
+      "InstantiateClass": 5716,
+      "InstantiateFunction": 3804,
+      "EvaluateAsConstantExpr": 26806,
+      "CheckConstraintSatisfaction": 141419,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -1072,15 +1072,15 @@
       "object_bytes": 1016,
       "code_bytes": 51,
       "symbol_bytes": 965,
-      "decls_total": 197143,
-      "function_decls": 8723,
+      "decls_total": 197264,
+      "function_decls": 8729,
       "twin": "include/define_workload"
     },
     "scaling/define_constants_064": {
-      "InstantiateClass": 6142,
-      "InstantiateFunction": 4726,
-      "EvaluateAsConstantExpr": 30566,
-      "CheckConstraintSatisfaction": 152197,
+      "InstantiateClass": 6143,
+      "InstantiateFunction": 4725,
+      "EvaluateAsConstantExpr": 30554,
+      "CheckConstraintSatisfaction": 152238,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -1091,15 +1091,15 @@
       "object_bytes": 1016,
       "code_bytes": 51,
       "symbol_bytes": 965,
-      "decls_total": 215262,
-      "function_decls": 9606,
+      "decls_total": 215383,
+      "function_decls": 9612,
       "twin": "include/define_workload"
     },
     "scaling/define_constants_256": {
-      "InstantiateClass": 7881,
-      "InstantiateFunction": 8493,
-      "EvaluateAsConstantExpr": 46147,
-      "CheckConstraintSatisfaction": 196110,
+      "InstantiateClass": 7882,
+      "InstantiateFunction": 8492,
+      "EvaluateAsConstantExpr": 46135,
+      "CheckConstraintSatisfaction": 196151,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -1110,15 +1110,15 @@
       "object_bytes": 1016,
       "code_bytes": 51,
       "symbol_bytes": 965,
-      "decls_total": 289524,
-      "function_decls": 13209,
+      "decls_total": 289645,
+      "function_decls": 13215,
       "twin": "include/define_workload"
     },
     "scaling/define_specs_016": {
-      "InstantiateClass": 5556,
-      "InstantiateFunction": 3457,
-      "EvaluateAsConstantExpr": 25494,
-      "CheckConstraintSatisfaction": 137479,
+      "InstantiateClass": 5557,
+      "InstantiateFunction": 3456,
+      "EvaluateAsConstantExpr": 25482,
+      "CheckConstraintSatisfaction": 137520,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -1129,15 +1129,15 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 190615,
-      "function_decls": 8391,
+      "decls_total": 190736,
+      "function_decls": 8397,
       "twin": "include/define_workload"
     },
     "scaling/define_specs_064": {
-      "InstantiateClass": 5556,
-      "InstantiateFunction": 3457,
-      "EvaluateAsConstantExpr": 25542,
-      "CheckConstraintSatisfaction": 137527,
+      "InstantiateClass": 5557,
+      "InstantiateFunction": 3456,
+      "EvaluateAsConstantExpr": 25530,
+      "CheckConstraintSatisfaction": 137568,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -1148,15 +1148,15 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 191047,
-      "function_decls": 8391,
+      "decls_total": 191168,
+      "function_decls": 8397,
       "twin": "include/define_workload"
     },
     "scaling/define_specs_256": {
-      "InstantiateClass": 5556,
-      "InstantiateFunction": 3457,
-      "EvaluateAsConstantExpr": 25734,
-      "CheckConstraintSatisfaction": 137719,
+      "InstantiateClass": 5557,
+      "InstantiateFunction": 3456,
+      "EvaluateAsConstantExpr": 25722,
+      "CheckConstraintSatisfaction": 137760,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -1167,15 +1167,15 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 192775,
-      "function_decls": 8391,
+      "decls_total": 192896,
+      "function_decls": 8397,
       "twin": "include/define_workload"
     },
     "scaling/define_units_016": {
-      "InstantiateClass": 5572,
-      "InstantiateFunction": 3457,
-      "EvaluateAsConstantExpr": 25547,
-      "CheckConstraintSatisfaction": 137571,
+      "InstantiateClass": 5573,
+      "InstantiateFunction": 3456,
+      "EvaluateAsConstantExpr": 25535,
+      "CheckConstraintSatisfaction": 137612,
       "census": {
         "quantity_spec": 59,
         "named_unit": 60,
@@ -1186,15 +1186,15 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 190976,
-      "function_decls": 8391,
+      "decls_total": 191097,
+      "function_decls": 8397,
       "twin": "include/define_workload"
     },
     "scaling/define_units_064": {
-      "InstantiateClass": 5620,
-      "InstantiateFunction": 3457,
-      "EvaluateAsConstantExpr": 25739,
-      "CheckConstraintSatisfaction": 137859,
+      "InstantiateClass": 5621,
+      "InstantiateFunction": 3456,
+      "EvaluateAsConstantExpr": 25727,
+      "CheckConstraintSatisfaction": 137900,
       "census": {
         "quantity_spec": 59,
         "named_unit": 108,
@@ -1205,15 +1205,15 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 192464,
-      "function_decls": 8391,
+      "decls_total": 192585,
+      "function_decls": 8397,
       "twin": "include/define_workload"
     },
     "scaling/define_units_256": {
-      "InstantiateClass": 5812,
-      "InstantiateFunction": 3457,
-      "EvaluateAsConstantExpr": 26507,
-      "CheckConstraintSatisfaction": 139011,
+      "InstantiateClass": 5813,
+      "InstantiateFunction": 3456,
+      "EvaluateAsConstantExpr": 26495,
+      "CheckConstraintSatisfaction": 139052,
       "census": {
         "quantity_spec": 59,
         "named_unit": 300,
@@ -1224,15 +1224,15 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 198416,
-      "function_decls": 8391,
+      "decls_total": 198537,
+      "function_decls": 8397,
       "twin": "include/define_workload"
     },
     "scaling/narrow_016": {
-      "InstantiateClass": 8702,
-      "InstantiateFunction": 5844,
-      "EvaluateAsConstantExpr": 40073,
-      "CheckConstraintSatisfaction": 219824,
+      "InstantiateClass": 8689,
+      "InstantiateFunction": 5843,
+      "EvaluateAsConstantExpr": 39949,
+      "CheckConstraintSatisfaction": 219651,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -1243,15 +1243,15 @@
       "object_bytes": 1440,
       "code_bytes": 87,
       "symbol_bytes": 1353,
-      "decls_total": 252127,
-      "function_decls": 10870,
+      "decls_total": 252069,
+      "function_decls": 10876,
       "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/narrow_064": {
-      "InstantiateClass": 8750,
-      "InstantiateFunction": 5940,
-      "EvaluateAsConstantExpr": 40841,
-      "CheckConstraintSatisfaction": 221120,
+      "InstantiateClass": 8737,
+      "InstantiateFunction": 5939,
+      "EvaluateAsConstantExpr": 40717,
+      "CheckConstraintSatisfaction": 220947,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -1262,15 +1262,15 @@
       "object_bytes": 1440,
       "code_bytes": 87,
       "symbol_bytes": 1353,
-      "decls_total": 253327,
-      "function_decls": 10918,
+      "decls_total": 253269,
+      "function_decls": 10924,
       "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/narrow_256": {
-      "InstantiateClass": 8942,
-      "InstantiateFunction": 6324,
-      "EvaluateAsConstantExpr": 43913,
-      "CheckConstraintSatisfaction": 226304,
+      "InstantiateClass": 8929,
+      "InstantiateFunction": 6323,
+      "EvaluateAsConstantExpr": 43789,
+      "CheckConstraintSatisfaction": 226131,
       "census": {
         "quantity_spec": 105,
         "named_unit": 44,
@@ -1281,15 +1281,15 @@
       "object_bytes": 1440,
       "code_bytes": 87,
       "symbol_bytes": 1353,
-      "decls_total": 258127,
-      "function_decls": 11110,
+      "decls_total": 258069,
+      "function_decls": 11116,
       "twin": "include/cstdio+scaling_workload+utility"
     },
     "scaling/specs_broad_016": {
       "InstantiateClass": 1800,
-      "InstantiateFunction": 1290,
-      "EvaluateAsConstantExpr": 7810,
-      "CheckConstraintSatisfaction": 63361,
+      "InstantiateFunction": 1288,
+      "EvaluateAsConstantExpr": 7806,
+      "CheckConstraintSatisfaction": 63364,
       "census": {
         "quantity_spec": 8,
         "named_unit": 3,
@@ -1298,15 +1298,15 @@
       "object_bytes": 1288,
       "code_bytes": 77,
       "symbol_bytes": 1211,
-      "decls_total": 112355,
-      "function_decls": 6153,
+      "decls_total": 112351,
+      "function_decls": 6152,
       "twin": "include/cstdio+spec_workload"
     },
     "scaling/specs_broad_064": {
       "InstantiateClass": 2727,
-      "InstantiateFunction": 1930,
-      "EvaluateAsConstantExpr": 11092,
-      "CheckConstraintSatisfaction": 87250,
+      "InstantiateFunction": 1928,
+      "EvaluateAsConstantExpr": 11088,
+      "CheckConstraintSatisfaction": 87253,
       "census": {
         "quantity_spec": 8,
         "named_unit": 3,
@@ -1315,15 +1315,15 @@
       "object_bytes": 1288,
       "code_bytes": 77,
       "symbol_bytes": 1211,
-      "decls_total": 128058,
-      "function_decls": 6733,
+      "decls_total": 128054,
+      "function_decls": 6732,
       "twin": "include/cstdio+spec_workload"
     },
     "scaling/specs_broad_256": {
       "InstantiateClass": 8160,
-      "InstantiateFunction": 5386,
-      "EvaluateAsConstantExpr": 27550,
-      "CheckConstraintSatisfaction": 216351,
+      "InstantiateFunction": 5384,
+      "EvaluateAsConstantExpr": 27546,
+      "CheckConstraintSatisfaction": 216354,
       "census": {
         "quantity_spec": 8,
         "named_unit": 3,
@@ -1332,15 +1332,15 @@
       "object_bytes": 1288,
       "code_bytes": 77,
       "symbol_bytes": 1211,
-      "decls_total": 215489,
-      "function_decls": 9805,
+      "decls_total": 215485,
+      "function_decls": 9804,
       "twin": "include/cstdio+spec_workload"
     },
     "scaling/typed_broad_016": {
-      "InstantiateClass": 8222,
-      "InstantiateFunction": 5953,
-      "EvaluateAsConstantExpr": 46952,
-      "CheckConstraintSatisfaction": 242263,
+      "InstantiateClass": 8193,
+      "InstantiateFunction": 5952,
+      "EvaluateAsConstantExpr": 46625,
+      "CheckConstraintSatisfaction": 241764,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -1351,15 +1351,15 @@
       "object_bytes": 1440,
       "code_bytes": 87,
       "symbol_bytes": 1353,
-      "decls_total": 269145,
-      "function_decls": 11094,
+      "decls_total": 268777,
+      "function_decls": 11100,
       "twin": "include/cstdio+typed_workload"
     },
     "scaling/typed_broad_064": {
-      "InstantiateClass": 11300,
-      "InstantiateFunction": 9182,
-      "EvaluateAsConstantExpr": 75583,
-      "CheckConstraintSatisfaction": 393846,
+      "InstantiateClass": 11229,
+      "InstantiateFunction": 9181,
+      "EvaluateAsConstantExpr": 74815,
+      "CheckConstraintSatisfaction": 392591,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -1370,15 +1370,15 @@
       "object_bytes": 1440,
       "code_bytes": 87,
       "symbol_bytes": 1353,
-      "decls_total": 374644,
-      "function_decls": 14428,
+      "decls_total": 373604,
+      "function_decls": 14434,
       "twin": "include/cstdio+typed_workload"
     },
     "scaling/typed_broad_256": {
-      "InstantiateClass": 39129,
-      "InstantiateFunction": 35874,
-      "EvaluateAsConstantExpr": 316936,
-      "CheckConstraintSatisfaction": 1584418,
+      "InstantiateClass": 38674,
+      "InstantiateFunction": 35873,
+      "EvaluateAsConstantExpr": 312136,
+      "CheckConstraintSatisfaction": 1576251,
       "census": {
         "quantity_spec": 59,
         "named_unit": 44,
@@ -1389,15 +1389,15 @@
       "object_bytes": 1440,
       "code_bytes": 87,
       "symbol_bytes": 1353,
-      "decls_total": 1457882,
-      "function_decls": 42041,
+      "decls_total": 1450698,
+      "function_decls": 42047,
       "twin": "include/cstdio+typed_workload"
     },
     "systems/user_defined_units": {
-      "InstantiateClass": 7668,
-      "InstantiateFunction": 5300,
-      "EvaluateAsConstantExpr": 36110,
-      "CheckConstraintSatisfaction": 195558,
+      "InstantiateClass": 7653,
+      "InstantiateFunction": 5299,
+      "EvaluateAsConstantExpr": 35970,
+      "CheckConstraintSatisfaction": 195319,
       "census": {
         "quantity_spec": 107,
         "named_unit": 49,
@@ -1408,15 +1408,15 @@
       "object_bytes": 1744,
       "code_bytes": 163,
       "symbol_bytes": 1581,
-      "decls_total": 236847,
-      "function_decls": 10252,
+      "decls_total": 236768,
+      "function_decls": 10258,
       "twin": "include/cstdio+mechanics+si+space_and_time-bd8c"
     },
     "text/output_format": {
-      "InstantiateClass": 6397,
-      "InstantiateFunction": 4766,
-      "EvaluateAsConstantExpr": 36534,
-      "CheckConstraintSatisfaction": 199795,
+      "InstantiateClass": 6386,
+      "InstantiateFunction": 4765,
+      "EvaluateAsConstantExpr": 36402,
+      "CheckConstraintSatisfaction": 199600,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -1427,15 +1427,15 @@
       "object_bytes": 421976,
       "code_bytes": 136909,
       "symbol_bytes": 285067,
-      "decls_total": 227499,
-      "function_decls": 9767,
+      "decls_total": 227443,
+      "function_decls": 9773,
       "twin": "include/cstdio+format+output_workload"
     },
     "text/output_format_advanced": {
-      "InstantiateClass": 6548,
+      "InstantiateClass": 6535,
       "InstantiateFunction": 5026,
-      "EvaluateAsConstantExpr": 38689,
-      "CheckConstraintSatisfaction": 210758,
+      "EvaluateAsConstantExpr": 38547,
+      "CheckConstraintSatisfaction": 210549,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -1446,15 +1446,15 @@
       "object_bytes": 479760,
       "code_bytes": 154687,
       "symbol_bytes": 325073,
-      "decls_total": 235249,
-      "function_decls": 10097,
+      "decls_total": 235190,
+      "function_decls": 10104,
       "twin": "include/output_workload+print"
     },
     "text/output_ostream": {
-      "InstantiateClass": 5949,
-      "InstantiateFunction": 3957,
-      "EvaluateAsConstantExpr": 30426,
-      "CheckConstraintSatisfaction": 169281,
+      "InstantiateClass": 5938,
+      "InstantiateFunction": 3956,
+      "EvaluateAsConstantExpr": 30294,
+      "CheckConstraintSatisfaction": 169086,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -1465,15 +1465,15 @@
       "object_bytes": 43472,
       "code_bytes": 11638,
       "symbol_bytes": 31834,
-      "decls_total": 209863,
-      "function_decls": 9013,
+      "decls_total": 209807,
+      "function_decls": 9019,
       "twin": "include/iostream+ostream+output_workload"
     },
     "text/output_printf": {
-      "InstantiateClass": 5764,
-      "InstantiateFunction": 3725,
-      "EvaluateAsConstantExpr": 28634,
-      "CheckConstraintSatisfaction": 157173,
+      "InstantiateClass": 5753,
+      "InstantiateFunction": 3724,
+      "EvaluateAsConstantExpr": 28501,
+      "CheckConstraintSatisfaction": 156969,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -1484,15 +1484,15 @@
       "object_bytes": 1968,
       "code_bytes": 206,
       "symbol_bytes": 1762,
-      "decls_total": 203292,
-      "function_decls": 8703,
+      "decls_total": 203232,
+      "function_decls": 8709,
       "twin": "include/cstdio+output_workload"
     },
     "text/output_println": {
-      "InstantiateClass": 6432,
-      "InstantiateFunction": 4802,
-      "EvaluateAsConstantExpr": 36732,
-      "CheckConstraintSatisfaction": 200910,
+      "InstantiateClass": 6421,
+      "InstantiateFunction": 4801,
+      "EvaluateAsConstantExpr": 36600,
+      "CheckConstraintSatisfaction": 200715,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -1503,15 +1503,15 @@
       "object_bytes": 423240,
       "code_bytes": 137394,
       "symbol_bytes": 285846,
-      "decls_total": 228551,
-      "function_decls": 9840,
+      "decls_total": 228495,
+      "function_decls": 9846,
       "twin": "include/format+output_workload+print"
     },
     "umbrella/codata_2022_umbrella": {
-      "InstantiateClass": 14725,
-      "InstantiateFunction": 19309,
-      "EvaluateAsConstantExpr": 85621,
-      "CheckConstraintSatisfaction": 418151,
+      "InstantiateClass": 14726,
+      "InstantiateFunction": 19308,
+      "EvaluateAsConstantExpr": 85609,
+      "CheckConstraintSatisfaction": 418192,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -1522,14 +1522,14 @@
       "object_bytes": 1016,
       "code_bytes": 51,
       "symbol_bytes": 965,
-      "decls_total": 500970,
-      "function_decls": 23573
+      "decls_total": 501091,
+      "function_decls": 23579
     },
     "umbrella/codata_lean_umbrella": {
-      "InstantiateClass": 5771,
-      "InstantiateFunction": 5715,
-      "EvaluateAsConstantExpr": 28761,
-      "CheckConstraintSatisfaction": 170205,
+      "InstantiateClass": 5772,
+      "InstantiateFunction": 5714,
+      "EvaluateAsConstantExpr": 28749,
+      "CheckConstraintSatisfaction": 170246,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -1540,14 +1540,14 @@
       "object_bytes": 1016,
       "code_bytes": 51,
       "symbol_bytes": 965,
-      "decls_total": 216710,
-      "function_decls": 10494
+      "decls_total": 216831,
+      "function_decls": 10500
     },
     "umbrella/codata_umbrella": {
-      "InstantiateClass": 24924,
-      "InstantiateFunction": 38498,
-      "EvaluateAsConstantExpr": 164299,
-      "CheckConstraintSatisfaction": 705457,
+      "InstantiateClass": 24925,
+      "InstantiateFunction": 38497,
+      "EvaluateAsConstantExpr": 164287,
+      "CheckConstraintSatisfaction": 705498,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -1558,14 +1558,14 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 877319,
-      "function_decls": 42301
+      "decls_total": 877440,
+      "function_decls": 42307
     },
     "umbrella/isq_atomic_and_nuclear_physics_umbrella": {
       "InstantiateClass": 2276,
-      "InstantiateFunction": 1472,
-      "EvaluateAsConstantExpr": 9410,
-      "CheckConstraintSatisfaction": 74061,
+      "InstantiateFunction": 1470,
+      "EvaluateAsConstantExpr": 9406,
+      "CheckConstraintSatisfaction": 74064,
       "census": {
         "quantity_spec": 30,
         "named_unit": 3,
@@ -1574,14 +1574,14 @@
       "object_bytes": 1032,
       "code_bytes": 51,
       "symbol_bytes": 981,
-      "decls_total": 120271,
-      "function_decls": 6332
+      "decls_total": 120264,
+      "function_decls": 6331
     },
     "umbrella/isq_electromagnetism_umbrella": {
       "InstantiateClass": 6717,
-      "InstantiateFunction": 4289,
-      "EvaluateAsConstantExpr": 25018,
-      "CheckConstraintSatisfaction": 173810,
+      "InstantiateFunction": 4287,
+      "EvaluateAsConstantExpr": 25014,
+      "CheckConstraintSatisfaction": 173813,
       "census": {
         "quantity_spec": 132,
         "named_unit": 3,
@@ -1590,14 +1590,14 @@
       "object_bytes": 1024,
       "code_bytes": 51,
       "symbol_bytes": 973,
-      "decls_total": 190829,
-      "function_decls": 9142
+      "decls_total": 190822,
+      "function_decls": 9141
     },
     "umbrella/isq_information_science_umbrella": {
       "InstantiateClass": 3270,
-      "InstantiateFunction": 2189,
-      "EvaluateAsConstantExpr": 13017,
-      "CheckConstraintSatisfaction": 94719,
+      "InstantiateFunction": 2187,
+      "EvaluateAsConstantExpr": 13013,
+      "CheckConstraintSatisfaction": 94722,
       "census": {
         "quantity_spec": 76,
         "named_unit": 3,
@@ -1606,14 +1606,14 @@
       "object_bytes": 1024,
       "code_bytes": 51,
       "symbol_bytes": 973,
-      "decls_total": 137990,
-      "function_decls": 7055
+      "decls_total": 137983,
+      "function_decls": 7054
     },
     "umbrella/isq_light_and_radiation_umbrella": {
       "InstantiateClass": 4045,
-      "InstantiateFunction": 2665,
-      "EvaluateAsConstantExpr": 15750,
-      "CheckConstraintSatisfaction": 113152,
+      "InstantiateFunction": 2663,
+      "EvaluateAsConstantExpr": 15746,
+      "CheckConstraintSatisfaction": 113155,
       "census": {
         "quantity_spec": 102,
         "named_unit": 3,
@@ -1622,14 +1622,14 @@
       "object_bytes": 1024,
       "code_bytes": 51,
       "symbol_bytes": 973,
-      "decls_total": 152457,
-      "function_decls": 7522
+      "decls_total": 152450,
+      "function_decls": 7521
     },
     "umbrella/isq_mechanics_umbrella": {
       "InstantiateClass": 4797,
-      "InstantiateFunction": 3196,
-      "EvaluateAsConstantExpr": 18454,
-      "CheckConstraintSatisfaction": 130469,
+      "InstantiateFunction": 3194,
+      "EvaluateAsConstantExpr": 18450,
+      "CheckConstraintSatisfaction": 130472,
       "census": {
         "quantity_spec": 105,
         "named_unit": 3,
@@ -1638,14 +1638,14 @@
       "object_bytes": 1016,
       "code_bytes": 51,
       "symbol_bytes": 965,
-      "decls_total": 163220,
-      "function_decls": 8037
+      "decls_total": 163213,
+      "function_decls": 8036
     },
     "umbrella/isq_space_and_time_umbrella": {
       "InstantiateClass": 2823,
-      "InstantiateFunction": 1887,
-      "EvaluateAsConstantExpr": 11422,
-      "CheckConstraintSatisfaction": 85168,
+      "InstantiateFunction": 1885,
+      "EvaluateAsConstantExpr": 11418,
+      "CheckConstraintSatisfaction": 85171,
       "census": {
         "quantity_spec": 59,
         "named_unit": 3,
@@ -1654,14 +1654,14 @@
       "object_bytes": 1024,
       "code_bytes": 51,
       "symbol_bytes": 973,
-      "decls_total": 130318,
-      "function_decls": 6752
+      "decls_total": 130311,
+      "function_decls": 6751
     },
     "umbrella/isq_thermodynamics_umbrella": {
       "InstantiateClass": 5725,
-      "InstantiateFunction": 3783,
-      "EvaluateAsConstantExpr": 21943,
-      "CheckConstraintSatisfaction": 153075,
+      "InstantiateFunction": 3781,
+      "EvaluateAsConstantExpr": 21939,
+      "CheckConstraintSatisfaction": 153078,
       "census": {
         "quantity_spec": 136,
         "named_unit": 3,
@@ -1670,14 +1670,14 @@
       "object_bytes": 1024,
       "code_bytes": 51,
       "symbol_bytes": 973,
-      "decls_total": 180207,
-      "function_decls": 8615
+      "decls_total": 180200,
+      "function_decls": 8614
     },
     "umbrella/isq_umbrella": {
       "InstantiateClass": 12177,
-      "InstantiateFunction": 7702,
-      "EvaluateAsConstantExpr": 45137,
-      "CheckConstraintSatisfaction": 300955,
+      "InstantiateFunction": 7700,
+      "EvaluateAsConstantExpr": 45133,
+      "CheckConstraintSatisfaction": 300958,
       "census": {
         "quantity_spec": 285,
         "named_unit": 3,
@@ -1686,14 +1686,14 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 284097,
-      "function_decls": 12513
+      "decls_total": 284090,
+      "function_decls": 12512
     },
     "umbrella/si_lean_umbrella": {
-      "InstantiateClass": 3574,
-      "InstantiateFunction": 2532,
-      "EvaluateAsConstantExpr": 16928,
-      "CheckConstraintSatisfaction": 108087,
+      "InstantiateClass": 3575,
+      "InstantiateFunction": 2531,
+      "EvaluateAsConstantExpr": 16916,
+      "CheckConstraintSatisfaction": 108128,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -1704,14 +1704,14 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 154738,
-      "function_decls": 7491
+      "decls_total": 154859,
+      "function_decls": 7497
     },
     "umbrella/si_umbrella": {
-      "InstantiateClass": 5020,
-      "InstantiateFunction": 3043,
-      "EvaluateAsConstantExpr": 23490,
-      "CheckConstraintSatisfaction": 126596,
+      "InstantiateClass": 5021,
+      "InstantiateFunction": 3042,
+      "EvaluateAsConstantExpr": 23478,
+      "CheckConstraintSatisfaction": 126637,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -1722,14 +1722,14 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 180542,
-      "function_decls": 7972
+      "decls_total": 180663,
+      "function_decls": 7978
     },
     "umbrella/si_units_umbrella": {
-      "InstantiateClass": 3255,
-      "InstantiateFunction": 2484,
-      "EvaluateAsConstantExpr": 15330,
-      "CheckConstraintSatisfaction": 104184,
+      "InstantiateClass": 3256,
+      "InstantiateFunction": 2483,
+      "EvaluateAsConstantExpr": 15318,
+      "CheckConstraintSatisfaction": 104225,
       "census": {
         "quantity_spec": 30,
         "named_unit": 44,
@@ -1740,8 +1740,8 @@
       "object_bytes": 1008,
       "code_bytes": 51,
       "symbol_bytes": 957,
-      "decls_total": 148598,
-      "function_decls": 7414
+      "decls_total": 148719,
+      "function_decls": 7420
     }
   }
 }
