@@ -209,9 +209,17 @@ jobs:
         shell: bash
         run: |
           runner/bench.py --repo mp-units --cxx "clang++-${GATE_CLANG}" --std ${{ matrix.std }} ${{ matrix.args }} update
-          mkdir -p tighten
-          cp "$(runner/bench.py --cxx clang++-${GATE_CLANG} --std ${{ matrix.std }} ${{ matrix.args }} key)" tighten/
-          echo "First recording for \`clang++-${GATE_CLANG} -std=${{ matrix.std }} ${{ matrix.args }}\`: no baseline file existed for this configuration, so this run measured mp-units \`$(git -C mp-units rev-parse --short HEAD)\` and recorded every entry. Nothing is compared here; the gate for this configuration starts with the run after this file is merged." > "tighten/pr-body-${{ matrix.id }}.md"
+          mkdir -p bootstrap
+          cp "$(runner/bench.py --cxx clang++-${GATE_CLANG} --std ${{ matrix.std }} ${{ matrix.args }} key)" bootstrap/
+          echo "First recording for \`clang++-${GATE_CLANG} -std=${{ matrix.std }} ${{ matrix.args }}\`: no baseline file existed for this configuration, so this run measured mp-units \`$(git -C mp-units rev-parse --short HEAD)\` and recorded every entry. Nothing is compared here; the gate for this configuration starts with the run after this file is merged." > "bootstrap/pr-body-${{ matrix.id }}.md"
+      - uses: actions/upload-artifact@v4
+        # Its own artifact kind: a first recording compares nothing and blesses nothing, so the
+        # consolidator takes it even when another arm is red, where a re-record has to wait.
+        if: steps.guard.outputs.bootstrap == 'true' && github.event_name != 'pull_request'
+        with:
+          name: bootstrap-${{ matrix.id }}
+          path: bootstrap/
+          retention-days: 3
       - name: Decide whether the baselines can be tightened
         id: decide
         if: steps.guard.outputs.measure == 'true' && steps.guard.outputs.bootstrap != 'true'
@@ -280,7 +288,7 @@ jobs:
           cp "$(runner/bench.py --cxx clang++-${GATE_CLANG} --std ${{ matrix.std }} ${{ matrix.args }} key)" tighten/
           mv pr-body.md "tighten/pr-body-${{ matrix.id }}.md"
       - uses: actions/upload-artifact@v4
-        if: (steps.decide.outputs.tighten == 'true' || steps.guard.outputs.bootstrap == 'true') && github.event_name != 'pull_request'
+        if: steps.decide.outputs.tighten == 'true' && github.event_name != 'pull_request'
         with:
           name: tighten-${{ matrix.id }}
           path: tighten/
@@ -292,11 +300,15 @@ jobs:
           exit 1
 
   tighten:
-    # One PR for the whole re-record, however many standards improved. Runs only when every gate arm is
-    # green: a regression anywhere means a human is already looking at this tree, and an auto-PR that
-    # blesses the other standards' numbers underneath them is exactly the kind of helpful that is not.
+    # One PR for the whole re-record, however many standards improved. Re-records go in only when
+    # every gate arm is green: a regression anywhere means a human is already looking at this tree,
+    # and an auto-PR that blesses the other standards' numbers underneath them is exactly the kind of
+    # helpful that is not. A FIRST recording (a configuration with no baseline file yet) compares
+    # nothing and blesses nothing, so it goes in regardless - otherwise a red arm elsewhere would keep
+    # a new configuration ungated for as long as the red lasts, which is what happened to the modules
+    # arm in its first three runs.
     needs: gate
-    if: needs.gate.result == 'success' && github.event_name != 'pull_request'
+    if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -305,27 +317,44 @@ jobs:
           pattern: tighten-*
           path: tighten
           merge-multiple: true
-      - name: Open or refresh the single tightening pull request
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bootstrap-*
+          path: bootstrap
+          merge-multiple: true
+      - name: Open or refresh the single baselines pull request
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GATE_RESULT: ${{ needs.gate.result }}
         run: |
           shopt -s nullglob
-          files=(tighten/instantiations-*.json)
+          files=(bootstrap/instantiations-*.json)
+          rerecords=(tighten/instantiations-*.json)
+          if [ "$GATE_RESULT" = "success" ]; then
+            files+=("${rerecords[@]}")
+          elif [ ${#rerecords[@]} -gt 0 ]; then
+            echo "a gate arm is red: ${#rerecords[@]} re-record(s) left to a human, first recordings still go in"
+            echo "A gate arm is red, so this run's ${#rerecords[@]} re-record(s) are left to a human." >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ ${#files[@]} -eq 0 ]; then
-            echo "no gate arm asked for a re-record - nothing to do"
-            echo "No baselines to tighten this run." >> "$GITHUB_STEP_SUMMARY"
+            echo "no gate arm asked for a re-record or a first recording - nothing to do"
+            echo "No baselines to record this run." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$BRANCH_PREFIX"
-          cp tighten/instantiations-*.json baselines/
+          cp "${files[@]}" baselines/
+          bodies=(bootstrap/pr-body-*.md)
+          [ "$GATE_RESULT" = "success" ] && bodies+=(tighten/pr-body-*.md)
+          title="chore: tighten instantiation baselines"
+          [ "$GATE_RESULT" != "success" ] && title="chore: record the first baselines of a new configuration"
           {
-            echo "One re-record, one review: every standard whose gate arm found the baselines stale is"
-            echo "updated together, because they describe the same library tree."
+            echo "One recording, one review: every configuration whose gate arm found its baselines stale"
+            echo "or missing is updated together, because they describe the same library tree."
             echo
-            for body in tighten/pr-body-*.md; do
+            for body in "${bodies[@]}"; do
               std=$(basename "$body" .md); std=${std#pr-body-}
               echo "<details><summary>${std}</summary>"
               echo
@@ -336,16 +365,16 @@ jobs:
             done
           } > pr-body.md
           git add baselines
-          git commit -m "chore: tighten instantiation baselines
+          git commit -m "$title
 
-          Re-recorded against mp-units ${MP_UNITS_REF} for: $(basename -a "${files[@]}" | sed 's/instantiations-//;s/\.json//' | paste -sd', ')."
+          Recorded against mp-units ${MP_UNITS_REF} for: $(basename -a "${files[@]}" | sed 's/instantiations-//;s/\.json//' | paste -sd', ')."
           git push -f origin "$BRANCH_PREFIX"
           if gh pr view "$BRANCH_PREFIX" --json state --jq .state 2>/dev/null | grep -qx OPEN; then
-            gh pr edit "$BRANCH_PREFIX" --body-file pr-body.md
+            gh pr edit "$BRANCH_PREFIX" --title "$title" --body-file pr-body.md
             echo "refreshed the open PR"
           else
             gh pr create --base "${{ github.event.repository.default_branch }}" --head "$BRANCH_PREFIX" \
-              --title "chore: tighten instantiation baselines" --body-file pr-body.md
+              --title "$title" --body-file pr-body.md
           fi
 
   measure:

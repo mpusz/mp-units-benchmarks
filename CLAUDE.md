@@ -513,8 +513,10 @@ the gate table names which one it used in its `basis` column:
   in `GATE_CLANG` (23 since mp-units added it; 22 is skipped, see `measure` below) at
   `-std=c++20/23/26`, one arm per standard matching the three reviewed baseline files, plus a
   `cxx26-modules` arm (`--modules --import-std`) whose baseline file gates the `bmi/*` rows. An arm
-  whose baseline file does not exist records it (`update`) and hands it to the `tighten` job, which
-  opens the PR adding it. Gating starts with the run after the merge. A new configuration's file is
+  whose baseline file does not exist records it (`update`) and hands it to the `tighten` job as a
+  `bootstrap-*` artifact, which the job takes even when another arm is red (a first recording
+  blesses nothing), where `tighten-*` re-records wait for a fully green gate. Gating starts with
+  the run after the merge. A new configuration's file is
   created only this way because a file recorded on a laptop carries another clang snapshot, and
   declaration counts differ by several percent between snapshots. That one
   value also drives the re-record PR and `modules-ab`, so the default compiler moves in one place -
