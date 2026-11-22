@@ -293,6 +293,27 @@ jobs:
           name: tighten-${{ matrix.id }}
           path: tighten/
           retention-days: 3
+      - name: Record candidate baselines for review
+        # A dispatched run also records what the baselines would become, so excused growth can be
+        # reviewed row by row and committed by hand. Only CI's runner can record them: another system's
+        # C library headers move every `total` row by a constant. Nothing consumes this artifact; the
+        # `tighten` job takes only `tighten-*` and `bootstrap-*`.
+        if: >-
+          github.event_name == 'workflow_dispatch' && steps.guard.outputs.measure == 'true'
+          && steps.guard.outputs.bootstrap != 'true' && steps.decide.outputs.tighten != 'true'
+        shell: bash
+        run: |
+          runner/bench.py --repo mp-units --cxx "clang++-${GATE_CLANG}" --std ${{ matrix.std }} ${{ matrix.args }} update
+          mkdir -p candidate
+          cp "$(runner/bench.py --cxx clang++-${GATE_CLANG} --std ${{ matrix.std }} ${{ matrix.args }} key)" candidate/
+      - uses: actions/upload-artifact@v4
+        if: >-
+          github.event_name == 'workflow_dispatch' && steps.guard.outputs.measure == 'true'
+          && steps.guard.outputs.bootstrap != 'true' && steps.decide.outputs.tighten != 'true'
+        with:
+          name: candidate-${{ matrix.id }}
+          path: candidate/
+          retention-days: 30
       - name: Fail on regression
         if: steps.check.outcome == 'failure'
         run: |
