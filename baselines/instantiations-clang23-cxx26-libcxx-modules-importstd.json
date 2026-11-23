@@ -1,7 +1,7 @@
 {
   "mp_units_version": "2.6",
-  "mp_units_sha": "ed5c8eb52c375c82ed6ccfbed84a1a32a4ece96b",
-  "mp_units_describe": "ed5c8eb",
+  "mp_units_sha": "f50df760fbf0b4607c55a34d9553af8700525afa",
+  "mp_units_describe": "f50df76",
   "cxx": "clang++-23",
   "cxx_version": "Ubuntu clang version 23.1.6 (++20261116013850+5b10d2d74929-1~exp1~20261116133903.98)",
   "std": "c++26",
@@ -51,13 +51,13 @@
       "InstantiateClass": 227,
       "InstantiateFunction": 269,
       "EvaluateAsConstantExpr": 1910,
-      "CheckConstraintSatisfaction": 10765,
+      "CheckConstraintSatisfaction": 10762,
       "census": {
         "quantity_spec": 1,
         "named_unit": 3,
         "named_constant": 1
       },
-      "decls_total": 50565,
+      "decls_total": 50562,
       "function_decls": 2334
     },
     "bmi/mp_units.systems": {
@@ -554,15 +554,15 @@
     },
     "isq/fractional_exponents": {
       "InstantiateClass": 408,
-      "InstantiateFunction": 387,
-      "EvaluateAsConstantExpr": 3715,
-      "CheckConstraintSatisfaction": 21122,
+      "InstantiateFunction": 377,
+      "EvaluateAsConstantExpr": 3620,
+      "CheckConstraintSatisfaction": 20888,
       "census": {},
       "object_bytes": 2168,
       "code_bytes": 176,
       "symbol_bytes": 1992,
-      "decls_total": 38356,
-      "function_decls": 2249,
+      "decls_total": 38060,
+      "function_decls": 2238,
       "twin": "include/cstdio+electromagnetism+math+si+space_and_time"
     },
     "isq/hierarchy_conversions": {
@@ -592,16 +592,16 @@
       "twin": "include/cstdio+mechanics+si+space_and_time-326f"
     },
     "isq/kind_safe_interfaces": {
-      "InstantiateClass": 1240,
-      "InstantiateFunction": 1107,
-      "EvaluateAsConstantExpr": 8213,
-      "CheckConstraintSatisfaction": 41156,
+      "InstantiateClass": 1227,
+      "InstantiateFunction": 1074,
+      "EvaluateAsConstantExpr": 8049,
+      "CheckConstraintSatisfaction": 40596,
       "census": {},
       "object_bytes": 1952,
       "code_bytes": 124,
       "symbol_bytes": 1828,
-      "decls_total": 66221,
-      "function_decls": 4966,
+      "decls_total": 65218,
+      "function_decls": 4831,
       "twin": "include/cstdio+math+mechanics+si+space_and_time"
     },
     "isq/overload_sets": {
@@ -674,8 +674,8 @@
     "real_life/glide_computer": {
       "InstantiateClass": 3729,
       "InstantiateFunction": 4781,
-      "EvaluateAsConstantExpr": 44330,
-      "CheckConstraintSatisfaction": 201225,
+      "EvaluateAsConstantExpr": 44284,
+      "CheckConstraintSatisfaction": 201150,
       "census": {
         "point_origin": 8,
         "quantity_spec": 1
@@ -683,22 +683,22 @@
       "object_bytes": 614168,
       "code_bytes": 185202,
       "symbol_bytes": 428966,
-      "decls_total": 248372,
+      "decls_total": 248187,
       "function_decls": 16262,
       "twin": "include/algorithm+array+chrono+compare+concepts+cstddef+exception+format+framework+functional+hacks+initializer_list+iostream+iterator+limits+math+numbers+numeric+ostream+ranges+si+space_and_time+string+string_view+utility+vector+yard_pound"
     },
     "real_life/storage_tank": {
       "InstantiateClass": 3545,
       "InstantiateFunction": 3990,
-      "EvaluateAsConstantExpr": 31787,
-      "CheckConstraintSatisfaction": 151292,
+      "EvaluateAsConstantExpr": 31764,
+      "CheckConstraintSatisfaction": 151268,
       "census": {
         "quantity_spec": 1
       },
       "object_bytes": 597104,
       "code_bytes": 176056,
       "symbol_bytes": 421048,
-      "decls_total": 209020,
+      "decls_total": 209001,
       "function_decls": 14566,
       "twin": "include/adopted_values+cassert+chrono+format+iostream+isq+math+numbers+si+string"
     },
