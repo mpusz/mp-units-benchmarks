@@ -2984,6 +2984,73 @@ Not one column up on one workflow, which is the shape a change needs before it i
 
 **Timing, from the fleet (2026-10-17).** The `Compile cost` dispatch 39042038069 measured `98c055d044` and `9ffaf3e1fa` in one session per arm, interleaved, best of two, on sixteen configurations. Wall time did not move at that resolution. The corpus totals sit between -0.9 % and +0.6 % on every configuration. The four workflows named above read, on clang 23, `glide_computer` 9,815 -> 9,782 ms (-0.3 %), `custom_origins` 3,349 -> 3,347 ms (-0.1 %), `codata_expressions` 5,356 -> 5,324 ms (-0.6 %), `broad_064` 5,863 -> 5,887 ms (+0.4 %). The counts moved as the gate said they would: whole-TU constraint checks -0.9 % on `glide_computer` and -0.8 % on `broad_256`, instantiations -0.2 % to -1.2 % per configuration, the broad slope -1.6 % to -3.2 %. So the mechanism of this section is real, and the two pieces kept from it are worth under one percent of a real TU's wall time, which best of two on a shared runner cannot see. The 27 % of §34 is still there to be taken, and taking it needs fewer candidates per operator call rather than a better order of atoms inside each.
 
+## 36. The pattern sweep and eager declarations
+
+This section started from the fixes already made and looked for places where they were never applied. The question was whether a pattern that had paid once was still unapplied somewhere else, in code that never showed up as a regression because it had always been that slow. So the perf commits of mp-units and §10 to §35 were read as a catalog (builtins over library traits, one atom per concept, `is_base_of_v` over `derived_from`, member reads over accessors, variable-template specializations over class templates, `conditional` over `std::conditional_t`, hidden friends in a non-template base, lazy requires-expressions, literal tables), and the library was searched for sites each pattern had missed. Fifteen experiments came out of it, each on its own copy of the tree at `72b75d99e7`, measured with clang 23 and libc++ at C++23 on 25 workflows, whole TU. Only counts are reported because other sessions were building on the laptop and two identical arms differed by up to 30 % in CPU time.
+
+| experiment | pattern | instantiations | constant evaluations | constraint checks | verdict |
+|---|---|---:|---:|---:|---|
+| `std::conditional_t` -> `conditional` in the equation engine (3 sites) | §11 | up to -1.3 % | up to -1.3 % | | **kept** |
+| `expr_type_impl`, `unscaled_unit_impl` define `type` instead of deriving from `std::type_identity` | one class less per result | -0.5 % median | | | **kept** |
+| `to_flags` without its `switch` | guess: case labels are evaluated per call | 0 | -2 per TU | 0 | rejected: nothing there |
+| `clone_kind_of`, `close_kinds` take types instead of `QuantitySpec auto...` values | a class-type template argument is a constant evaluation | 0 | -0.6 % median, -2.3 % best | -0.2 % | **kept** |
+| `basic_fixed_string` concatenation through a tag constructor instead of the iterator pair | a constrained constructor template per result size | -43 per TU | -466 per TU (-7.5 % of `core_only`) | -1,629 per TU | **kept** |
+| `SymbolicArg`, `SymbolicTerm` as one atom each | §33 | 0 | -1.7 % median | -0.2 % | **kept** |
+| the `SymbolicArg...` constraint dropped from `detail::type_list` | | | | | rejected: a static test pins that `type_list<const U>` is ill-formed |
+| `TypeList` type-constraints dropped from the private helpers of `type_list.h` | a constraint on a private helper checks what its only callers guarantee | 0 | -1.9 % median | -1.3 % | **kept** |
+| `Unit`, `QuantitySpec`, `Dimension`, `PointOrigin` as one atom each | §33, finished | 0 | -3.3 % median, -4.8 % best | -1.5 % | **kept** |
+| the defaulted `Rep` removed from the remaining deduction guides | the one-argument guide of `ed5c8eb52c` | 0 | +290 over the corpus | +908 | rejected |
+| `prefixed_unit::_symbol_` declared with its type | eager declaration | -46 per SI TU | | -722 per SI TU | **kept** |
+| the trivial `static constexpr auto x = y;` members declared with their type | eager declaration | 0 | 0 | -0.4 % median | **kept** |
+| `inverse`, `sqrt`, `cbrt` of `reference` made templates | eager declaration | -29.7 % best, 0 on the umbrellas | -17.1 % best | -17.7 % best | **kept** |
+| `explicit(cond)` on `quantity`'s value constructor split into two constrained constructors | eager declaration, guessed | 0 | +0.2 % median, +0.6 % worst | up to +0.1 % | rejected |
+| the dimension of a quantity specification computed on demand | eager declaration | -6.2 % median, -22.6 % best | -2.3 % median | -7.2 % median | **kept** |
+
+Eleven kept, four rejected. The old patterns transferred, at 0.5 to 3.3 % at the median of their best column. Five rows share one mechanism that the earlier sections had not named, and four of them are kept.
+
+**Eager declarations.** Instantiating `C<Args>` instantiates the declaration of every member and every friend of `C`, and leaves the definitions for later ([temp.inst]/3). The types in a declaration, and an `explicit` operand, are therefore computed for every specialization of the class whether or not the member is used. A return type is in the declaration. So is the type of a static data member, and when that type is `auto` or `Concept auto` the compiler has to evaluate the initializer to learn it. Three spellings in mp-units paid for it.
+
+*A non-template friend with a computed return type.* `reference<Q, U>` declared `friend consteval detail::reference_t<sqrt(Q{}), sqrt(U{})> sqrt(reference)` and the same for `inverse` and `cbrt`. Every `reference<Q, U>` a program instantiates (every `isq::speed[km / h]`, every typed quantity's reference) computed the square root, the cube root and the inverse of its quantity specification and of its unit, six expression-engine runs, to declare three functions that few programs call. `pow` next to them was a template and cost nothing. The spelling dates from `e585fd9e37` (December 2024) and shipped in v2.5.0, and no gate ever saw it because it predates the first baseline. Making the three functions templates on `std::same_as<reference> R`, with the return type written in terms of `R`, defers the computation to the call and keeps the type visible in the signature. A deduced `auto` return type gives identical counts. `scaling/typed_broad_064` goes from 20,699 to 14,550 instantiations (-29.7 %), `safety/typed_quantities` -12.5 %, `isq/derived_spec_conversions` -11.7 %, `scaling/narrow_064` -8.9 %, `generic/generic_interfaces` -8.7 %, `scaling/broad_064` -6.9 %. The umbrellas don't move, since a header that only defines things names no typed reference.
+
+*A static member typed `auto`.* `static constexpr auto _symbol_ = Symbol + U._symbol_;` in `prefixed_unit` instantiates and evaluates the concatenation of two symbols to learn the type of the result, 674 times in any TU that includes `si/unit_symbols.h` (§33 wrote "what remains of it is the definition itself" and took this for a part of the definition's cost that cannot be avoided). Declared as `static constexpr decltype(Symbol + U._symbol_) _symbol_ = ...`, the type is still computed but the initializer waits until the member is first used. MSVC up to 19.52 evaluates such initializers with the class anyway (the library's `MP_UNITS_EAGER_STATIC_MEMBER_INIT_HACK` documents it), so the spelling buys nothing there. The typed spelling applies equally to every `static constexpr auto x = y;` that copies a template argument into a member. `decltype(y)` costs nothing there and removes a deduction per class.
+
+*A member that is derived data.* `derived_quantity_spec_impl` declared `static constexpr Dimension auto _dimension_ = expr_map<to_dimension, derived_dimension, dimension_one>(...)`, and every named specification copied its parent's or its equation's. So every quantity specification a program instantiates computed its dimension, including each intermediate result of an equation: `mass * pow<2>(length) / pow<3>(time)` builds a derived specification per operator and each one mapped its factors to dimensions and simplified the result. In the `isq.h` umbrella the `expr_map` instantiations nested under `derived_quantity_spec_impl` were 4,031 of 19,854. The readers are the conversion engine when two different specifications meet, a unit definition for its quantity kind, `get_dimension`, and the `dimension` member of `quantity` and `quantity_point`. Nearly all intermediates are never asked. The dimension now lives in a variable template, `detail::dimension_of<Q>`, specialized for a specification with a parent, one with an equation, a kind, the engine's `open_factor` wrapper, and a derived specification. Only a base quantity still stores a `_dimension_`. The framework reads `dimension_of<Q>`, `get_dimension(qs)` returns it, and `quantity::dimension` stays a member. It is still an `auto` member, so the dimension is still computed once per quantity type, which is accepted because the member is public API of `quantity` and `quantity_point`.
+
+The deprecated public member `quantity_spec::dimension` cannot be kept lazily: its type is the dimension, so declaring it computes it. Kept on the named specifications only, as a control, it gives back about half of the gain (the `isq.h` umbrella at -5.1 % instantiations instead of -11.4 %, the corpus median at -4.6 % instead of -8.3 %, both measured before the concatenation constructor below was added). The measured tree drops the member from every specification except the base quantities, where it is a copy of a template argument.
+
+**The combined tree**, all eleven kept changes, against `72b75d99e7`, whole TU (24 workflows at C++20, where `text/output_format_advanced` has no row):
+
+| | instantiations | constant evaluations | constraint checks |
+|---|---:|---:|---:|
+| C++20, median [worst .. best] | -9.9 % [-2.0 .. -32.9] | -13.3 % [-8.1 .. -24.2] | -13.2 % [-3.7 .. -24.6] |
+| C++23 | -8.7 % [-2.0 .. -32.9] | -12.0 % [-7.4 .. -24.3] | -12.4 % [-3.2 .. -24.2] |
+| C++26 | -8.7 % [-1.9 .. -32.8] | -14.1 % [-7.9 .. -25.1] | -12.3 % [-3.1 .. -24.1] |
+
+Every row is down on all three columns on every standard. `control/core_only`, which defines no quantity, gains the least on instantiations and constraint checks, and nearly all of that is the concatenation constructor. Selected rows at C++23:
+
+| workflow | instantiations | constant evaluations | constraint checks |
+|---|---:|---:|---:|
+| `umbrella/isq_umbrella` | 19,854 -> 17,550 (-11.6 %) | 42,481 -> 35,337 (-16.8 %) | 299,756 -> 251,690 (-16.0 %) |
+| `umbrella/si_umbrella` | 8,335 -> 7,714 (-7.5 %) | 24,172 -> 21,499 (-11.1 %) | 131,008 -> 115,649 (-11.7 %) |
+| `scaling/typed_broad_064` | 20,699 -> 13,883 (-32.9 %) | 72,650 -> 55,005 (-24.3 %) | 386,931 -> 293,118 (-24.2 %) |
+| `scaling/specs_broad_064` | 4,591 -> 3,502 (-23.7 %) | 10,835 -> 8,444 (-22.1 %) | 85,460 -> 66,889 (-21.7 %) |
+| `safety/typed_quantities` | 16,920 -> 13,735 (-18.8 %) | 46,495 -> 36,510 (-21.5 %) | 255,319 -> 201,884 (-20.9 %) |
+| `isq/derived_spec_conversions` | 16,287 -> 13,324 (-18.2 %) | 44,038 -> 34,833 (-20.9 %) | 243,532 -> 194,560 (-20.1 %) |
+| `generic/generic_interfaces` | 12,163 -> 10,352 (-14.9 %) | 35,356 -> 29,221 (-17.4 %) | 191,577 -> 158,666 (-17.2 %) |
+| `scaling/broad_064` | 19,162 -> 16,857 (-12.0 %) | 69,278 -> 59,100 (-14.7 %) | 373,337 -> 323,260 (-13.4 %) |
+| `real_life/storage_tank` | 32,654 -> 27,722 (-15.1 %) | 87,207 -> 72,115 (-17.3 %) | 509,719 -> 420,893 (-17.4 %) |
+| `real_life/glide_computer` | 19,232 -> 16,389 (-14.8 %) | 70,482 -> 60,450 (-14.2 %) | 352,332 -> 303,252 (-13.9 %) |
+
+Without the lazy dimension and the concatenation constructor the tree reads -1.7 %, -9.3 % and -4.9 % at the median, so the dimension is most of the instantiation column and about half of the constraint-check column. The tree builds and passes the 110 tests and the header-set verification on gcc 15 at C++26, and the static tests on gcc 12 at C++20. Clang's own test presets, MSVC, the module build and the gate itself were not run, and nothing here is a wall-time number.
+
+**The rejections.** `explicit(!implicitly_convertible(...))` looks like the friends' return type, a computed expression in a declaration, and splitting the constructor in two made it slightly worse: the condition was already cheap and two constrained candidates cost more than one. A defaulted template argument in a deduction guide was expensive on the one guide `ed5c8eb52c` fixed and free on the ones that were left.
+
+**What a symbol concatenation constructs.** `operator+` on `basic_fixed_string` filled a local array and returned `basic_fixed_string<CharT, N + N2>(txt, it)`, the iterator-pair constructor. That constructor is a template constrained on `std::input_iterator`, `std::sentinel_for` and the value type, and each result size is a new class whose constructors are declared and overload-resolved again. Concatenation now builds its result through a non-template constructor taking `(detail::fixed_string_concat_t, const CharT*)`. That removes 43 instantiations, 466 constant evaluations and 1,629 constraint checks from 23 of the 25 workflows, `control/core_only` included (7.5 % of its constant evaluations, 1.9 % of the SI umbrella's). The two text workflows and the two real-life programs save 32, 262 and 1,027. The saving doesn't grow with the 674 prefixed symbols, and it was not traced to its source. Two other spellings were tried first. A private constructor reached through `friend struct detail::fixed_string_iface;` would have left the public surface as P3094 has it. It compiles on clang 23 and gcc 15 and is rejected by gcc 12 (gcc 13 accepts it). The operators are hidden friends of the non-template base, and gcc 12 doesn't extend the friendship of a class to the friend functions defined in it. The parameter order matters as well: a constructor spelled `(const CharT*, std::size_t)` saved 32 constant evaluations in `core_only` instead of 466. Presumably the iterator-pair template is still a candidate there, its first constraint passes for the pointer, and the second one is evaluated before the candidate is rejected, while with a tag first the candidate fails on its first constraint. So the constructor is public, with an exposition-only tag as its first parameter, on a class that otherwise mirrors P3094.
+
+**How to find the next one.** In the trace, sum the instantiations nested under each `InstantiateClass` event by the class template's name, and compare the list with what a definition of that class should need. `reference<>` with six `expr_fractions` chains under it, when declaring a reference needs none, was visible that way. The rule for the codebase: in a class template, a member or a friend whose declaration computes something (a return type, a parameter type, an `explicit` operand, the initializer of an `auto` member) is paid once per specialization, so it has to be either trivial or deferred. Deferring means a template parameter the declaration depends on, a declared type in front of the initializer, or a variable template outside the class.
+
+**One corpus fix on the way.** `real_life/glide_computer` had stopped compiling against master: its two coordinate formatters compared a quantity with a literal `0`, which mp-units #885 replaced with `mp_units::zero`. The frozen snapshot now carries that one edit and says so in its header. It compiles only from that change on, so a comparison against an older ref loses the row.
+
 ## Talk skeleton
 
 Most compile-time talks are about IWYU, qualified lookup, forward declarations, and PCH hygiene. That
@@ -3043,6 +3110,21 @@ is not the number that costs you* — which needs no mp-units background at all.
 
 ## Open threads
 
+- **Timing for §36.** The sweep has counts only, taken on a loaded laptop. A `Compile cost` dispatch
+  with `compare_ref` set to `72b75d99e7` gives the wall time of the combined tree on the fleet, and
+  the gate run on the same tree says whether any use-basis row moved up.
+- **Re-record `real_life/glide_computer`** (§36): its source changed (`mp_units::zero` in two
+  formatters), so its baseline rows describe a program that is no longer in the corpus.
+- **The `basic_fixed_string` concatenation constructor** (§36): the 466 constant evaluations it
+  removes from nearly every TU were not traced to the concatenations that pay them, and neither was
+  the smaller saving in the TUs that format text.
+- **The deprecated `quantity_spec::dimension`** (§36): the lazy dimension drops it from every
+  specification but the base quantities, and keeping it costs half of the gain. mp-units 2.6.0 has to
+  say which.
+- **The nesting audit as a tool** (§36): the per-class sum of nested instantiations was done with
+  scratch scripts on two workflows. As `bench.py attribute --nested` it could be run on every class
+  template of the framework. `quantity::dimension` and `quantity::quantity_spec` are `auto` members
+  of the most instantiated class of all and were not priced.
 - ~~**Timing confirmation for §34 and §35** on an idle machine or on the fleet: `bench.py time
   98c055d044 <kept commit> --reps 5 --pin` for `glide_computer`, `custom_origins`, `codata_expressions`
   and `broad_064`, or a `Compile cost` dispatch with `compare_ref` set to the parent, whose arms
