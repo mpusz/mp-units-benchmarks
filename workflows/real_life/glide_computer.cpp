@@ -8,6 +8,8 @@
 // still an example: the tier prices the feature MIX in one file, and SIZE remains the scaling
 // series' axis. Deliberately FROZEN rather than included from the measured checkout: a workflow
 // whose source changes with the ref compares different programs and calls it a regression.
+// One edit since the snapshot: the two coordinate formatters compare against `mp_units::zero`, as
+// the example does since the comparison with a literal `0` was removed (mp-units #885).
 #include <mp-units/compat_macros.h>
 #include <mp-units/bits/hacks.h>
 #include <mp-units/ext/format.h>
@@ -259,8 +261,8 @@ struct MP_UNITS_STD_FMT::formatter<geographic::latitude<T>, Char> :
   auto format(geographic::latitude<T> lat, FormatContext& ctx) const -> decltype(ctx.out())
   {
     const auto& q = lat.quantity_ref_from(geographic::equator);
-    ctx.advance_to(formatter<typename geographic::latitude<T>::quantity_type, Char>::format(q >= 0 ? q : -q, ctx));
-    return MP_UNITS_STD_FMT::format_to(ctx.out(), "{}", q >= 0 ? " N" : " S");
+    ctx.advance_to(formatter<typename geographic::latitude<T>::quantity_type, Char>::format(q >= mp_units::zero ? q : -q, ctx));
+    return MP_UNITS_STD_FMT::format_to(ctx.out(), "{}", q >= mp_units::zero ? " N" : " S");
   }
 };
 
@@ -271,8 +273,8 @@ struct MP_UNITS_STD_FMT::formatter<geographic::longitude<T>, Char> :
   auto format(geographic::longitude<T> lon, FormatContext& ctx) const -> decltype(ctx.out())
   {
     const auto& q = lon.quantity_ref_from(geographic::prime_meridian);
-    ctx.advance_to(formatter<typename geographic::longitude<T>::quantity_type, Char>::format(q >= 0 ? q : -q, ctx));
-    return MP_UNITS_STD_FMT::format_to(ctx.out(), "{}", q >= 0 ? " E" : " W");
+    ctx.advance_to(formatter<typename geographic::longitude<T>::quantity_type, Char>::format(q >= mp_units::zero ? q : -q, ctx));
+    return MP_UNITS_STD_FMT::format_to(ctx.out(), "{}", q >= mp_units::zero ? " E" : " W");
   }
 };
 
