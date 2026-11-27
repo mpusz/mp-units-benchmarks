@@ -3016,32 +3016,32 @@ Eleven kept, four rejected. The old patterns transferred, at 0.5 to 3.3 % at the
 
 *A member that is derived data.* `derived_quantity_spec_impl` declared `static constexpr Dimension auto _dimension_ = expr_map<to_dimension, derived_dimension, dimension_one>(...)`, and every named specification copied its parent's or its equation's. So every quantity specification a program instantiates computed its dimension, including each intermediate result of an equation: `mass * pow<2>(length) / pow<3>(time)` builds a derived specification per operator and each one mapped its factors to dimensions and simplified the result. In the `isq.h` umbrella the `expr_map` instantiations nested under `derived_quantity_spec_impl` were 4,031 of 19,854. The readers are the conversion engine when two different specifications meet, a unit definition for its quantity kind, `get_dimension`, and the `dimension` member of `quantity` and `quantity_point`. Nearly all intermediates are never asked. The dimension now lives in a variable template, `detail::dimension_of<Q>`, specialized for a specification with a parent, one with an equation, a kind, the engine's `open_factor` wrapper, and a derived specification. Only a base quantity still stores a `_dimension_`. The framework reads `dimension_of<Q>`, `get_dimension(qs)` returns it, and `quantity::dimension` stays a member. It is still an `auto` member, so the dimension is still computed once per quantity type, which is accepted because the member is public API of `quantity` and `quantity_point`.
 
-The deprecated public member `quantity_spec::dimension` cannot be kept lazily: its type is the dimension, so declaring it computes it. Kept on the named specifications only, as a control, it gives back about half of the gain (the `isq.h` umbrella at -5.1 % instantiations instead of -11.4 %, the corpus median at -4.6 % instead of -8.3 %, both measured before the concatenation constructor below was added). The measured tree drops the member from every specification except the base quantities, where it is a copy of a template argument.
+The deprecated public member `quantity_spec::dimension` cannot be kept lazily: its type is the dimension, so declaring it computes it. mp-units 2.6 keeps it on the named specifications, where it has been deprecated, and loses it on `derived_quantity_spec`, which is what every intermediate result is. That costs about half of the gain until V3 removes the member: with it dropped everywhere the same tree reads -8.7 %, -12.0 % and -12.4 % at the C++23 median, and the `isq.h` umbrella -11.6 % instantiations instead of -5.3 %.
 
-**The combined tree**, all eleven kept changes, against `72b75d99e7`, whole TU (24 workflows at C++20, where `text/output_format_advanced` has no row):
+**The combined tree**, all eleven kept changes with the deprecated member still on the named specifications, against `72b75d99e7`, whole TU (24 workflows at C++20, where `text/output_format_advanced` has no row):
 
 | | instantiations | constant evaluations | constraint checks |
 |---|---:|---:|---:|
-| C++20, median [worst .. best] | -9.9 % [-2.0 .. -32.9] | -13.3 % [-8.1 .. -24.2] | -13.2 % [-3.7 .. -24.6] |
-| C++23 | -8.7 % [-2.0 .. -32.9] | -12.0 % [-7.4 .. -24.3] | -12.4 % [-3.2 .. -24.2] |
-| C++26 | -8.7 % [-1.9 .. -32.8] | -14.1 % [-7.9 .. -25.1] | -12.3 % [-3.1 .. -24.1] |
+| C++20, median [worst .. best] | -4.2 % [-1.3 .. -30.8] | -10.4 % [-6.3 .. -23.2] | -6.3 % [-3.6 .. -23.1] |
+| C++23 | -5.0 % [-1.9 .. -31.3] | -10.5 % [-6.4 .. -23.6] | -8.6 % [-3.2 .. -22.5] |
+| C++26 | -5.0 % [-1.9 .. -31.2] | -12.5 % [-7.3 .. -24.3] | -8.6 % [-3.0 .. -22.4] |
 
 Every row is down on all three columns on every standard. `control/core_only`, which defines no quantity, gains the least on instantiations and constraint checks, and nearly all of that is the concatenation constructor. Selected rows at C++23:
 
 | workflow | instantiations | constant evaluations | constraint checks |
 |---|---:|---:|---:|
-| `umbrella/isq_umbrella` | 19,854 -> 17,550 (-11.6 %) | 42,481 -> 35,337 (-16.8 %) | 299,756 -> 251,690 (-16.0 %) |
-| `umbrella/si_umbrella` | 8,335 -> 7,714 (-7.5 %) | 24,172 -> 21,499 (-11.1 %) | 131,008 -> 115,649 (-11.7 %) |
-| `scaling/typed_broad_064` | 20,699 -> 13,883 (-32.9 %) | 72,650 -> 55,005 (-24.3 %) | 386,931 -> 293,118 (-24.2 %) |
-| `scaling/specs_broad_064` | 4,591 -> 3,502 (-23.7 %) | 10,835 -> 8,444 (-22.1 %) | 85,460 -> 66,889 (-21.7 %) |
-| `safety/typed_quantities` | 16,920 -> 13,735 (-18.8 %) | 46,495 -> 36,510 (-21.5 %) | 255,319 -> 201,884 (-20.9 %) |
-| `isq/derived_spec_conversions` | 16,287 -> 13,324 (-18.2 %) | 44,038 -> 34,833 (-20.9 %) | 243,532 -> 194,560 (-20.1 %) |
-| `generic/generic_interfaces` | 12,163 -> 10,352 (-14.9 %) | 35,356 -> 29,221 (-17.4 %) | 191,577 -> 158,666 (-17.2 %) |
-| `scaling/broad_064` | 19,162 -> 16,857 (-12.0 %) | 69,278 -> 59,100 (-14.7 %) | 373,337 -> 323,260 (-13.4 %) |
-| `real_life/storage_tank` | 32,654 -> 27,722 (-15.1 %) | 87,207 -> 72,115 (-17.3 %) | 509,719 -> 420,893 (-17.4 %) |
-| `real_life/glide_computer` | 19,232 -> 16,389 (-14.8 %) | 70,482 -> 60,450 (-14.2 %) | 352,332 -> 303,252 (-13.9 %) |
+| `umbrella/isq_umbrella` | 19,854 -> 18,800 (-5.3 %) | 42,481 -> 37,539 (-11.6 %) | 299,756 -> 279,690 (-6.7 %) |
+| `umbrella/si_umbrella` | 8,335 -> 7,986 (-4.2 %) | 24,172 -> 21,937 (-9.2 %) | 131,008 -> 120,790 (-7.8 %) |
+| `scaling/typed_broad_064` | 20,699 -> 14,220 (-31.3 %) | 72,650 -> 55,537 (-23.6 %) | 386,931 -> 299,832 (-22.5 %) |
+| `scaling/specs_broad_064` | 4,591 -> 3,503 (-23.7 %) | 10,835 -> 8,450 (-22.0 %) | 85,460 -> 66,924 (-21.7 %) |
+| `safety/typed_quantities` | 16,920 -> 14,282 (-15.6 %) | 46,495 -> 37,385 (-19.6 %) | 255,319 -> 213,236 (-16.5 %) |
+| `isq/derived_spec_conversions` | 16,287 -> 13,854 (-14.9 %) | 44,038 -> 35,680 (-19.0 %) | 243,532 -> 205,767 (-15.5 %) |
+| `generic/generic_interfaces` | 12,163 -> 10,675 (-12.2 %) | 35,356 -> 29,730 (-15.9 %) | 191,577 -> 165,120 (-13.8 %) |
+| `scaling/broad_064` | 19,162 -> 17,390 (-9.2 %) | 69,278 -> 59,952 (-13.5 %) | 373,337 -> 334,452 (-10.4 %) |
+| `real_life/storage_tank` | 32,654 -> 28,874 (-11.6 %) | 87,207 -> 74,139 (-15.0 %) | 509,719 -> 446,892 (-12.3 %) |
+| `real_life/glide_computer` | 19,232 -> 16,742 (-12.9 %) | 70,482 -> 61,002 (-13.5 %) | 352,332 -> 310,218 (-12.0 %) |
 
-Without the lazy dimension and the concatenation constructor the tree reads -1.7 %, -9.3 % and -4.9 % at the median, so the dimension is most of the instantiation column and about half of the constraint-check column. The tree builds and passes the 110 tests and the header-set verification on gcc 15 at C++26, and the static tests on gcc 12 at C++20. Clang's own test presets, MSVC, the module build and the gate itself were not run, and nothing here is a wall-time number.
+Without the lazy dimension and the concatenation constructor the tree reads -1.7 %, -9.3 % and -4.9 % at the median. The tree builds and passes the 110 tests and the header-set verification on gcc 15 at C++26, and the static tests on gcc 12 at C++20. Clang's own test presets, MSVC, the module build and the gate itself were not run, and nothing here is a wall-time number.
 
 **The rejections.** `explicit(!implicitly_convertible(...))` looks like the friends' return type, a computed expression in a declaration, and splitting the constructor in two made it slightly worse: the condition was already cheap and two constrained candidates cost more than one. A defaulted template argument in a deduction guide was expensive on the one guide `ed5c8eb52c` fixed and free on the ones that were left.
 
@@ -3118,9 +3118,9 @@ is not the number that costs you* — which needs no mp-units background at all.
 - **The `basic_fixed_string` concatenation constructor** (§36): the 466 constant evaluations it
   removes from nearly every TU were not traced to the concatenations that pay them, and neither was
   the smaller saving in the TUs that format text.
-- **The deprecated `quantity_spec::dimension`** (§36): the lazy dimension drops it from every
-  specification but the base quantities, and keeping it costs half of the gain. mp-units 2.6.0 has to
-  say which.
+- **The deprecated `quantity_spec::dimension`** (§36): kept on the named specifications through
+  mp-units 2.6. Removing it in V3 is worth the other half of the lazy-dimension gain, and the numbers
+  for that tree are in §36.
 - **The nesting audit as a tool** (§36): the per-class sum of nested instantiations was done with
   scratch scripts on two workflows. As `bench.py attribute --nested` it could be run on every class
   template of the framework. `quantity::dimension` and `quantity::quantity_spec` are `auto` members
